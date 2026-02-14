@@ -1,0 +1,15 @@
+[Unit]
+Description=Flask Server for Game Mover
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/env python3 /opt/steam_mover/steam_flask.py
+WorkingDirectory=/opt/steam_mover
+User=root
+Group=gemers
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

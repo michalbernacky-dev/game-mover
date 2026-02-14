@@ -1,0 +1,177 @@
+#!/bin/bash
+# CLI wrapper pro Flask GameMover API
+# Použití:
+#   game-mover list <platform>
+#   game-mover list-user <platform> <user>
+#   game-mover move <platform> <game_name> <user>
+#   game-mover link <platform> <game_name> <user>
+#   game-mover fix <path>
+#   Timekpr:
+#     game-mover timekpr-auth <wheel_user>
+#     game-mover timekpr-userinfo <user> <token>
+#     game-mover timekpr-day-plan <user> <token>
+#     game-mover timekpr-add-bonus <user> <minutes> <token>
+#     game-mover timekpr-disable-today <user> <token>
+#     game-mover timekpr-reset-today <user> <token>
+#     game-mover timekpr-set-hours <user> <hours_str> <token>
+
+FLASK_URL="http://127.0.0.1:5000"
+
+show_help() {
+  echo "Použití:"
+  echo "  game-mover list <platform>"
+  echo "      → seznam her ve sdílené knihovně (/var/Games/<platform>)"
+  echo ""
+  echo "  game-mover list-user <platform> <user>"
+  echo "      → seznam her v uživatelské knihovně, které lze přesunout"
+  echo ""
+  echo "  game-mover move <platform> <game_name> <user>"
+  echo "      → přesune hru do sdílené knihovny a vytvoří symlink"
+  echo ""
+  echo "  game-mover link <platform> <game_name> <user>"
+  echo "      → vytvoří symlink z uživatelské knihovny do sdílené"
+  echo ""
+  echo "  game-mover fix <path>"
+  echo "      → opraví oprávnění složky (skupina: gemers)"
+  echo ""
+  echo "  game-mover timekpr-auth <wheel_user>"
+  echo "      → získá token pro práci s timekpr (dotáže se na heslo)"
+  echo ""
+  echo "  game-mover timekpr-userinfo <user> <token>"
+  echo "  game-mover timekpr-day-plan <user> <token>"
+  echo "  game-mover timekpr-add-bonus <user> <minutes> <token>"
+  echo "  game-mover timekpr-disable-today <user> <token>"
+  echo "  game-mover timekpr-reset-today <user> <token>"
+  echo "  game-mover timekpr-set-hours <user> <hours_str> <token>"
+  echo "      → hours_str je formát timekpra, např. \"13;14;15[0-29]\""
+  echo ""
+  echo "Příklady:"
+  echo "  game-mover list steam"
+  echo "  game-mover list-user steam alice"
+  echo "  game-mover move steam \"For Honor\" alice"
+  echo "  game-mover link steam \"For Honor\" alice"
+  echo "  game-mover fix /var/Games/steam/For\\ Honor"
+  echo "  game-mover timekpr-auth root"
+  echo "  game-mover timekpr-userinfo bob <TOKEN>"
+  echo "  game-mover timekpr-set-hours bob \"13;14;15\" <TOKEN>"
+  echo "  # Nastavit okno na dnes (13:00–22:30) pro bob:"
+  echo "  TOKEN=\$(game-mover timekpr-auth root | jq -r .token)"
+  echo "  game-mover timekpr-set-hours bob \"13;14;15;16;17;18;19;20;21;22[0-29]\" \"$TOKEN\""
+  echo "  game-mover timekpr-reset-today bob \"$TOKEN\"   # reset na původní limit dne"
+}
+
+cmd="$1"
+shift
+
+case "$cmd" in
+  -h|--help|-\?)
+    show_help
+    ;;
+
+  list)
+    platform="$1"
+    curl -s "$FLASK_URL/list_shared?platform=$platform" | jq
+    ;;
+
+  list-user)
+    platform="$1"
+    user="$2"
+    curl -s "$FLASK_URL/list_user_games?platform=$platform&user=$user" | jq
+    ;;
+
+  move)
+    platform="$1"
+    game="$2"
+    user="$3"
+    curl -s -X POST "$FLASK_URL/move_game" \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\":\"$platform\",\"game_name\":\"$game\",\"user\":\"$user\"}" | jq
+    ;;
+
+  link)
+    platform="$1"
+    game="$2"
+    user="$3"
+    curl -s -X POST "$FLASK_URL/create_symlink" \
+      -H "Content-Type: application/json" \
+      -d "{\"platform\":\"$platform\",\"game_name\":\"$game\",\"user\":\"$user\"}" | jq
+    ;;
+
+  fix)
+    path="$1"
+    curl -s -X POST "$FLASK_URL/fix_perms" \
+      -H "Content-Type: application/json" \
+      -d "{\"path\":\"$path\"}" | jq
+    ;;
+
+  timekpr-auth)
+    wheel_user="$1"
+    read -s -p "Heslo pro $wheel_user: " password
+    echo
+    curl -s -X POST "$FLASK_URL/timekpr/auth" \
+      -H "Content-Type: application/json" \
+      -d "{\"username\":\"$wheel_user\",\"password\":\"$password\"}" | jq
+    ;;
+
+  timekpr-userinfo)
+    user="$1"
+    token="$2"
+    curl -s -X POST "$FLASK_URL/timekpr/userinfo" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | jq
+    ;;
+
+  timekpr-day-plan)
+    user="$1"
+    token="$2"
+    curl -s -X POST "$FLASK_URL/timekpr/day_plan" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | jq
+    ;;
+
+  timekpr-add-bonus)
+    user="$1"
+    minutes="$2"
+    token="$3"
+    curl -s -X POST "$FLASK_URL/timekpr/add_bonus" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"minutes\":$minutes,\"token\":\"$token\"}" | jq
+    ;;
+
+  timekpr-disable-today)
+    user="$1"
+    token="$2"
+    curl -s -X POST "$FLASK_URL/timekpr/disable_today" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | jq
+    ;;
+
+  timekpr-reset-today)
+    user="$1"
+    token="$2"
+    curl -s -X POST "$FLASK_URL/timekpr/reset_today" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | jq
+    ;;
+
+  timekpr-set-hours)
+    user="$1"
+    hours="$2"
+    token="$3"
+    curl -s -X POST "$FLASK_URL/timekpr/set_hours_today" \
+      -H "Content-Type: application/json" \
+      -H "X-Timekpr-Token: $token" \
+      -d "{\"user\":\"$user\",\"hours\":\"$hours\",\"token\":\"$token\"}" | jq
+    ;;
+
+  *)
+    echo "Neznámý příkaz: $cmd"
+    echo "Použij game-mover -h pro nápovědu."
+    exit 1
+    ;;
+esac

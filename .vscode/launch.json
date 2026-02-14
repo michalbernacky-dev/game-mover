@@ -1,0 +1,15 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Game Mover (Wayland)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/steam_mover.py",
+      "env": {
+        "QT_QPA_PLATFORM": "wayland"
+      },
+      "console": "integratedTerminal"
+    }
+  ]
+}

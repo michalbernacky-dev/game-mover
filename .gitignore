@@ -1,0 +1,4 @@
+*.bck
+.venv/
+__pycache__/
+*.pyc   

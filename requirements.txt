@@ -1,0 +1,5 @@
+Flask
+PyQt5
+requests
+psutil
+python-pam
