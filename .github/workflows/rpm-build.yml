@@ -1,0 +1,71 @@
+name: RPM Build
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build-rpm:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          dnf -y install \
+            git \
+            rpm-build \
+            rsync \
+            tar \
+            systemd-rpm-macros
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build RPM and SRPM
+        run: |
+          set -euo pipefail
+
+          VERSION="$(awk '/^Version:/ {print $2; exit}' game-mover.spec)"
+          if [ -z "$VERSION" ]; then
+            echo "Unable to determine Version from game-mover.spec" >&2
+            exit 1
+          fi
+
+          TOPDIR="$PWD/.rpmbuild"
+          mkdir -p "$TOPDIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+
+          TMPDIR_SRC="$(mktemp -d)"
+          PKGROOT="$TMPDIR_SRC/game-mover-${VERSION}"
+          mkdir -p "$PKGROOT"
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.venv' \
+            --exclude '.vscode' \
+            --exclude '__pycache__' \
+            --exclude '.rpmbuild' \
+            --exclude '*.pyc' \
+            --exclude '*.bck' \
+            ./ "$PKGROOT"/
+
+          tar -C "$TMPDIR_SRC" -czf "$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" "game-mover-${VERSION}"
+          rm -rf "$TMPDIR_SRC"
+
+          cp game-mover.spec "$TOPDIR/SPECS/"
+          rpmbuild --define "_topdir $TOPDIR" -ba "$TOPDIR/SPECS/game-mover.spec"
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-mover-rpm
+          path: |
+            .rpmbuild/RPMS/**/*.rpm
+            .rpmbuild/SRPMS/**/*.src.rpm
+          if-no-files-found: error

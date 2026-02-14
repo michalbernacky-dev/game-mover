@@ -6,7 +6,7 @@ Application for managing game data of installed games through Steam, GOG, Epic e
 1) Install dependencies (as root or via sudo):
 
 ```
-pip install -r " requirements.txt"
+pip install -r requirements.txt
 ```
 
 > Timekpr Next integrace: pro záložku Timekpr musí být v systému nainstalovaný balík `timekpr-next`, aby byl dostupný CLI nástroj `timekpra` (není to Python balíček, nelze instalovat přes pip). Nainstaluj jej správcem balíčků své distribuce.
@@ -49,3 +49,56 @@ sudo rm /usr/share/applications/game-mover.desktop
 sudo rm -rf /opt/steam_mover
 sudo systemctl daemon-reload
 ```
+
+## RPM build and install
+
+This repository now contains a native RPM spec file: `game-mover.spec`.
+
+Create source tarball and build RPM (from repository root):
+
+```
+VERSION=0.1.0
+TOPDIR="$(pwd)/.rpmbuild"
+mkdir -p "$TOPDIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
+TMPDIR_SRC="$(mktemp -d)"
+PKGROOT="$TMPDIR_SRC/game-mover-${VERSION}"
+mkdir -p "$PKGROOT"
+rsync -a \
+  --exclude '.git' \
+  --exclude '.venv' \
+  --exclude '.vscode' \
+  --exclude '__pycache__' \
+  --exclude '.rpmbuild' \
+  --exclude '*.pyc' \
+  --exclude '*.bck' \
+  ./ "$PKGROOT"/
+tar -C "$TMPDIR_SRC" -czf "$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" "game-mover-${VERSION}"
+rm -rf "$TMPDIR_SRC"
+cp game-mover.spec "$TOPDIR/SPECS/"
+rpmbuild --define "_topdir $TOPDIR" -ba "$TOPDIR/SPECS/game-mover.spec"
+```
+
+Install built package:
+
+```
+sudo dnf install "$TOPDIR"/RPMS/noarch/game-mover-*.noarch.rpm
+```
+
+Enable and start backend service:
+
+```
+sudo systemctl enable --now steam_mover.service
+```
+
+## CI on push
+
+Git itself does not build RPMs on push. RPM build is done by CI workflow.
+
+Repository now includes GitHub Actions workflow:
+
+- `.github/workflows/rpm-build.yml`
+
+Behavior:
+
+- on every `push` and `pull_request`, workflow builds RPM + SRPM
+- resulting artifacts are available in Actions run as downloadable files

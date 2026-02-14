@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Game Mover
+Comment=Sprava sdilene herni knihovny
+Exec=/usr/bin/python3 /opt/steam_mover/steam_mover.py
+Icon=/opt/steam_mover/steam_mover_logo.jpg
+Terminal=false
+Categories=Game;Utility;
