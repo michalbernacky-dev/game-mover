@@ -2,7 +2,7 @@
 Type=Application
 Name=Game Mover
 Comment=Sprava sdilene herni knihovny
-Exec=/usr/bin/python3 /opt/steam_mover/steam_mover.py
-Icon=/opt/steam_mover/steam_mover_logo.jpg
+Exec=/usr/bin/python3 /opt/game_mover/game_mover.py
+Icon=/opt/game_mover/game_mover_logo.jpg
 Terminal=false
 Categories=Game;Utility;

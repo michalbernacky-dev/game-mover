@@ -6,8 +6,9 @@ set -euo pipefail
 # Skript musí běžet jako root.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/opt/steam_mover"
-SERVICE_NAME="steam_mover.service"
+INSTALL_DIR="/opt/game_mover"
+SERVICE_NAME="game_mover.service"
+LEGACY_SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
@@ -51,19 +52,23 @@ copy_if_changed() {
   fi
 }
 
-echo "[1/7] Kopíruji aplikaci do ${INSTALL_DIR}"
+echo "[1/8] Kopíruji aplikaci do ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 rsync -a --delete \
-  --include='/steam_flask.py' \
-  --include='/steam_mover.py' \
+  --include='/game_mover_flask.py' \
+  --include='/game_mover.py' \
   --include='/game-mover' \
   --include='/requirements.txt' \
-  --include='/steam_mover_logo.jpg' \
+  --include='/game_mover_logo.jpg' \
   --exclude='*' \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
-chmod 0755 "${INSTALL_DIR}/steam_flask.py" "${INSTALL_DIR}/steam_mover.py" "${INSTALL_DIR}/game-mover"
+chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
 
-echo "[2/7] Vytvářím skupinu a adresáře pro sdílené hry"
+echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"
+systemctl disable --now "${LEGACY_SERVICE_NAME}" >/dev/null 2>&1 || true
+rm -f "/etc/systemd/system/${LEGACY_SERVICE_NAME}"
+
+echo "[3/8] Vytvářím skupinu a adresáře pro sdílené hry"
 if ! getent group "${GROUP_NAME}" >/dev/null; then
   groupadd --system "${GROUP_NAME}"
 fi
@@ -71,7 +76,7 @@ mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp "${GROUP_NAME}" /var/Games /var/Games_links /var/Games/steam-cache
 chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache
 
-echo "[3/7] Instaluji systemd službu pro Flask API (${SERVICE_PATH})"
+echo "[4/8] Instaluji systemd službu pro Flask API (${SERVICE_PATH})"
 service_tmp="$(mktemp)"
 cat >"${service_tmp}" <<'EOF'
 [Unit]
@@ -79,8 +84,8 @@ Description=Flask Server for Game Mover
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/env python3 /opt/steam_mover/steam_flask.py
-WorkingDirectory=/opt/steam_mover
+ExecStart=/usr/bin/env python3 /opt/game_mover/game_mover_flask.py
+WorkingDirectory=/opt/game_mover
 User=root
 Group=gemers
 Restart=always
@@ -93,30 +98,30 @@ EOF
 copy_if_changed "${service_tmp}" "${SERVICE_PATH}" 644
 rm -f "${service_tmp}"
 
-echo "[4/7] Desktop launcher (${APP_DESKTOP})"
+echo "[5/8] Desktop launcher (${APP_DESKTOP})"
 desktop_tmp="$(mktemp)"
 cat >"${desktop_tmp}" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Game Mover
 Comment=Správa sdílené herní knihovny
-Exec=/usr/bin/env python3 /opt/steam_mover/steam_mover.py
-Icon=/opt/steam_mover/steam_mover_logo.jpg
+Exec=/usr/bin/env python3 /opt/game_mover/game_mover.py
+Icon=/opt/game_mover/game_mover_logo.jpg
 Terminal=false
 Categories=Game;Utility;
 EOF
 copy_if_changed "${desktop_tmp}" "${APP_DESKTOP}" 644
 rm -f "${desktop_tmp}"
 
-echo "[5/7] (Volitelně) GNOME autostart (${AUTOSTART_DESKTOP})"
+echo "[6/8] (Volitelně) GNOME autostart (${AUTOSTART_DESKTOP})"
 autostart_tmp="$(mktemp)"
 cat >"${autostart_tmp}" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Game Mover
 Comment=Správa sdílené herní knihovny
-Exec=/usr/bin/env python3 /opt/steam_mover/steam_mover.py
-Icon=/opt/steam_mover/steam_mover_logo.jpg
+Exec=/usr/bin/env python3 /opt/game_mover/game_mover.py
+Icon=/opt/game_mover/game_mover_logo.jpg
 X-GNOME-Autostart-enabled=true
 NoDisplay=false
 Terminal=false
@@ -135,11 +140,11 @@ else
 fi
 rm -f "${autostart_tmp}"
 
-echo "[6/7] CLI symlink /usr/local/bin/game-mover"
+echo "[7/8] CLI symlink /usr/local/bin/game-mover"
 ln -sf "${INSTALL_DIR}/game-mover" /usr/local/bin/game-mover
 chmod +x /usr/local/bin/game-mover
 
-echo "[7/7] systemd daemon-reload"
+echo "[8/8] systemd daemon-reload"
 systemctl daemon-reload
 if [[ "${RESTART_SERVICE}" -eq 1 ]]; then
   echo "    enable + restart ${SERVICE_NAME}"

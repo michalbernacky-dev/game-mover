@@ -13,7 +13,7 @@ pip install -r requirements.txt
 
 > Ověření přes PAM: pro autentizaci wheel uživatelů na serveru je potřeba mít nainstalovaný modul `python3-pam` (na Fedora: `sudo dnf install python3-pam`). Pip závislost `python-pam` je uvedená v requirements, ale bez systémové knihovny PAM nebude fungovat.
 
-2) Run installer (creates /opt/steam_mover, systemd service, desktop launcher). Skript je idempotentní, můžeš ho pouštět znovu pro update z repa:
+2) Run installer (creates /opt/game_mover, systemd service, desktop launcher). Skript je idempotentní, můžeš ho pouštět znovu pro update z repa:
 
 ```
 sudo sh ./install.sh
@@ -40,23 +40,23 @@ git pull --ff-only
 ```
 
 What installer does:
-- copies scripts + logo into `/opt/steam_mover`
+- copies scripts + logo into `/opt/game_mover`
 - ensures group `gemers` and shared dirs `/var/Games` + `/var/Games_links` (sgid, group-owned)
-- installs/enables systemd service `steam_mover.service` (Flask API on 127.0.0.1:5000)
+- installs/enables systemd service `game_mover.service` (Flask API on 127.0.0.1:5000)
 - installs desktop launcher `/usr/share/applications/game-mover.desktop` (app vyhledatelná v menu)
 - optional autostart `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
-- exposes CLI helper via `/usr/local/bin/game-mover` (a také v `/opt/steam_mover/game-mover`)
+- exposes CLI helper via `/usr/local/bin/game-mover` (a také v `/opt/game_mover/game-mover`)
 
-`deploy.sh` pouze syncne zdroj do `/opt/steam_mover` přes `install.sh --no-restart` a restartuje službu. Je to vhodná cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+`deploy.sh` pouze syncne zdroj do `/opt/game_mover` přes `install.sh --no-restart` a restartuje službu. Je to vhodná cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
 
 To uninstall:
 
 ```
-sudo systemctl disable --now steam_mover.service
-sudo rm /etc/systemd/system/steam_mover.service
+sudo systemctl disable --now game_mover.service
+sudo rm /etc/systemd/system/game_mover.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
 sudo rm /usr/share/applications/game-mover.desktop
-sudo rm -rf /opt/steam_mover
+sudo rm -rf /opt/game_mover
 sudo systemctl daemon-reload
 ```
 
@@ -97,7 +97,7 @@ sudo dnf install "$TOPDIR"/RPMS/noarch/game-mover-*.noarch.rpm
 Enable and start backend service:
 
 ```
-sudo systemctl enable --now steam_mover.service
+sudo systemctl enable --now game_mover.service
 ```
 
 ## CI on push

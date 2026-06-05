@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/steam_mover/steam_flask.py
-WorkingDirectory=/opt/steam_mover
+ExecStart=/usr/bin/python3 /opt/game_mover/game_mover_flask.py
+WorkingDirectory=/opt/game_mover
 User=root
 Group=gemers
 Restart=always

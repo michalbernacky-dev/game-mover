@@ -114,6 +114,17 @@ def get_disk_usage(path):
     text = f"{path}: {usage.used // (2**30)}G / {usage.total // (2**30)}G ({percent}%)"
     return percent, text
 
+
+def resolve_logo_path():
+    candidates = [
+        "/opt/game_mover/game_mover_logo.jpg",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "game_mover_logo.jpg"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[0]
+
 # ------------------------------------------------------------
 # Worker pro přesun
 # ------------------------------------------------------------
@@ -178,7 +189,7 @@ class GameMover(QWidget):
 
         self.logo_label = QLabel(self)
         try:
-            pixmap = QPixmap('/opt/steam_mover/steam_mover_logo.jpg')
+            pixmap = QPixmap(resolve_logo_path())
             if not pixmap.isNull():
                 pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.logo_label.setPixmap(pixmap)
