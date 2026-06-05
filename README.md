@@ -1,3 +1,5 @@
+## English
+
 # game-mover
 Application for managing game data of installed games through Steam, GOG, Epic etc.
 
@@ -5,7 +7,7 @@ Application for managing game data of installed games through Steam, GOG, Epic e
 
 1) Install dependencies (as root or via sudo):
 
-```
+```bash
 pip install -r requirements.txt
 ```
 
@@ -15,25 +17,25 @@ pip install -r requirements.txt
 
 2) Run the installer only for first-time/manual bootstrap (creates `/opt/game_mover`, the systemd service, and the desktop launcher). The script is idempotent, so you can run it again, but the normal deploy path is now the RPM:
 
-```
+```bash
 sudo sh ./install.sh
 ```
 
 If you want to keep the service from being restarted/enabled immediately, use:
 
-```
+```bash
 sudo sh ./install.sh --no-restart
 ```
 
 If you want to enable GNOME autostart for the GUI, add:
 
-```
+```bash
 sudo sh ./install.sh --enable-autostart
 ```
 
 For the normal development deploy on the same PC, use:
 
-```
+```bash
 cd ~/Projects/game-mover-rpm
 ./deploy.sh
 ```
@@ -50,7 +52,7 @@ What installer does:
 
 To uninstall:
 
-```
+```bash
 sudo systemctl disable --now game_mover.service
 sudo rm /etc/systemd/system/game_mover.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
@@ -65,7 +67,7 @@ This repository contains a native RPM spec file: `game-mover.spec`.
 
 For local builds, use the helper:
 
-```
+```bash
 ./build_rpm.sh
 ```
 
@@ -75,13 +77,13 @@ It prints the path to the generated RPM.
 
 If you need to install a prebuilt RPM manually:
 
-```
+```bash
 sudo rpm -Uvh --replacepkgs --replacefiles /path/to/game-mover-*.rpm
 ```
 
 Note: a manual RPM install may not start the service automatically. If the service is `dead`, run:
 
-```
+```bash
 sudo systemctl restart game_mover.service
 ```
 
@@ -99,6 +101,8 @@ Behavior:
 - the resulting artifacts are available in the Actions run as downloadable files
 
 ---
+
+## Čeština
 
 # game-mover
 Nástroj pro správu herních dat nainstalovaných her přes Steam, GOG, Epic atd.
