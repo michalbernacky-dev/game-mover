@@ -3,6 +3,8 @@
 # game-mover
 Application for managing game data of installed games through Steam, GOG, Epic etc.
 
+Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -108,6 +110,8 @@ Behavior:
 
 # game-mover
 Nástroj pro správu herních dat nainstalovaných her přes Steam, GOG, Epic atd.
+
+Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
