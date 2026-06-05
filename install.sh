@@ -5,6 +5,7 @@ set -euo pipefail
 # Idempotentní: lze spouštět opakovaně pro update z repa.
 # Skript musí běžet jako root.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/steam_mover"
 SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
@@ -20,6 +21,9 @@ Použití: sudo ./install.sh [--no-restart] [--enable-autostart]
 
 --no-restart        nahraje soubory a daemon-reload, ale neprovede enable/now
 --enable-autostart  vytvoří autostart položku pro GUI (výchozí je bez autostartu)
+
+Pro běžný vývojový deploy na stejném PC použij:
+  ./deploy.sh
 EOF
 }
 
@@ -49,11 +53,15 @@ copy_if_changed() {
 
 echo "[1/7] Kopíruji aplikaci do ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
-install -Dm755 steam_flask.py "${INSTALL_DIR}/steam_flask.py"
-install -Dm755 steam_mover.py "${INSTALL_DIR}/steam_mover.py"
-install -Dm755 game-mover "${INSTALL_DIR}/game-mover"
-install -Dm644 "requirements.txt" "${INSTALL_DIR}/requirements.txt"
-install -Dm644 steam_mover_logo.jpg "${INSTALL_DIR}/steam_mover_logo.jpg"
+rsync -a --delete \
+  --include='/steam_flask.py' \
+  --include='/steam_mover.py' \
+  --include='/game-mover' \
+  --include='/requirements.txt' \
+  --include='/steam_mover_logo.jpg' \
+  --exclude='*' \
+  "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
+chmod 0755 "${INSTALL_DIR}/steam_flask.py" "${INSTALL_DIR}/steam_mover.py" "${INSTALL_DIR}/game-mover"
 
 echo "[2/7] Vytvářím skupinu a adresáře pro sdílené hry"
 if ! getent group "${GROUP_NAME}" >/dev/null; then

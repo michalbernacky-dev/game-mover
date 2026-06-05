@@ -31,6 +31,14 @@ Chceš-li zapnout autostart GUI po přihlášení do GNOME, přidej:
 sudo sh ./install.sh --enable-autostart
 ```
 
+Pro běžný vývojový deploy na stejném PC použij tento postup:
+
+```
+cd ~/Projects/game-mover-rpm
+git pull --ff-only
+./deploy.sh
+```
+
 What installer does:
 - copies scripts + logo into `/opt/steam_mover`
 - ensures group `gemers` and shared dirs `/var/Games` + `/var/Games_links` (sgid, group-owned)
@@ -38,6 +46,8 @@ What installer does:
 - installs desktop launcher `/usr/share/applications/game-mover.desktop` (app vyhledatelná v menu)
 - optional autostart `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
 - exposes CLI helper via `/usr/local/bin/game-mover` (a také v `/opt/steam_mover/game-mover`)
+
+`deploy.sh` pouze syncne zdroj do `/opt/steam_mover` přes `install.sh --no-restart` a restartuje službu. Je to vhodná cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
 
 To uninstall:
 
