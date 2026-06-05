@@ -197,6 +197,10 @@ class GameMover(QWidget):
         self.cache_button.clicked.connect(self.set_shared_cache)
         layout.addWidget(self.cache_button)
 
+        self.fix_perms_button = QPushButton('Opravit oprávnění /var/Games', self)
+        self.fix_perms_button.clicked.connect(self.fix_shared_permissions)
+        layout.addWidget(self.fix_perms_button)
+
         layout.addWidget(QLabel("DNSmasq:"))
         dnsmasq_row = QHBoxLayout()
         self.dnsmasq_status_label = QLabel("Stav: —")
@@ -924,6 +928,36 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "Chyba", str(e))
         finally:
             self.refresh_cache_status()
+
+    def fix_shared_permissions(self):
+        reply = QMessageBox.question(
+            self,
+            "Opravit oprávnění",
+            "Opravdu chceš opravit oprávnění pro /var/Games?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            path = "/var/Games"
+            resp = requests.post(f"{FLASK_URL}/fix_perms", json={"path": path}, timeout=30)
+            try:
+                data = resp.json()
+            except Exception:
+                data = {"message": resp.text}
+
+            if resp.status_code >= 400:
+                QMessageBox.warning(self, "Opravit oprávnění", data.get("message", "Chyba při opravě oprávnění"))
+            else:
+                QMessageBox.information(self, "Opravit oprávnění", data.get("message", "Oprávnění upravena pro /var/Games"))
+        except Exception as e:
+            QMessageBox.critical(self, "Opravit oprávnění", str(e))
+        finally:
+            self.refresh_game_lists()
+            self.refresh_cache_status()
+            self.update_disk_bars()
 
     def move_game(self):
         game = self.game_combo_move.currentText()
