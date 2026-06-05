@@ -12,6 +12,8 @@ LEGACY_SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
+LOCAL_ADMIN_DIR="/etc/game_mover"
+LOCAL_ADMIN_TOKEN_PATH="${LOCAL_ADMIN_DIR}/api.token"
 GROUP_NAME="gemers"
 RESTART_SERVICE=1
 AUTOSTART=0
@@ -52,6 +54,16 @@ copy_if_changed() {
   fi
 }
 
+ensure_local_admin_token() {
+  mkdir -p "${LOCAL_ADMIN_DIR}"
+  if [[ ! -f "${LOCAL_ADMIN_TOKEN_PATH}" ]]; then
+    token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    printf '%s\n' "${token}" > "${LOCAL_ADMIN_TOKEN_PATH}"
+  fi
+  chown root:"${GROUP_NAME}" "${LOCAL_ADMIN_TOKEN_PATH}"
+  chmod 0640 "${LOCAL_ADMIN_TOKEN_PATH}"
+}
+
 echo "[1/8] Kopíruji aplikaci do ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 rsync -a --delete \
@@ -72,6 +84,7 @@ echo "[3/8] Vytvářím skupinu a adresáře pro sdílené hry"
 if ! getent group "${GROUP_NAME}" >/dev/null; then
   groupadd --system "${GROUP_NAME}"
 fi
+ensure_local_admin_token
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp "${GROUP_NAME}" /var/Games /var/Games_links /var/Games/steam-cache
 chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache

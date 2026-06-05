@@ -54,6 +54,14 @@ getent group gemers >/dev/null || groupadd -r gemers
 %post
 %systemd_post game_mover.service
 
+mkdir -p /etc/game_mover
+if [ ! -f /etc/game_mover/api.token ]; then
+    token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    printf '%s\n' "$token" > /etc/game_mover/api.token
+fi
+chgrp gemers /etc/game_mover/api.token || :
+chmod 0640 /etc/game_mover/api.token || :
+
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
 chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
@@ -63,6 +71,10 @@ chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
 
 %postun
 %systemd_postun_with_restart game_mover.service
+if [ "$1" -eq 0 ]; then
+    rm -f /etc/game_mover/api.token || :
+    rmdir /etc/game_mover 2>/dev/null || :
+fi
 
 %files
 %doc README.md

@@ -47,6 +47,7 @@ What installer does:
 - installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
 - optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
 - exposes the CLI helper via `/usr/local/bin/game-mover` and also in `/opt/game_mover/game-mover`
+- protects mutating local API calls with a random token stored in `/etc/game_mover/api.token`, readable only by members of the `gemers` group
 
 `deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
 
@@ -58,6 +59,7 @@ sudo rm /etc/systemd/system/game_mover.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
 sudo rm /usr/share/applications/game-mover.desktop
 sudo rm -rf /opt/game_mover
+sudo rm -rf /etc/game_mover
 sudo systemctl daemon-reload
 ```
 
@@ -151,6 +153,7 @@ Co instalátor dělá:
 - nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
 - volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`
 - zpřístupní CLI helper přes `/usr/local/bin/game-mover` a také v `/opt/game_mover/game-mover`
+- chrání mutující lokální API volání náhodným tokenem v `/etc/game_mover/api.token`, který je čitelný jen pro členy skupiny `gemers`
 
 `deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
 
@@ -162,6 +165,7 @@ sudo rm /etc/systemd/system/game_mover.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
 sudo rm /usr/share/applications/game-mover.desktop
 sudo rm -rf /opt/game_mover
+sudo rm -rf /etc/game_mover
 sudo systemctl daemon-reload
 ```
 

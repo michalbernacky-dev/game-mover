@@ -18,6 +18,8 @@ from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal
 # KONFIGURACE
 # ------------------------------------------------------------
 FLASK_URL = "http://127.0.0.1:5000"
+LOCAL_ADMIN_TOKEN_PATH = "/etc/game_mover/api.token"
+LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 PLATFORMS = ["steam", "gog", "epic", "ubisoft", "rockstar"]
 DAY_NAMES = {
     1: "Po",
@@ -125,17 +127,26 @@ def resolve_logo_path():
             return path
     return candidates[0]
 
+
+def load_local_admin_token():
+    try:
+        with open(LOCAL_ADMIN_TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
 # ------------------------------------------------------------
 # Worker pro přesun
 # ------------------------------------------------------------
 class MoveThread(QThread):
     finished = pyqtSignal(dict, str)
 
-    def __init__(self, platform, game, user):
+    def __init__(self, platform, game, user, headers):
         super().__init__()
         self.platform = platform
         self.game = game
         self.user = user
+        self.headers = headers
 
     def run(self):
         try:
@@ -143,7 +154,7 @@ class MoveThread(QThread):
                 "platform": self.platform,
                 "game_name": self.game,
                 "user": self.user
-            })
+            }, headers=self.headers)
             data = resp.json()
             self.finished.emit(data, self.game)
         except Exception as e:
@@ -157,6 +168,7 @@ class GameMover(QWidget):
         super().__init__()
         self.user = os.getenv("USER") or os.getenv("USERNAME") or "unknown"
         self.platform = "steam"
+        self.local_admin_token = load_local_admin_token()
         self.timekpra_add_flag = None
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
@@ -182,6 +194,12 @@ class GameMover(QWidget):
         self.refresh_dnsmasq_status()
         self.refresh_game_lists()
         self.show()
+
+    def local_admin_headers(self):
+        self.local_admin_token = load_local_admin_token()
+        if not self.local_admin_token:
+            return {}
+        return {LOCAL_ADMIN_TOKEN_HEADER: self.local_admin_token}
 
     def init_mover_tab(self):
         tab = QWidget(self)
@@ -408,8 +426,12 @@ class GameMover(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
+        headers = self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "DNSmasq", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            return
         try:
-            resp = requests.post(f"{FLASK_URL}/dnsmasq/stop")
+            resp = requests.post(f"{FLASK_URL}/dnsmasq/stop", headers=headers)
             data = resp.json()
             if resp.status_code != 200:
                 QMessageBox.critical(self, "DNSmasq", data.get("message", "Chyba"))
@@ -926,10 +948,15 @@ class GameMover(QWidget):
     def set_shared_cache(self):
         if self.platform != "steam":
             return
+        headers = self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "Steam cache", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            return
 
         try:
             resp = requests.post(f"{FLASK_URL}/set_steam_cache",
-                                 json={"user": self.user})
+                                 json={"user": self.user},
+                                 headers=headers)
             data = resp.json()
             if resp.status_code >= 400:
                 QMessageBox.warning(self, "Steam cache", data.get("message", "Chyba při nastavování cache"))
@@ -950,10 +977,19 @@ class GameMover(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
+        headers = self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "Opravit oprávnění", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            return
 
         try:
             path = "/var/Games"
-            resp = requests.post(f"{FLASK_URL}/fix_perms", json={"path": path}, timeout=30)
+            resp = requests.post(
+                f"{FLASK_URL}/fix_perms",
+                json={"path": path},
+                headers=headers,
+                timeout=30,
+            )
             try:
                 data = resp.json()
             except Exception:
@@ -978,7 +1014,15 @@ class GameMover(QWidget):
         self.progress_bar.setRange(0, 0)
         self.move_button.setEnabled(False)
         self.link_button.setEnabled(False)
-        self.thread = MoveThread(self.platform, game, self.user)
+        headers = self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "Výsledek", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            self.progress_bar.setVisible(False)
+            self.progress_bar.setRange(0, 100)
+            self.move_button.setEnabled(True)
+            self.link_button.setEnabled(True)
+            return
+        self.thread = MoveThread(self.platform, game, self.user, headers)
         self.thread.finished.connect(self.move_finished)
         self.thread.start()
 
@@ -996,6 +1040,10 @@ class GameMover(QWidget):
         if not item or item.text().startswith("Žádné"):
             return
         game = item.text()
+        headers = self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "Chyba", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            return
         payload = {"platform": self.platform, "game_name": game, "user": self.user}
         if self.platform in ("gog", "epic", "ubisoft"):
             source_user = self.source_user_combo.currentText()
@@ -1005,7 +1053,7 @@ class GameMover(QWidget):
             payload["source_user"] = source_user
 
         try:
-            resp = requests.post(f"{FLASK_URL}/create_symlink", json=payload)
+            resp = requests.post(f"{FLASK_URL}/create_symlink", json=payload, headers=headers)
             QMessageBox.information(self, "Výsledek", resp.json().get("message", ""))
             self.refresh_game_lists()
         except Exception as e:

@@ -16,6 +16,23 @@
 #     game-mover timekpr-set-hours <user> <hours_str> <token>
 
 FLASK_URL="http://127.0.0.1:5000"
+LOCAL_ADMIN_TOKEN_PATH="/etc/game_mover/api.token"
+LOCAL_ADMIN_TOKEN_HEADER="X-Game-Mover-Token"
+
+read_local_admin_token() {
+  if [[ -r "${LOCAL_ADMIN_TOKEN_PATH}" ]]; then
+    tr -d '\n' < "${LOCAL_ADMIN_TOKEN_PATH}"
+  fi
+}
+
+require_local_admin_token() {
+  token="$(read_local_admin_token)"
+  if [[ -z "${token:-}" ]]; then
+    echo "Chybí lokální admin token v ${LOCAL_ADMIN_TOKEN_PATH}." >&2
+    exit 1
+  fi
+  printf '%s' "${token}"
+}
 
 show_help() {
   echo "Použití:"
@@ -83,8 +100,10 @@ case "$cmd" in
     platform="$1"
     game="$2"
     user="$3"
+    token="$(require_local_admin_token)"
     curl -s -X POST "$FLASK_URL/move_game" \
       -H "Content-Type: application/json" \
+      -H "${LOCAL_ADMIN_TOKEN_HEADER}: ${token}" \
       -d "{\"platform\":\"$platform\",\"game_name\":\"$game\",\"user\":\"$user\"}" | jq
     ;;
 
@@ -92,15 +111,19 @@ case "$cmd" in
     platform="$1"
     game="$2"
     user="$3"
+    token="$(require_local_admin_token)"
     curl -s -X POST "$FLASK_URL/create_symlink" \
       -H "Content-Type: application/json" \
+      -H "${LOCAL_ADMIN_TOKEN_HEADER}: ${token}" \
       -d "{\"platform\":\"$platform\",\"game_name\":\"$game\",\"user\":\"$user\"}" | jq
     ;;
 
   fix)
     path="$1"
+    token="$(require_local_admin_token)"
     curl -s -X POST "$FLASK_URL/fix_perms" \
       -H "Content-Type: application/json" \
+      -H "${LOCAL_ADMIN_TOKEN_HEADER}: ${token}" \
       -d "{\"path\":\"$path\"}" | jq
     ;;
 

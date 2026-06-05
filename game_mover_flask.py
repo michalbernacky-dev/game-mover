@@ -20,6 +20,9 @@ app = Flask(__name__)
 # ------------------------------------------------------------
 GAMES_ROOT = "/var/Games"
 GROUP_NAME = "gemers"
+LOCAL_ADMIN_TOKEN_DIR = "/etc/game_mover"
+LOCAL_ADMIN_TOKEN_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "api.token")
+LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 
 EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton")
 EXCLUDE_LIST = {
@@ -145,6 +148,40 @@ def set_group_perms(path):
     except Exception as e:
         print(f"Permission fix error: {e}")
 
+
+def ensure_local_admin_token():
+    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    created = False
+    if not os.path.exists(LOCAL_ADMIN_TOKEN_PATH):
+        token = secrets.token_hex(32)
+        with open(LOCAL_ADMIN_TOKEN_PATH, "w") as f:
+            f.write(token + "\n")
+        created = True
+    try:
+        gid = grp.getgrnam(GROUP_NAME).gr_gid
+        os.chown(LOCAL_ADMIN_TOKEN_PATH, 0, gid)
+        os.chmod(LOCAL_ADMIN_TOKEN_PATH, 0o640)
+    except Exception as e:
+        print(f"Permission setup error for local admin token: {e}")
+    try:
+        with open(LOCAL_ADMIN_TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except Exception as e:
+        if created:
+            print(f"Permission setup error for local admin token: {e}")
+        return ""
+
+
+def load_local_admin_token():
+    try:
+        with open(LOCAL_ADMIN_TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+ensure_local_admin_token()
+
 def find_gog_prefix_dir(user, game_name):
     """
     Najde prefix (~/Games/gog/<prefix>) podle hry, která je uvnitř drive_c/GOG Games/<game_name>
@@ -157,6 +194,12 @@ def find_gog_prefix_dir(user, game_name):
         if os.path.isdir(gog_path):
             return os.path.join(base, prefix)
     return None
+
+
+def require_local_admin(req):
+    token = req.headers.get(LOCAL_ADMIN_TOKEN_HEADER) or (req.json or {}).get("token")
+    expected = load_local_admin_token()
+    return bool(token and expected and secrets.compare_digest(token, expected))
 
 # ------------------------------------------------------------
 # Systemctl helpers
@@ -383,6 +426,8 @@ def api_list_shared():
 
 @app.route("/move_game", methods=["POST"])
 def move_game():
+    if not require_local_admin(request):
+        return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     platform = data.get("platform")
     game_name = data.get("game_name")
@@ -425,6 +470,8 @@ def move_game():
 
 @app.route("/create_symlink", methods=["POST"])
 def create_symlink():
+    if not require_local_admin(request):
+        return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     platform = data.get("platform")
     game_name = data.get("game_name")
@@ -502,6 +549,8 @@ def create_symlink():
 
 @app.route("/fix_perms", methods=["POST"])
 def fix_perms():
+    if not require_local_admin(request):
+        return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     path = data.get("path")
     if not path or not os.path.exists(path):
@@ -565,6 +614,8 @@ def steam_cache_status():
 
 @app.route("/set_steam_cache", methods=["POST"])
 def set_steam_cache():
+    if not require_local_admin(request):
+        return jsonify({"message": "Unauthorized"}), 403
     data = request.json or {}
     user = data.get("user")
     if not user:
@@ -636,6 +687,8 @@ def dnsmasq_status():
 
 @app.route("/dnsmasq/stop", methods=["POST"])
 def dnsmasq_stop():
+    if not require_local_admin(request):
+        return jsonify({"message": "Unauthorized"}), 403
     rc, status, err = systemctl_is_active("dnsmasq")
     if rc == 127:
         return jsonify({"message": err}), 500
