@@ -9,29 +9,29 @@ Application for managing game data of installed games through Steam, GOG, Epic e
 pip install -r requirements.txt
 ```
 
-> Timekpr Next integrace: pro záložku Timekpr musí být v systému nainstalovaný balík `timekpr-next`, aby byl dostupný CLI nástroj `timekpra` (není to Python balíček, nelze instalovat přes pip). Nainstaluj jej správcem balíčků své distribuce.
+> Timekpr Next integration: the Timekpr tab requires the `timekpr-next` package to be installed so the `timekpra` CLI tool is available. It is not a Python package, so it cannot be installed via pip. Install it with your distribution package manager.
 
-> Ověření přes PAM: pro autentizaci wheel uživatelů na serveru je potřeba mít nainstalovaný modul `python3-pam` (na Fedora: `sudo dnf install python3-pam`). Pip závislost `python-pam` je uvedená v requirements, ale bez systémové knihovny PAM nebude fungovat.
+> PAM authentication: wheel user authentication on the server requires the `python3-pam` module to be installed (on Fedora: `sudo dnf install python3-pam`). The `python-pam` pip dependency is listed in `requirements`, but it will not work without the system PAM library.
 
-2) Run installer only for first-time/manual bootstrap (creates /opt/game_mover, systemd service, desktop launcher). Skript je idempotentní, můžeš ho pouštět znovu, ale běžný deploy už řeší RPM:
+2) Run the installer only for first-time/manual bootstrap (creates `/opt/game_mover`, the systemd service, and the desktop launcher). The script is idempotent, so you can run it again, but the normal deploy path is now the RPM:
 
 ```
 sudo sh ./install.sh
 ```
 
-Chceš-li ponechat službu bez restartu/enable (třeba při batch deployi), použij:
+If you want to keep the service from being restarted/enabled immediately, use:
 
 ```
 sudo sh ./install.sh --no-restart
 ```
 
-Chceš-li zapnout autostart GUI po přihlášení do GNOME, přidej:
+If you want to enable GNOME autostart for the GUI, add:
 
 ```
 sudo sh ./install.sh --enable-autostart
 ```
 
-Pro běžný vývojový deploy na stejném PC použij tento postup:
+For the normal development deploy on the same PC, use:
 
 ```
 cd ~/Projects/game-mover-rpm
@@ -40,13 +40,13 @@ cd ~/Projects/game-mover-rpm
 
 What installer does:
 - copies scripts + logo into `/opt/game_mover`
-- ensures group `gemers` and shared dirs `/var/Games` + `/var/Games_links` (sgid, group-owned)
-- installs/enables systemd service `game_mover.service` (Flask API on 127.0.0.1:5000)
-- installs desktop launcher `/usr/share/applications/game-mover.desktop` (app vyhledatelná v menu)
-- optional autostart `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
-- exposes CLI helper via `/usr/local/bin/game-mover` (a také v `/opt/game_mover/game-mover`)
+- ensures the `gemers` group and shared directories `/var/Games` and `/var/Games_links` exist with sgid and group ownership
+- installs and enables the `game_mover.service` systemd unit (Flask API on `127.0.0.1:5000`)
+- installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
+- optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
+- exposes the CLI helper via `/usr/local/bin/game-mover` and also in `/opt/game_mover/game-mover`
 
-`deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+`deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
 
 To uninstall:
 
@@ -61,9 +61,9 @@ sudo systemctl daemon-reload
 
 ## RPM build and install
 
-This repository now contains a native RPM spec file: `game-mover.spec`.
+This repository contains a native RPM spec file: `game-mover.spec`.
 
-For local builds there is a helper:
+For local builds, use the helper:
 
 ```
 ./build_rpm.sh
@@ -79,7 +79,7 @@ If you need to install a prebuilt RPM manually:
 sudo rpm -Uvh --replacepkgs --replacefiles /path/to/game-mover-*.rpm
 ```
 
-Poznámka: ruční instalace RPM nemusí službu automaticky spustit. Když je stav `dead`, dej:
+Note: a manual RPM install may not start the service automatically. If the service is `dead`, run:
 
 ```
 sudo systemctl restart game_mover.service
@@ -87,7 +87,7 @@ sudo systemctl restart game_mover.service
 
 ## CI on push
 
-Git itself does not build RPMs on push. RPM build is done by CI workflow.
+Git itself does not build RPMs on push. The RPM build is handled by the CI workflow.
 
 Repository now includes GitHub Actions workflow:
 
@@ -95,5 +95,107 @@ Repository now includes GitHub Actions workflow:
 
 Behavior:
 
-- on every `push` and `pull_request`, workflow builds RPM + SRPM
-- resulting artifacts are available in Actions run as downloadable files
+- on every `push` and `pull_request`, the workflow builds an RPM and SRPM
+- the resulting artifacts are available in the Actions run as downloadable files
+
+---
+
+# game-mover
+Nástroj pro správu herních dat nainstalovaných her přes Steam, GOG, Epic atd.
+
+## Nasazení na Fedoře (systemd + GNOME autostart)
+
+1) Nainstaluj závislosti (jako root nebo přes sudo):
+
+```bash
+pip install -r requirements.txt
+```
+
+> Integrace Timekpr Next: záložka Timekpr vyžaduje nainstalovaný balík `timekpr-next`, aby byl dostupný CLI nástroj `timekpra`. Není to Python balíček, takže jej nelze instalovat přes pip. Nainstaluj jej přes správce balíčků své distribuce.
+
+> PAM autentizace: ověření wheel uživatelů na serveru vyžaduje nainstalovaný modul `python3-pam` (na Fedoře: `sudo dnf install python3-pam`). Pip závislost `python-pam` je uvedená v `requirements`, ale bez systémové PAM knihovny nebude fungovat.
+
+2) Spusť instalátor pouze pro první ruční bootstrap (vytvoří `/opt/game_mover`, systemd službu a desktop launcher). Skript je idempotentní, takže jej můžeš spustit znovu, ale běžná deploy cesta je už přes RPM:
+
+```bash
+sudo sh ./install.sh
+```
+
+Pokud chceš službu nespouštět ani neenableovat hned, použij:
+
+```bash
+sudo sh ./install.sh --no-restart
+```
+
+Pokud chceš zapnout GNOME autostart pro GUI, přidej:
+
+```bash
+sudo sh ./install.sh --enable-autostart
+```
+
+Pro běžný vývojový deploy na stejném PC použij:
+
+```bash
+cd ~/Projects/game-mover-rpm
+./deploy.sh
+```
+
+Co instalátor dělá:
+- kopíruje skripty a logo do `/opt/game_mover`
+- zajistí skupinu `gemers` a sdílené adresáře `/var/Games` a `/var/Games_links` se sgid a group ownership
+- nainstaluje a zapne systemd jednotku `game_mover.service` (Flask API na `127.0.0.1:5000`)
+- nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
+- volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`
+- zpřístupní CLI helper přes `/usr/local/bin/game-mover` a také v `/opt/game_mover/game-mover`
+
+`deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+
+Odinstalace:
+
+```bash
+sudo systemctl disable --now game_mover.service
+sudo rm /etc/systemd/system/game_mover.service
+sudo rm /etc/xdg/autostart/game-mover.desktop
+sudo rm /usr/share/applications/game-mover.desktop
+sudo rm -rf /opt/game_mover
+sudo systemctl daemon-reload
+```
+
+## Build a instalace RPM
+
+V repozitáři je nativní RPM spec soubor: `game-mover.spec`.
+
+Pro lokální build použij helper:
+
+```bash
+./build_rpm.sh
+```
+
+Vypíše cestu k vygenerovanému RPM.
+
+`./deploy.sh` RPM sestaví, lokálně ho nainstaluje přes `rpm -Uvh --replacepkgs --replacefiles` a restartuje službu.
+
+Pokud chceš nainstalovat předem připravené RPM ručně:
+
+```bash
+sudo rpm -Uvh --replacepkgs --replacefiles /path/to/game-mover-*.rpm
+```
+
+Poznámka: ruční instalace RPM nemusí službu automaticky spustit. Pokud je služba ve stavu `dead`, spusť:
+
+```bash
+sudo systemctl restart game_mover.service
+```
+
+## CI při pushi
+
+Git sám o sobě při pushi RPM nebuilduje. Build RPM zajišťuje CI workflow.
+
+Repozitář obsahuje GitHub Actions workflow:
+
+- `.github/workflows/rpm-build.yml`
+
+Chování:
+
+- při každém `push` a `pull_request` workflow vytvoří RPM a SRPM
+- výsledné artefakty jsou dostupné v Actions běhu ke stažení
