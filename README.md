@@ -13,7 +13,7 @@ pip install -r requirements.txt
 
 > Ověření přes PAM: pro autentizaci wheel uživatelů na serveru je potřeba mít nainstalovaný modul `python3-pam` (na Fedora: `sudo dnf install python3-pam`). Pip závislost `python-pam` je uvedená v requirements, ale bez systémové knihovny PAM nebude fungovat.
 
-2) Run installer (creates /opt/game_mover, systemd service, desktop launcher). Skript je idempotentní, můžeš ho pouštět znovu pro update z repa:
+2) Run installer only for first-time/manual bootstrap (creates /opt/game_mover, systemd service, desktop launcher). Skript je idempotentní, můžeš ho pouštět znovu, ale běžný deploy už řeší RPM:
 
 ```
 sudo sh ./install.sh
@@ -35,7 +35,6 @@ Pro běžný vývojový deploy na stejném PC použij tento postup:
 
 ```
 cd ~/Projects/game-mover-rpm
-git pull --ff-only
 ./deploy.sh
 ```
 
@@ -47,7 +46,7 @@ What installer does:
 - optional autostart `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
 - exposes CLI helper via `/usr/local/bin/game-mover` (a také v `/opt/game_mover/game-mover`)
 
-`deploy.sh` pouze syncne zdroj do `/opt/game_mover` přes `install.sh --no-restart` a restartuje službu. Je to vhodná cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+`deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
 
 To uninstall:
 
@@ -64,40 +63,20 @@ sudo systemctl daemon-reload
 
 This repository now contains a native RPM spec file: `game-mover.spec`.
 
-Create source tarball and build RPM (from repository root):
+For local builds there is a helper:
 
 ```
-VERSION=0.1.0
-TOPDIR="$(pwd)/.rpmbuild"
-mkdir -p "$TOPDIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-TMPDIR_SRC="$(mktemp -d)"
-PKGROOT="$TMPDIR_SRC/game-mover-${VERSION}"
-mkdir -p "$PKGROOT"
-rsync -a \
-  --exclude '.git' \
-  --exclude '.venv' \
-  --exclude '.vscode' \
-  --exclude '__pycache__' \
-  --exclude '.rpmbuild' \
-  --exclude '*.pyc' \
-  --exclude '*.bck' \
-  ./ "$PKGROOT"/
-tar -C "$TMPDIR_SRC" -czf "$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" "game-mover-${VERSION}"
-rm -rf "$TMPDIR_SRC"
-cp game-mover.spec "$TOPDIR/SPECS/"
-rpmbuild --define "_topdir $TOPDIR" -ba "$TOPDIR/SPECS/game-mover.spec"
+./build_rpm.sh
 ```
 
-Install built package:
+It prints the path to the generated RPM.
+
+`./deploy.sh` builds the RPM, installs it locally with `rpm -Uvh --replacepkgs --replacefiles`, and restarts the service.
+
+If you need to install a prebuilt RPM manually:
 
 ```
-sudo dnf install "$TOPDIR"/RPMS/noarch/game-mover-*.noarch.rpm
-```
-
-Enable and start backend service:
-
-```
-sudo systemctl enable --now game_mover.service
+sudo rpm -Uvh --replacepkgs --replacefiles /path/to/game-mover-*.rpm
 ```
 
 ## CI on push
