@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd "${SCRIPT_DIR}"
-sudo ./install.sh --no-restart
+sudo bash "${SCRIPT_DIR}/install.sh" --no-restart
 sudo systemctl restart steam_mover.service
 
 echo "Deploy hotový: /opt/steam_mover syncnuto a steam_mover.service restartována."
