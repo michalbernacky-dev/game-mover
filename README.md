@@ -79,6 +79,12 @@ If you need to install a prebuilt RPM manually:
 sudo rpm -Uvh --replacepkgs --replacefiles /path/to/game-mover-*.rpm
 ```
 
+Poznámka: ruční instalace RPM nemusí službu automaticky spustit. Když je stav `dead`, dej:
+
+```
+sudo systemctl restart game_mover.service
+```
+
 ## CI on push
 
 Git itself does not build RPMs on push. RPM build is done by CI workflow.
