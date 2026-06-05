@@ -1,9 +1,18 @@
 ## English
 
 # game-mover
-Application for managing game data of installed games through Steam, GOG, Epic etc.
+Local-first game data manager for trusted local users on a single Linux machine.
 
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
+
+## Security model
+
+This project is intended for a trusted local environment:
+
+- mutating actions are restricted to members of the `gemers` group
+- the backend listens on `127.0.0.1` only
+- admin operations use a local token stored outside the repository
+- it is not intended to be exposed as a public network service
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -109,9 +118,18 @@ Behavior:
 ## Čeština
 
 # game-mover
-Nástroj pro správu herních dat nainstalovaných her přes Steam, GOG, Epic atd.
+Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jednom Linux stroji.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
+
+## Bezpečnostní model
+
+Projekt je určený pro důvěryhodné lokální prostředí:
+
+- mutující akce jsou dostupné jen členům skupiny `gemers`
+- backend poslouchá pouze na `127.0.0.1`
+- admin operace používají lokální token uložený mimo repozitář
+- není určený jako veřejně vystavená síťová služba
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
