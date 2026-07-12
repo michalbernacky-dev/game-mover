@@ -34,6 +34,7 @@ EXCLUDE_LIST = {
 }
 
 TIMEKPRA_BIN = "timekpra"
+TIMEKPRA_BIN_RESOLVED: str | None = None
 TIMEKPRA_ADD_FLAG_CANDIDATES = ["--addtime", "--add-allowedtime", "--addallowedtime"]
 TIMEKPRA_SET_TIMELEFT = "--settimeleft"
 TIMEKPRA_DISABLE_ARGS = ["--disable"]
@@ -241,15 +242,46 @@ def systemctl_stop(service_name: str):
 class TimekprCapabilities:
     mode: str = ""          # "settimeleft" nebo "addflag" nebo ""
     add_flag: Optional[str] = None
+    bin_path: Optional[str] = None
+    error: str = ""
 
 
 def detect_timekpr() -> TimekprCapabilities:
     caps = TimekprCapabilities()
-    try:
-        proc = subprocess.run([TIMEKPRA_BIN, "--help"], text=True, capture_output=True, check=False)
-        if proc.returncode != 0:
-            return caps
-        help_text = proc.stdout
+    global TIMEKPRA_BIN_RESOLVED
+    candidates = [TIMEKPRA_BIN]
+    detected = shutil.which(TIMEKPRA_BIN)
+    if detected:
+        candidates.insert(0, detected)
+    candidates.extend([
+        "/usr/bin/timekpra",
+        "/usr/local/bin/timekpra",
+        "/usr/sbin/timekpra",
+        "/bin/timekpra",
+        "/sbin/timekpra",
+    ])
+    seen = set()
+    last_error = ""
+    for bin_path in candidates:
+        if not bin_path or bin_path in seen:
+            continue
+        seen.add(bin_path)
+        try:
+            proc = subprocess.run([bin_path, "--help"], text=True, capture_output=True, check=False)
+        except FileNotFoundError:
+            last_error = f"{bin_path} nenalezen"
+            continue
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+        help_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        if not help_text.strip():
+            last_error = f"{bin_path} nevrátil žádný help výstup"
+            continue
+
+        TIMEKPRA_BIN_RESOLVED = bin_path
+        caps.bin_path = bin_path
         if TIMEKPRA_SET_TIMELEFT in help_text:
             caps.mode = "settimeleft"
         if caps.mode != "settimeleft":
@@ -258,8 +290,10 @@ def detect_timekpr() -> TimekprCapabilities:
                     caps.mode = "addflag"
                     caps.add_flag = candidate
                     break
-    except FileNotFoundError:
-        pass
+        if not caps.mode:
+            caps.error = f"{bin_path} nepodporuje {TIMEKPRA_SET_TIMELEFT} ani {', '.join(TIMEKPRA_ADD_FLAG_CANDIDATES)}"
+        return caps
+    caps.error = last_error or f"{TIMEKPRA_BIN} nenalezen"
     return caps
 
 
@@ -269,7 +303,7 @@ TIMEKPRA_CAPS = detect_timekpr()
 def run_timekpra(args: list[str]):
     """Spustí timekpra s předanými argy, vrací (rc, stdout, stderr)."""
     try:
-        proc = subprocess.run([TIMEKPRA_BIN] + args, text=True, capture_output=True, check=False)
+        proc = subprocess.run([TIMEKPRA_BIN_RESOLVED or TIMEKPRA_BIN] + args, text=True, capture_output=True, check=False)
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
         return 127, "", f"{TIMEKPRA_BIN} nenalezen (nainstaluj timekpr-next)"
@@ -711,6 +745,8 @@ def timekpr_status():
     return jsonify({
         "mode": caps.mode,
         "add_flag": caps.add_flag,
+        "bin_path": caps.bin_path,
+        "error": caps.error,
         "disable_seconds": TIMEKPRA_DISABLE_SECONDS,
         "user": user,
     })
@@ -793,6 +829,8 @@ def timekpr_auth():
         "token": token,
         "mode": caps.mode,
         "add_flag": caps.add_flag,
+        "bin_path": caps.bin_path,
+        "error": caps.error,
         "disable_seconds": TIMEKPRA_DISABLE_SECONDS,
         "user": username,
         "ttl_seconds": TOKEN_TTL_SECONDS,

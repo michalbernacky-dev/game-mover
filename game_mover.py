@@ -718,9 +718,10 @@ class GameMover(QWidget):
                 self.set_timekpr_controls_enabled(True)
                 self.fetch_day_plan()
             else:
-                self.timekpr_status_label.setText("Timekpr neumí přidat čas (zkontroluj instalaci)")
+                detail = data.get("error") or "server nevrátil podporovaný mód"
+                self.timekpr_status_label.setText("Timekpr neumí přidat čas")
                 self.set_timekpr_controls_enabled(False)
-                QMessageBox.critical(self, "Timekpr", "Přihlášení se nezdařilo (chybí token nebo mód).")
+                QMessageBox.critical(self, "Timekpr", f"Přihlášení proběhlo, ale Timekpr není použitelný: {detail}")
         except Exception as e:
             QMessageBox.critical(self, "Timekpr", str(e))
             self.set_timekpr_controls_enabled(False)
