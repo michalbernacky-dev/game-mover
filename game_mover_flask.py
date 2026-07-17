@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 from flask import Flask, jsonify, request
+import glob
 import os
 import shutil
 import grp
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 import time
 import secrets
 import datetime
+import sys
 
 app = Flask(__name__)
 
@@ -34,7 +36,7 @@ EXCLUDE_LIST = {
 }
 
 TIMEKPRA_BIN = "timekpra"
-TIMEKPRA_BIN_RESOLVED: str | None = None
+TIMEKPRA_BIN_RESOLVED: list[str] | None = None
 TIMEKPRA_ADD_FLAG_CANDIDATES = ["--addtime", "--add-allowedtime", "--addallowedtime"]
 TIMEKPRA_SET_TIMELEFT = "--settimeleft"
 TIMEKPRA_DISABLE_ARGS = ["--disable"]
@@ -246,30 +248,55 @@ class TimekprCapabilities:
     error: str = ""
 
 
-def detect_timekpr() -> TimekprCapabilities:
-    caps = TimekprCapabilities()
-    global TIMEKPRA_BIN_RESOLVED
-    candidates = [TIMEKPRA_BIN]
+def _candidate_timekpra_commands() -> list[list[str]]:
+    commands: list[list[str]] = []
+
+    def add_command(command: list[str]) -> None:
+        if command and command not in commands:
+            commands.append(command)
+
     detected = shutil.which(TIMEKPRA_BIN)
     if detected:
-        candidates.insert(0, detected)
-    candidates.extend([
+        add_command([detected])
+    add_command([TIMEKPRA_BIN])
+    for bin_path in (
         "/usr/bin/timekpra",
         "/usr/local/bin/timekpra",
         "/usr/sbin/timekpra",
         "/bin/timekpra",
         "/sbin/timekpra",
-    ])
-    seen = set()
+    ):
+        add_command([bin_path])
+
+    python_bins = [sys.executable, shutil.which("python3"), "/usr/bin/python3"]
+    script_patterns = [
+        "/usr/lib/python3/dist-packages/timekpr/client/timekpra.py",
+        "/usr/local/lib/python3*/dist-packages/timekpr/client/timekpra.py",
+        "/usr/lib/python3*/site-packages/timekpr/client/timekpra.py",
+        "/usr/lib64/python3*/site-packages/timekpr/client/timekpra.py",
+    ]
+    scripts: list[str] = []
+    for pattern in script_patterns:
+        scripts.extend(glob.glob(pattern))
+    for script in sorted(set(scripts)):
+        if os.path.isfile(script):
+            for python_bin in python_bins:
+                if python_bin:
+                    add_command([python_bin, script])
+
+    return commands
+
+
+def detect_timekpr() -> TimekprCapabilities:
+    caps = TimekprCapabilities()
+    global TIMEKPRA_BIN_RESOLVED
     last_error = ""
-    for bin_path in candidates:
-        if not bin_path or bin_path in seen:
-            continue
-        seen.add(bin_path)
+    for command in _candidate_timekpra_commands():
+        label = " ".join(command)
         try:
-            proc = subprocess.run([bin_path, "--help"], text=True, capture_output=True, check=False)
+            proc = subprocess.run(command + ["--help"], text=True, capture_output=True, check=False)
         except FileNotFoundError:
-            last_error = f"{bin_path} nenalezen"
+            last_error = f"{label} nenalezen"
             continue
         except Exception as e:
             last_error = str(e)
@@ -277,22 +304,28 @@ def detect_timekpr() -> TimekprCapabilities:
 
         help_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
         if not help_text.strip():
-            last_error = f"{bin_path} nevrátil žádný help výstup"
+            last_error = f"{label} nevrátil žádný help výstup"
             continue
 
-        TIMEKPRA_BIN_RESOLVED = bin_path
-        caps.bin_path = bin_path
         if TIMEKPRA_SET_TIMELEFT in help_text:
+            TIMEKPRA_BIN_RESOLVED = command
+            caps.bin_path = label
             caps.mode = "settimeleft"
-        if caps.mode != "settimeleft":
-            for candidate in TIMEKPRA_ADD_FLAG_CANDIDATES:
-                if candidate in help_text:
-                    caps.mode = "addflag"
-                    caps.add_flag = candidate
-                    break
-        if not caps.mode:
-            caps.error = f"{bin_path} nepodporuje {TIMEKPRA_SET_TIMELEFT} ani {', '.join(TIMEKPRA_ADD_FLAG_CANDIDATES)}"
-        return caps
+            return caps
+
+        for candidate in TIMEKPRA_ADD_FLAG_CANDIDATES:
+            if candidate in help_text:
+                TIMEKPRA_BIN_RESOLVED = command
+                caps.bin_path = label
+                caps.mode = "addflag"
+                caps.add_flag = candidate
+                return caps
+
+        if TIMEKPRA_SET_ALLOWED_HOURS in help_text:
+            last_error = f"{label} podporuje jen {TIMEKPRA_SET_ALLOWED_HOURS}, ne změnu zbývajícího času"
+        else:
+            last_error = f"{label} nepodporuje {TIMEKPRA_SET_TIMELEFT} ani {', '.join(TIMEKPRA_ADD_FLAG_CANDIDATES)}"
+
     caps.error = last_error or f"{TIMEKPRA_BIN} nenalezen"
     return caps
 
@@ -303,13 +336,13 @@ TIMEKPRA_CAPS = detect_timekpr()
 def run_timekpra(args: list[str]):
     """Spustí timekpra s předanými argy, vrací (rc, stdout, stderr)."""
     try:
-        proc = subprocess.run([TIMEKPRA_BIN_RESOLVED or TIMEKPRA_BIN] + args, text=True, capture_output=True, check=False)
+        command = TIMEKPRA_BIN_RESOLVED or [TIMEKPRA_BIN]
+        proc = subprocess.run(command + args, text=True, capture_output=True, check=False)
         return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
     except FileNotFoundError:
         return 127, "", f"{TIMEKPRA_BIN} nenalezen (nainstaluj timekpr-next)"
     except Exception as e:
         return 1, "", str(e)
-
 
 def user_in_wheel(username: str) -> bool:
     try:
