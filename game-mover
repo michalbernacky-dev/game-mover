@@ -34,6 +34,159 @@ require_local_admin_token() {
   printf '%s' "${token}"
 }
 
+format_timekpr_userinfo() {
+  jq -r 'if (.message? | type) == "string" then .message else . end' | awk '
+    function day_name(day) {
+      return (day == 1 ? "Pondělí" : day == 2 ? "Úterý" : day == 3 ? "Středa" :
+              day == 4 ? "Čtvrtek" : day == 5 ? "Pátek" : day == 6 ? "Sobota" :
+              day == 7 ? "Neděle" : day)
+    }
+
+    function duration(value,    seconds, days, hours, minutes, result) {
+      if (value !~ /^[0-9]+$/) return value
+      seconds = value + 0
+      days = int(seconds / 86400)
+      seconds %= 86400
+      hours = int(seconds / 3600)
+      seconds %= 3600
+      minutes = int(seconds / 60)
+      seconds %= 60
+      result = ""
+      if (days) result = days " d"
+      if (hours) result = result (result ? " " : "") hours " h"
+      if (minutes) result = result (result ? " " : "") minutes " min"
+      if (seconds || !result) result = result (result ? " " : "") seconds " s"
+      return result
+    }
+
+    function clock_value(minutes) {
+      return sprintf("%02d:%02d", int(minutes / 60), minutes % 60)
+    }
+
+    function allowed_hours(value,    count, tokens, token, bracket, range, bounds,
+                                             hour, start, finish, previous_finish, range_start, output, i) {
+      count = split(value, tokens, ";")
+      output = ""
+      previous_finish = -2
+      for (i = 1; i <= count; i++) {
+        token = tokens[i]
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", token)
+        if (token !~ /^[0-9]+(\[[0-9]+-[0-9]+\])?$/) return value
+
+        bracket = index(token, "[")
+        if (bracket) {
+          hour = substr(token, 1, bracket - 1) + 0
+          range = substr(token, bracket + 1, length(token) - bracket - 1)
+          split(range, bounds, "-")
+          start = hour * 60 + bounds[1]
+          finish = hour * 60 + bounds[2]
+        } else {
+          hour = token + 0
+          start = hour * 60
+          finish = start + 59
+        }
+
+        if (i == 1) {
+          range_start = start
+        } else if (start > previous_finish + 1) {
+          output = output (output ? ", " : "") clock_value(range_start) "–" clock_value(previous_finish)
+          range_start = start
+        }
+        previous_finish = finish
+      }
+      if (count && previous_finish >= 0)
+        output = output (output ? ", " : "") clock_value(range_start) "–" clock_value(previous_finish)
+      return output ? output : value
+    }
+
+    function day_list(value,    count, days, output, i) {
+      count = split(value, days, ";")
+      for (i = 1; i <= count; i++)
+        output = output (output ? ", " : "") day_name(days[i])
+      return output
+    }
+
+    function daily_limits(value,    count, limits, output, i) {
+      count = split(value, limits, ";")
+      for (i = 1; i <= count; i++)
+        output = output (output ? ", " : "") day_name(i) " " duration(limits[i])
+      return output
+    }
+
+    /^# Configuration for user / {
+      user = $0
+      sub(/^# Configuration for user /, "", user)
+      sub(/:$/, "", user)
+      print "Konfigurace uživatele " user
+      next
+    }
+    /^ALLOWED_HOURS_[1-7]:/ {
+      split($1, key_parts, "_")
+      sub(/:$/, "", key_parts[3])
+      value = substr($0, index($0, ":") + 1)
+      sub(/^[[:space:]]+/, "", value)
+      if (!hours_heading++) print "\nPovolené časy:"
+      printf "  %-9s %s\n", day_name(key_parts[3]), allowed_hours(value)
+      next
+    }
+    /^ALLOWED_WEEKDAYS:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      print "\nPovolené dny: " day_list(value)
+      next
+    }
+    /^LIMITS_PER_WEEKDAYS:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      print "Denní limity: " daily_limits(value)
+      next
+    }
+    /^(LIMIT_PER_WEEK|LIMIT_PER_MONTH|TIME_SPENT_BALANCE|TIME_SPENT_DAY|TIME_SPENT_WEEK|TIME_SPENT_MONTH|TIME_LEFT_DAY|PLAYTIME_LEFT_DAY|PLAYTIME_SPENT_DAY):/ {
+      key = substr($0, 1, index($0, ":") - 1)
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      label = (key == "LIMIT_PER_WEEK" ? "Limit za týden" :
+               key == "LIMIT_PER_MONTH" ? "Limit za měsíc" :
+               key == "TIME_SPENT_BALANCE" ? "Časový zůstatek" :
+               key == "TIME_SPENT_DAY" ? "Využito dnes" :
+               key == "TIME_SPENT_WEEK" ? "Využito tento týden" :
+               key == "TIME_SPENT_MONTH" ? "Využito tento měsíc" :
+               key == "TIME_LEFT_DAY" ? "Zbývá dnes" :
+               key == "PLAYTIME_LEFT_DAY" ? "Zbývající herní čas dnes" : "Herní čas dnes")
+      printf "%-29s %s\n", label ":", duration(value)
+      next
+    }
+    /^(TRACK_INACTIVE|HIDE_TRAY_ICON|PLAYTIME_ENABLED|PLAYTIME_LIMIT_OVERRIDE_ENABLED|PLAYTIME_UNACCOUNTED_INTERVALS_ENABLED):/ {
+      key = substr($0, 1, index($0, ":") - 1)
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      label = (key == "TRACK_INACTIVE" ? "Sledovat neaktivitu" :
+               key == "HIDE_TRAY_ICON" ? "Skrýt ikonu" :
+               key == "PLAYTIME_ENABLED" ? "Herní limit" :
+               key == "PLAYTIME_LIMIT_OVERRIDE_ENABLED" ? "Přepsání herního limitu" : "Nezapočítané herní intervaly")
+      printf "%-29s %s\n", label ":", (tolower(value) == "true" ? "ano" : "ne")
+      next
+    }
+    /^LOCKOUT_TYPE:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      printf "%-29s %s\n", "Akce po vyčerpání limitu:", (value == "terminate" ? "ukončit relaci" : value)
+      next
+    }
+    /^PLAYTIME_ALLOWED_WEEKDAYS:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      print "Herní dny: " day_list(value)
+      next
+    }
+    /^PLAYTIME_LIMITS_PER_WEEKDAYS:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      print "Herní denní limity: " daily_limits(value)
+      next
+    }
+    /^PLAYTIME_ACTIVITIES:/ {
+      value = substr($0, index($0, ":") + 1); sub(/^[[:space:]]+/, "", value)
+      print "Herní aktivity: " (value ? value : "žádné")
+      next
+    }
+    { print }
+  '
+}
+
 show_help() {
   echo "Použití:"
   echo "  game-mover list <platform>"
@@ -142,7 +295,7 @@ case "$cmd" in
     curl -s -X POST "$FLASK_URL/timekpr/userinfo" \
       -H "Content-Type: application/json" \
       -H "X-Timekpr-Token: $token" \
-      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | jq
+      -d "{\"user\":\"$user\",\"token\":\"$token\"}" | format_timekpr_userinfo
     ;;
 
   timekpr-day-plan)
