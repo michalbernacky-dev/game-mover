@@ -14,6 +14,11 @@ This project is intended for a trusted local environment:
 - admin operations use a local token stored outside the repository
 - it is not intended to be exposed as a public network service
 
+The **Servers** tab monitors `forge-srv.service` and `satisfactory.service` and
+refreshes their systemd state every 10 seconds. Different unit names can be set
+with `GAME_MOVER_MINECRAFT_SERVICE` and `GAME_MOVER_SATISFACTORY_SERVICE` in a
+systemd override for `game_mover.service`.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -130,6 +135,11 @@ Projekt je určený pro důvěryhodné lokální prostředí:
 - backend poslouchá pouze na `127.0.0.1`
 - admin operace používají lokální token uložený mimo repozitář
 - není určený jako veřejně vystavená síťová služba
+
+Záložka **Servery** sleduje jednotky `forge-srv.service` a
+`satisfactory.service` a jejich systemd stav obnovuje každých 10 sekund. Jiné
+názvy jednotek lze nastavit proměnnými `GAME_MOVER_MINECRAFT_SERVICE` a
+`GAME_MOVER_SATISFACTORY_SERVICE` v systemd override pro `game_mover.service`.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

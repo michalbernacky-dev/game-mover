@@ -26,6 +26,13 @@ LOCAL_ADMIN_TOKEN_DIR = "/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "api.token")
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 
+# Názvy jednotek lze na konkrétním stroji změnit pomocí proměnných
+# prostředí v systemd override pro game_mover.service.
+GAME_SERVER_SERVICES = (
+    ("minecraft", "Minecraft", os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service")),
+    ("satisfactory", "Satisfactory", os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service")),
+)
+
 EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton")
 EXCLUDE_LIST = {
     "steam": ["Half-Life Dedicated Server"],
@@ -236,6 +243,26 @@ def systemctl_stop(service_name: str):
         return 127, "", "systemctl nenalezen"
     except Exception as e:
         return 1, "", str(e)
+
+
+def game_server_status(server_id: str, label: str, service_name: str):
+    rc, status, err = systemctl_is_active(service_name)
+    messages = {
+        "active": "Běží",
+        "activating": "Spouští se",
+        "deactivating": "Zastavuje se",
+        "inactive": "Neběží",
+        "failed": "Chyba",
+        "unknown": "Jednotka nenalezena",
+    }
+    return {
+        "id": server_id,
+        "name": label,
+        "service": service_name,
+        "status": status,
+        "message": messages.get(status, err or f"Stav: {status}"),
+        "error": err if rc == 127 else "",
+    }
 
 # ------------------------------------------------------------
 # Timekpr detection & helpers
@@ -738,6 +765,14 @@ def set_steam_cache():
 # ------------------------------------------------------------
 # DNSmasq
 # ------------------------------------------------------------
+@app.route("/servers/status", methods=["GET"])
+def servers_status():
+    return jsonify({
+        "servers": [game_server_status(*server) for server in GAME_SERVER_SERVICES],
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+
+
 @app.route("/dnsmasq/status", methods=["GET"])
 def dnsmasq_status():
     rc, status, err = systemctl_is_active("dnsmasq")

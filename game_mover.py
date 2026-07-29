@@ -9,10 +9,10 @@ import re
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
-    QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit
+    QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
 
 # ------------------------------------------------------------
 # KONFIGURACE
@@ -184,6 +184,7 @@ class GameMover(QWidget):
     def initUI(self):
         self.tabs = QTabWidget(self)
         self.init_mover_tab()
+        self.init_servers_tab()
         self.init_timekpr_tab()
 
         layout = QVBoxLayout()
@@ -192,7 +193,11 @@ class GameMover(QWidget):
         self.setWindowTitle('Game Mover')
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
+        self.refresh_server_statuses()
         self.refresh_game_lists()
+        self.server_refresh_timer = QTimer(self)
+        self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
+        self.server_refresh_timer.start(10_000)
         self.show()
 
     def local_admin_headers(self):
@@ -382,7 +387,83 @@ class GameMover(QWidget):
         self.set_timekpr_controls_enabled(False)
         self.load_timekpr_status()
 
+    def init_servers_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout()
+
+        title = QLabel("Stav herních serverů")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("Stav se automaticky obnovuje každých 10 sekund."))
+
+        self.server_status_widgets = {}
+        for server_id, name, service in (
+            ("minecraft", "Minecraft", "forge-srv.service"),
+            ("satisfactory", "Satisfactory", "satisfactory.service"),
+        ):
+            card = QFrame(self)
+            card.setFrameShape(QFrame.StyledPanel)
+            card_layout = QVBoxLayout(card)
+
+            name_label = QLabel(name)
+            name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            card_layout.addWidget(name_label)
+
+            status_label = QLabel("● Načítám…")
+            card_layout.addWidget(status_label)
+            service_label = QLabel(service)
+            service_label.setStyleSheet("color: #aab7c0;")
+            card_layout.addWidget(service_label)
+
+            self.server_status_widgets[server_id] = (status_label, service_label)
+            layout.addWidget(card)
+
+        self.servers_updated_label = QLabel("Poslední aktualizace: —")
+        layout.addWidget(self.servers_updated_label)
+        refresh_button = QPushButton("Obnovit stav", self)
+        refresh_button.clicked.connect(self.refresh_server_statuses)
+        layout.addWidget(refresh_button)
+        layout.addStretch()
+
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "Servery")
+
     # ----------------- pomocné -----------------
+    def refresh_server_statuses(self):
+        colors = {
+            "active": "#66cc66",
+            "activating": "#ffcc66",
+            "deactivating": "#ffcc66",
+            "inactive": "#aaaaaa",
+            "failed": "#ff6666",
+            "unknown": "#ff6666",
+        }
+        try:
+            resp = requests.get(f"{FLASK_URL}/servers/status", timeout=3)
+            resp.raise_for_status()
+            data = resp.json()
+            for server in data.get("servers", []):
+                widgets = self.server_status_widgets.get(server.get("id"))
+                if not widgets:
+                    continue
+                status_label, service_label = widgets
+                status = server.get("status", "unknown")
+                message = server.get("message", "Neznámý stav")
+                status_label.setText(f"● {message}")
+                status_label.setStyleSheet(
+                    f"color: {colors.get(status, '#ff6666')}; font-weight: bold;"
+                )
+                service_label.setText(server.get("service", ""))
+            updated_at = data.get("updated_at", "")
+            if updated_at:
+                updated_at = updated_at.replace("T", " ").split("+")[0]
+            self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
+        except Exception as e:
+            for status_label, _service_label in self.server_status_widgets.values():
+                status_label.setText("● Backend není dostupný")
+                status_label.setStyleSheet("color: #ff6666; font-weight: bold;")
+            self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({e})")
+
     def update_disk_bars(self):
         for path, bar in [("/var/Games", self.var_bar), (f"/home/{self.user}", self.home_bar)]:
             try:
