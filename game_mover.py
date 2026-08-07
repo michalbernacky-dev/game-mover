@@ -287,6 +287,7 @@ class GameMover(QWidget):
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
         self.client_config = load_client_config()
+        self.app_mode = self.client_config.get("app_mode", "client")
         self.server_profiles = server_profiles(self.client_config)
         self.active_server_profile_id = self.client_config.get(
             "active_server_profile", self.server_profiles[0]["id"]
@@ -541,6 +542,15 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         layout.addWidget(QLabel("Profily se odemknou po ověření ve Timekpr. Port 5000 je výchozí pro Game Mover."))
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Režim aplikace:"))
+        self.app_mode_combo = QComboBox(self)
+        self.app_mode_combo.addItem("Klient – vzdálený náhled", "client")
+        self.app_mode_combo.addItem("Server – místní správa služeb", "server")
+        self.app_mode_combo.setCurrentIndex(1 if self.app_mode == "server" else 0)
+        self.app_mode_combo.currentIndexChanged.connect(self.on_app_mode_changed)
+        mode_row.addWidget(self.app_mode_combo)
+        layout.addLayout(mode_row)
 
         profile_row = QHBoxLayout()
         self.server_profile_combo = QComboBox(self)
@@ -697,6 +707,14 @@ class GameMover(QWidget):
         self.tabs.addTab(tab, "Servery")
 
     # ----------------- registr serverů -----------------
+    def on_app_mode_changed(self, index):
+        self.app_mode = self.app_mode_combo.itemData(index)
+        self.client_config["app_mode"] = self.app_mode
+        save_client_config(self.client_config)
+        self.endpoint_label.setText(
+            "Zdroj: místní server" if self.app_mode == "server" else f"Zdroj: {self.server_api_url()}"
+        )
+
     def set_server_registry_enabled(self, enabled):
         for widget in getattr(self, "server_registry_widgets", []):
             widget.setEnabled(enabled)
