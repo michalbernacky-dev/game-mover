@@ -335,6 +335,11 @@ class GameMover(QWidget):
         self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.server_refresh_timer.start(10_000)
         self.show()
+        QTimer.singleShot(0, self.show_compact_window)
+
+    def show_compact_window(self):
+        self.showNormal()
+        self.resize(820, 720)
 
     def active_server_profile(self):
         for profile in self.server_profiles:
