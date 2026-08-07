@@ -297,9 +297,21 @@ class GameMover(QWidget):
         self.compare_mods_thread = None
         self.initUI()
         self.setStyleSheet("""
-            QWidget { background-color: #121f28; color: white; }
-            QPushButton { background-color: #444444; color: white; }
-            QPushButton:disabled { background-color: #888888; color: #AAAAAA; }
+            QWidget { background-color: #121f28; color: #f3f6f8; }
+            QPushButton {
+                background-color: #2c414d;
+                color: #f3f6f8;
+                border: 1px solid #587080;
+                border-radius: 3px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover:enabled { background-color: #3a5665; }
+            QPushButton:pressed:enabled { background-color: #203541; }
+            QPushButton:disabled {
+                background-color: #24313a;
+                color: #aab9c2;
+                border: 1px solid #3c4d57;
+            }
         """)
 
     def initUI(self):
