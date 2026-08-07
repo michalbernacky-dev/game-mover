@@ -326,8 +326,7 @@ class GameMover(QWidget):
         layout.addWidget(self.tabs)
         self.setLayout(layout)
         self.setWindowTitle('Game Mover')
-        self.setMaximumSize(1100, 850)
-        self.resize(820, 720)
+        self.setFixedSize(960, 720)
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
         self.refresh_server_statuses()
@@ -336,11 +335,6 @@ class GameMover(QWidget):
         self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.server_refresh_timer.start(10_000)
         self.show()
-        QTimer.singleShot(0, self.show_compact_window)
-
-    def show_compact_window(self):
-        self.showNormal()
-        self.resize(820, 720)
 
     def active_server_profile(self):
         for profile in self.server_profiles:
@@ -667,7 +661,7 @@ class GameMover(QWidget):
                 header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
                 header.setSectionResizeMode(2, QHeaderView.Stretch)
                 self.minecraft_mods_table.setColumnWidth(0, 260)
-                self.minecraft_mods_table.setFixedHeight(240)
+                self.minecraft_mods_table.setFixedHeight(220)
                 card_layout.addWidget(self.minecraft_mods_table)
 
                 mods_buttons = QHBoxLayout()
@@ -683,7 +677,7 @@ class GameMover(QWidget):
                 self.minecraft_diff_output = QPlainTextEdit(self)
                 self.minecraft_diff_output.setReadOnly(True)
                 self.minecraft_diff_output.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
-                self.minecraft_diff_output.setFixedHeight(145)
+                self.minecraft_diff_output.setFixedHeight(120)
                 card_layout.addWidget(self.minecraft_diff_output)
             layout.addWidget(card)
 
