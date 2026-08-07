@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
     QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QFormLayout
+    QHeaderView, QAbstractItemView, QFormLayout, QScrollArea
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
@@ -326,7 +326,8 @@ class GameMover(QWidget):
         layout.addWidget(self.tabs)
         self.setLayout(layout)
         self.setWindowTitle('Game Mover')
-        self.setFixedSize(960, 720)
+        self.setMinimumSize(720, 500)
+        self.resize(960, 720)
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
         self.refresh_server_statuses()
@@ -591,7 +592,11 @@ class GameMover(QWidget):
 
     def init_servers_tab(self):
         tab = QWidget(self)
-        layout = QVBoxLayout()
+        tab_layout = QVBoxLayout(tab)
+        scroll_area = QScrollArea(tab)
+        scroll_area.setWidgetResizable(True)
+        content = QWidget(scroll_area)
+        layout = QVBoxLayout(content)
 
         title = QLabel("Stav herních serverů")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -687,8 +692,8 @@ class GameMover(QWidget):
         refresh_button.clicked.connect(self.refresh_server_statuses)
         layout.addWidget(refresh_button)
         layout.addStretch()
-
-        tab.setLayout(layout)
+        scroll_area.setWidget(content)
+        tab_layout.addWidget(scroll_area)
         self.tabs.addTab(tab, "Servery")
 
     # ----------------- registr serverů -----------------
