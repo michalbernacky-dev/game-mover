@@ -318,6 +318,7 @@ class GameMover(QWidget):
         self.tabs = QTabWidget(self)
         self.init_mover_tab()
         self.init_servers_tab()
+        self.init_server_registry_tab()
         self.init_timekpr_tab()
 
         layout = QVBoxLayout()
@@ -530,6 +531,62 @@ class GameMover(QWidget):
         self.set_timekpr_controls_enabled(False)
         self.load_timekpr_status()
 
+    def init_server_registry_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout()
+        title = QLabel("Připojení k hernímu serveru")
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("Profily se odemknou po ověření ve Timekpr. Port 5000 je výchozí pro Game Mover."))
+
+        profile_row = QHBoxLayout()
+        self.server_profile_combo = QComboBox(self)
+        self.server_profile_combo.currentIndexChanged.connect(self.on_server_profile_changed)
+        profile_row.addWidget(self.server_profile_combo)
+        self.server_profile_new_button = QPushButton("Nový", self)
+        self.server_profile_new_button.clicked.connect(self.new_server_profile)
+        profile_row.addWidget(self.server_profile_new_button)
+        self.server_profile_delete_button = QPushButton("Smazat", self)
+        self.server_profile_delete_button.clicked.connect(self.delete_server_profile)
+        profile_row.addWidget(self.server_profile_delete_button)
+        layout.addLayout(profile_row)
+
+        form = QFormLayout()
+        self.server_profile_name = QLineEdit(self)
+        form.addRow("Název:", self.server_profile_name)
+        self.server_profile_address = QLineEdit(self)
+        self.server_profile_address.setPlaceholderText("100.x.y.z nebo 192.168.x.x")
+        form.addRow("Adresa:", self.server_profile_address)
+        self.server_profile_port = QSpinBox(self)
+        self.server_profile_port.setRange(1, 65535)
+        self.server_profile_port.setValue(5000)
+        form.addRow("Port:", self.server_profile_port)
+        self.server_profile_token = QLineEdit(self)
+        self.server_profile_token.setEchoMode(QLineEdit.Password)
+        self.server_profile_token.setPlaceholderText("read.token ze vzdáleného serveru")
+        form.addRow("Read token:", self.server_profile_token)
+        layout.addLayout(form)
+
+        registry_actions = QHBoxLayout()
+        self.server_profile_save_button = QPushButton("Uložit profil", self)
+        self.server_profile_save_button.clicked.connect(self.save_server_profile)
+        registry_actions.addWidget(self.server_profile_save_button)
+        self.server_profile_test_button = QPushButton("Otestovat spojení", self)
+        self.server_profile_test_button.clicked.connect(self.test_server_profile)
+        registry_actions.addWidget(self.server_profile_test_button)
+        layout.addLayout(registry_actions)
+        layout.addStretch()
+
+        self.server_registry_widgets = [
+            self.server_profile_combo, self.server_profile_new_button, self.server_profile_delete_button,
+            self.server_profile_name, self.server_profile_address, self.server_profile_port,
+            self.server_profile_token, self.server_profile_save_button, self.server_profile_test_button,
+        ]
+        self.set_server_registry_enabled(False)
+        self.reload_server_profile_combo()
+        tab.setLayout(layout)
+        self.tabs.addTab(tab, "Připojení")
+
     def init_servers_tab(self):
         tab = QWidget(self)
         layout = QVBoxLayout()
@@ -541,54 +598,6 @@ class GameMover(QWidget):
         self.endpoint_label = QLabel(f"Zdroj: {self.server_api_url()}")
         self.endpoint_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.endpoint_label)
-
-        registry = QFrame(self)
-        registry.setFrameShape(QFrame.StyledPanel)
-        registry_layout = QVBoxLayout(registry)
-        registry_layout.addWidget(QLabel("Registr serverů (odemkne se po ověření ve Timekpr)"))
-        profile_row = QHBoxLayout()
-        self.server_profile_combo = QComboBox(self)
-        self.server_profile_combo.currentIndexChanged.connect(self.on_server_profile_changed)
-        profile_row.addWidget(self.server_profile_combo)
-        self.server_profile_new_button = QPushButton("Nový", self)
-        self.server_profile_new_button.clicked.connect(self.new_server_profile)
-        profile_row.addWidget(self.server_profile_new_button)
-        self.server_profile_delete_button = QPushButton("Smazat", self)
-        self.server_profile_delete_button.clicked.connect(self.delete_server_profile)
-        profile_row.addWidget(self.server_profile_delete_button)
-        registry_layout.addLayout(profile_row)
-        form = QFormLayout()
-        self.server_profile_name = QLineEdit(self)
-        form.addRow("Název:", self.server_profile_name)
-        self.server_profile_mode = QComboBox(self)
-        self.server_profile_mode.addItem("Lokální", "local")
-        self.server_profile_mode.addItem("Tailscale", "tailscale")
-        self.server_profile_mode.addItem("LAN", "lan")
-        form.addRow("Režim:", self.server_profile_mode)
-        self.server_profile_address = QLineEdit(self)
-        self.server_profile_address.setPlaceholderText("100.x.y.z:5000 nebo 192.168.x.x:5000")
-        form.addRow("Adresa:", self.server_profile_address)
-        self.server_profile_token = QLineEdit(self)
-        self.server_profile_token.setEchoMode(QLineEdit.Password)
-        self.server_profile_token.setPlaceholderText("read.token ze vzdáleného serveru")
-        form.addRow("Read token:", self.server_profile_token)
-        registry_layout.addLayout(form)
-        registry_actions = QHBoxLayout()
-        self.server_profile_save_button = QPushButton("Uložit profil", self)
-        self.server_profile_save_button.clicked.connect(self.save_server_profile)
-        registry_actions.addWidget(self.server_profile_save_button)
-        self.server_profile_test_button = QPushButton("Otestovat spojení", self)
-        self.server_profile_test_button.clicked.connect(self.test_server_profile)
-        registry_actions.addWidget(self.server_profile_test_button)
-        registry_layout.addLayout(registry_actions)
-        layout.addWidget(registry)
-        self.server_registry_widgets = [
-            self.server_profile_combo, self.server_profile_new_button, self.server_profile_delete_button,
-            self.server_profile_name, self.server_profile_mode, self.server_profile_address,
-            self.server_profile_token, self.server_profile_save_button, self.server_profile_test_button,
-        ]
-        self.set_server_registry_enabled(False)
-        self.reload_server_profile_combo()
 
         self.server_status_widgets = {}
         for server_id, name, service in (
@@ -697,13 +706,20 @@ class GameMover(QWidget):
         self.server_profile_combo.blockSignals(False)
         self.load_active_server_profile()
 
+    def split_server_address(self, address):
+        address = address.strip().removeprefix("http://").removeprefix("https://")
+        host, separator, port = address.rpartition(":")
+        if separator and port.isdigit():
+            return host, int(port)
+        return address, 5000
+
     def load_active_server_profile(self):
         profile = self.active_server_profile()
+        host, port = self.split_server_address(profile.get("address", ""))
         self.server_profile_name.setText(profile.get("name", ""))
-        self.server_profile_address.setText(profile.get("address", ""))
+        self.server_profile_address.setText(host)
+        self.server_profile_port.setValue(port)
         self.server_profile_token.setText(profile.get("read_token", ""))
-        mode_index = self.server_profile_mode.findData(profile.get("mode", "local"))
-        self.server_profile_mode.setCurrentIndex(max(mode_index, 0))
         self.endpoint_label.setText(f"Zdroj: {self.server_api_url()}")
 
     def on_server_profile_changed(self, index):
@@ -737,20 +753,19 @@ class GameMover(QWidget):
 
     def save_server_profile(self):
         profile = self.active_server_profile()
-        address = self.server_profile_address.text().strip()
-        if not address:
-            QMessageBox.warning(self, "Servery", "Zadej adresu serveru včetně portu.")
+        host = self.server_profile_address.text().strip()
+        if not host:
+            QMessageBox.warning(self, "Připojení", "Zadej adresu serveru.")
             return
         profile.update({
             "name": self.server_profile_name.text().strip() or "Server",
-            "mode": self.server_profile_mode.currentData(),
-            "address": address,
+            "address": f"{host}:{self.server_profile_port.value()}",
             "read_token": self.server_profile_token.text().strip(),
         })
         self.save_server_profiles()
         self.reload_server_profile_combo()
         self.refresh_server_statuses()
-        QMessageBox.information(self, "Servery", "Profil byl uložen do uživatelské konfigurace s právy 0600.")
+        QMessageBox.information(self, "Připojení", "Profil byl uložen do uživatelské konfigurace s právy 0600.")
 
     def test_server_profile(self):
         profile = self.active_server_profile()
