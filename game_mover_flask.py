@@ -36,8 +36,8 @@ GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
 
 def default_game_servers():
     return [
-        {"id": "minecraft", "name": "Minecraft", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR},
-        {"id": "satisfactory", "name": "Satisfactory", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic"},
+        {"id": "minecraft", "name": "Minecraft", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "control_auth": "silent"},
+        {"id": "satisfactory", "name": "Satisfactory", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "control_auth": "silent"},
     ]
 
 
@@ -312,10 +312,10 @@ def systemctl_is_active(service_name: str):
         return 1, "unknown", str(e)
 
 
-def systemctl_stop(service_name: str):
+def systemctl_action(action: str, service_name: str):
     try:
         proc = subprocess.run(
-            ["systemctl", "stop", service_name],
+            ["systemctl", action, service_name],
             text=True,
             capture_output=True,
             check=False,
@@ -325,6 +325,18 @@ def systemctl_stop(service_name: str):
         return 127, "", "systemctl nenalezen"
     except Exception as e:
         return 1, "", str(e)
+
+
+def systemctl_start(service_name: str):
+    return systemctl_action("start", service_name)
+
+
+def systemctl_stop(service_name: str):
+    return systemctl_action("stop", service_name)
+
+
+def systemctl_reset_failed(service_name: str):
+    return systemctl_action("reset-failed", service_name)
 
 
 def game_server_status(server):
@@ -343,6 +355,8 @@ def game_server_status(server):
         "name": server.get("name", service_name),
         "service": service_name,
         "kind": server.get("kind", "generic"),
+        "has_mods": bool(server.get("mods_dir")),
+        "control_auth": server.get("control_auth", "silent"),
         "status": status,
         "message": messages.get(status, err or f"Stav: {status}"),
         "error": err if rc == 127 else "",
@@ -485,6 +499,13 @@ def require_token(req):
 def require_local_pam_session(req):
     return req.remote_addr in ("127.0.0.1", "::1") and bool(require_token(req))
 
+
+def require_local_server_control(req, server):
+    if req.remote_addr not in ("127.0.0.1", "::1"):
+        return False
+    if server.get("control_auth", "silent") == "pam":
+        return bool(require_token(req))
+    return require_local_admin(req)
 
 
 def limit_for_today(user: str) -> Optional[int]:
@@ -878,10 +899,11 @@ def servers_config():
         server_id = str(server.get("id", "")).strip()
         name = str(server.get("name", "")).strip()
         service = str(server.get("service", "")).strip()
-        kind = str(server.get("kind", "generic"))
-        if not server_id or not server_id.replace("-", "").replace("_", "").isalnum() or server_id in seen_ids or not name or not service or "\n" in service or kind not in ("generic", "minecraft"):
+        kind = str(server.get("kind", "generic")).strip().lower()
+        control_auth = str(server.get("control_auth", "silent")).strip().lower()
+        if not server_id or not server_id.replace("-", "").replace("_", "").isalnum() or server_id in seen_ids or not name or not service or "\n" in service or kind not in ("generic", "minecraft") or control_auth not in ("silent", "pam"):
             return jsonify({"message": "Invalid server entry"}), 400
-        item = {"id": server_id, "name": name, "service": service, "kind": kind}
+        item = {"id": server_id, "name": name, "service": service, "kind": kind, "control_auth": control_auth}
         if kind == "minecraft":
             mods_dir = str(server.get("mods_dir", "")).strip()
             if not mods_dir.startswith("/"):
@@ -893,17 +915,37 @@ def servers_config():
     return jsonify({"servers": validated})
 
 
-@app.route("/servers/stop", methods=["POST"])
-def servers_stop():
-    if not require_local_pam_session(request):
-        return jsonify({"message": "Unauthorized"}), 403
+def control_game_server(action):
     server = find_game_server((request.json or {}).get("id", ""))
     if not server:
         return jsonify({"message": "Server not found"}), 404
-    rc, out, err = systemctl_stop(server.get("service", ""))
+    if not require_local_server_control(request, server):
+        return jsonify({"message": "Unauthorized"}), 403
+    service_name = server.get("service", "")
+    if action == "start":
+        systemctl_reset_failed(service_name)
+        rc, out, err = systemctl_start(service_name)
+        success_message = f"{server.get('name')} spuštěn"
+        failure_message = "Nepodařilo se spustit službu"
+    else:
+        rc, out, err = systemctl_stop(service_name)
+        if rc == 0:
+            systemctl_reset_failed(service_name)
+        success_message = f"{server.get('name')} zastaven"
+        failure_message = "Nepodařilo se zastavit službu"
     if rc == 0:
-        return jsonify({"message": f"{server.get('name')} zastaven"})
-    return jsonify({"message": err or out or "Nepodařilo se zastavit službu"}), 500
+        return jsonify({"message": success_message})
+    return jsonify({"message": err or out or failure_message}), 500
+
+
+@app.route("/servers/start", methods=["POST"])
+def servers_start():
+    return control_game_server("start")
+
+
+@app.route("/servers/stop", methods=["POST"])
+def servers_stop():
+    return control_game_server("stop")
 
 
 @app.route("/servers/minecraft/mods", methods=["GET"])

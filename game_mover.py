@@ -594,8 +594,8 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(5)
-        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "systemd služba", "Typ", "Adresář mods"])
+        self.local_services_table.setColumnCount(6)
+        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "systemd služba", "Typ", "Adresář mods", "Ovládání"])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
         services_header = self.local_services_table.horizontalHeader()
@@ -604,6 +604,7 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(2, QHeaderView.Stretch)
         services_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(4, QHeaderView.Stretch)
+        services_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         layout.addWidget(self.local_services_table)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
@@ -651,6 +652,7 @@ class GameMover(QWidget):
         self.server_cards_widget = QWidget(content)
         self.server_cards_layout = QVBoxLayout(self.server_cards_widget)
         self.server_cards_layout.setContentsMargins(0, 0, 0, 0)
+        self.server_card_layouts = {}
         layout.addWidget(self.server_cards_widget)
 
         self.minecraft_details = QFrame(content)
@@ -688,7 +690,6 @@ class GameMover(QWidget):
         self.minecraft_diff_output.setFixedHeight(120)
         minecraft_layout.addWidget(self.minecraft_diff_output)
         self.minecraft_details.setVisible(False)
-        layout.addWidget(self.minecraft_details)
 
         self.servers_updated_label = QLabel("Poslední aktualizace: —")
         layout.addWidget(self.servers_updated_label)
@@ -748,15 +749,26 @@ class GameMover(QWidget):
         service = service if isinstance(service, dict) else {}
         row = self.local_services_table.rowCount()
         self.local_services_table.insertRow(row)
-        defaults = (
-            service.get("id", f"server-{int(time.time() * 1000)}"),
-            service.get("name", "Nový server"),
-            service.get("service", "server.service"),
-            service.get("kind", "generic"),
-            service.get("mods_dir", ""),
-        )
-        for column, value in enumerate(defaults):
+        values = {
+            0: service.get("id", f"server-{int(time.time() * 1000)}"),
+            1: service.get("name", "Nový server"),
+            2: service.get("service", "server.service"),
+            4: service.get("mods_dir", ""),
+        }
+        for column, value in values.items():
             self.local_services_table.setItem(row, column, QTableWidgetItem(str(value)))
+        kind_combo = QComboBox(self.local_services_table)
+        kind_combo.addItem("Obecná", "generic")
+        kind_combo.addItem("Minecraft", "minecraft")
+        kind = service.get("kind", "generic")
+        kind_combo.setCurrentIndex(max(0, kind_combo.findData(kind)))
+        self.local_services_table.setCellWidget(row, 3, kind_combo)
+        control_combo = QComboBox(self.local_services_table)
+        control_combo.addItem("Tiché", "silent")
+        control_combo.addItem("Vyžaduje PAM", "pam")
+        control_auth = service.get("control_auth", "silent")
+        control_combo.setCurrentIndex(max(0, control_combo.findData(control_auth)))
+        self.local_services_table.setCellWidget(row, 5, control_combo)
 
     def remove_local_service_rows(self):
         rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
@@ -769,13 +781,23 @@ class GameMover(QWidget):
             return
         servers = []
         for row in range(self.local_services_table.rowCount()):
-            values = []
-            for column in range(5):
+            def cell_text(column):
                 item = self.local_services_table.item(row, column)
-                values.append(item.text().strip() if item else "")
-            server_id, name, service_name, kind, mods_dir = values
-            kind = kind.lower()
-            entry = {"id": server_id, "name": name, "service": service_name, "kind": kind}
+                return item.text().strip() if item else ""
+
+            kind_combo = self.local_services_table.cellWidget(row, 3)
+            control_combo = self.local_services_table.cellWidget(row, 5)
+            kind = kind_combo.currentData() if kind_combo else "generic"
+            control_auth = control_combo.currentData() if control_combo else "silent"
+            mods_dir = cell_text(4)
+            if kind == "minecraft" and not mods_dir.startswith("/"):
+                QMessageBox.warning(self, "Služby", "Minecraft služba musí mít absolutní cestu k adresáři mods.")
+                self.local_services_table.setCurrentCell(row, 4)
+                return
+            entry = {
+                "id": cell_text(0), "name": cell_text(1), "service": cell_text(2),
+                "kind": kind, "control_auth": control_auth,
+            }
             if kind == "minecraft":
                 entry["mods_dir"] = mods_dir
             servers.append(entry)
@@ -899,7 +921,10 @@ class GameMover(QWidget):
                 widget.deleteLater()
 
     def render_server_cards(self, servers):
+        details_open = not self.minecraft_details.isHidden()
+        self.minecraft_details.setParent(self.server_cards_widget)
         self.clear_layout(self.server_cards_layout)
+        self.server_card_layouts = {}
         colors = {
             "active": "#66cc66", "activating": "#ffcc66", "deactivating": "#ffcc66",
             "inactive": "#aaaaaa", "failed": "#ff6666", "unknown": "#ff6666",
@@ -908,6 +933,8 @@ class GameMover(QWidget):
             card = QFrame(self.server_cards_widget)
             card.setFrameShape(QFrame.StyledPanel)
             card_layout = QVBoxLayout(card)
+            server_id = server.get("id", "")
+            self.server_card_layouts[server_id] = card_layout
             name_label = QLabel(server.get("name", server.get("service", "Server")))
             name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
             card_layout.addWidget(name_label)
@@ -919,7 +946,8 @@ class GameMover(QWidget):
             service_label.setStyleSheet("color: #aab7c0;")
             card_layout.addWidget(service_label)
             actions = QHBoxLayout()
-            if server.get("kind") == "minecraft":
+            has_mods = server.get("has_mods", server.get("kind") == "minecraft")
+            if server.get("kind") == "minecraft" and has_mods:
                 mods_button = QPushButton("Mody a porovnání", card)
                 mods_button.clicked.connect(
                     lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Minecraft"):
@@ -927,15 +955,30 @@ class GameMover(QWidget):
                 )
                 actions.addWidget(mods_button)
             if self.app_mode == "server":
+                control_auth = server.get("control_auth", "silent")
+                can_control = bool(self.timekpr_token) if control_auth == "pam" else bool(self.local_admin_headers())
+                auth_label = QLabel("Ovládání: PAM" if control_auth == "pam" else "Ovládání: tiché", card)
+                auth_label.setStyleSheet("color: #aab7c0;")
+                actions.addWidget(auth_label)
+                start_button = QPushButton("Spustit", card)
+                start_button.setEnabled(can_control and status in ("inactive", "failed"))
+                start_button.clicked.connect(
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
+                    self.control_local_server("start", server_id, name, auth)
+                )
+                actions.addWidget(start_button)
                 stop_button = QPushButton("Vypnout", card)
-                stop_button.setEnabled(bool(self.timekpr_token) and status in ("active", "activating"))
+                stop_button.setEnabled(can_control and status in ("active", "activating"))
                 stop_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"):
-                    self.stop_local_server(server_id, name)
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
+                    self.control_local_server("stop", server_id, name, auth)
                 )
                 actions.addWidget(stop_button)
             if actions.count():
                 card_layout.addLayout(actions)
+            if details_open and server_id == getattr(self, "selected_minecraft_server_id", ""):
+                card_layout.addWidget(self.minecraft_details)
+                self.minecraft_details.setVisible(True)
             self.server_cards_layout.addWidget(card)
         self.server_cards_layout.addStretch()
 
@@ -954,24 +997,29 @@ class GameMover(QWidget):
             self.render_server_cards([])
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
 
-    def stop_local_server(self, server_id, name):
-        if self.app_mode != "server" or not self.timekpr_token:
+    def control_local_server(self, action, server_id, name, control_auth):
+        if self.app_mode != "server":
             return
-        answer = QMessageBox.question(self, "Vypnout server", f"Opravdu vypnout {name}?")
-        if answer != QMessageBox.Yes:
+        if action == "stop":
+            answer = QMessageBox.question(self, "Vypnout server", f"Opravdu vypnout {name}?")
+            if answer != QMessageBox.Yes:
+                return
+        headers = self.local_pam_headers() if control_auth == "pam" else self.local_admin_headers()
+        if not headers:
+            QMessageBox.warning(self, "Server", "Pro zvolený způsob ovládání chybí oprávnění.")
             return
+        action_label = "Spuštění" if action == "start" else "Vypnutí"
         try:
             response = requests.post(
-                f"{FLASK_URL}/servers/stop", json={"id": server_id, "token": self.timekpr_token},
-                headers=self.local_pam_headers(), timeout=15,
+                f"{FLASK_URL}/servers/{action}", json={"id": server_id}, headers=headers, timeout=30,
             )
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
-            QMessageBox.information(self, "Server", data.get("message", "Server zastaven."))
+            QMessageBox.information(self, "Server", data.get("message", f"{action_label} dokončeno."))
             self.refresh_server_statuses()
         except Exception as error:
-            QMessageBox.critical(self, "Server", f"Vypnutí selhalo: {error}")
+            QMessageBox.critical(self, "Server", f"{action_label} selhalo: {error}")
 
     def reload_selected_server_mods(self):
         if getattr(self, "selected_minecraft_server_id", ""):
@@ -980,6 +1028,10 @@ class GameMover(QWidget):
     def load_server_mods(self, server_id, server_name):
         self.selected_minecraft_server_id = server_id
         self.selected_minecraft_server_name = server_name
+        card_layout = self.server_card_layouts.get(server_id)
+        if card_layout:
+            self.minecraft_details.setParent(self.server_cards_widget)
+            card_layout.addWidget(self.minecraft_details)
         self.minecraft_details.setVisible(True)
         self.load_server_mods_button.setEnabled(False)
         self.compare_mods_button.setEnabled(False)

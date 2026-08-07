@@ -66,11 +66,14 @@ enter the local `api.token` there.
 The **Connection** tab selects either Client mode for remote read-only monitoring
 or Server mode for local administration. In Server mode, authenticate as a wheel
 user in the **Timekpr** tab, then edit the local service registry. Each row has an
-ID, display name, systemd unit, type (`generic` or `minecraft`), and an absolute
-`mods` directory for Minecraft services. Multiple Minecraft instances such as
-Forge and Pixelmon each get their own mod inventory and comparison action; for example, Pixelmon can use the `pixelmon-srv` systemd unit.
-Stopping a service is available only in Server mode after PAM authentication and
-is rejected for LAN/Tailscale requests.
+ID, display name, systemd unit, type (`generic` or `minecraft`), an absolute
+`mods` directory for Minecraft services, and a control policy. Multiple Minecraft
+instances such as Forge and Pixelmon each keep their own mod path and comparison;
+for example, Pixelmon can use the `pixelmon-srv` systemd unit. The `silent` policy
+uses the same local `api.token` as Mover actions, while `pam` requires Timekpr
+login. Starting and stopping services is always rejected over LAN/Tailscale.
+A successful stop also clears systemd's failed state caused by Minecraft exiting
+with status 130.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -240,10 +243,13 @@ vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
 V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only dohled,
 nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
 v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
-ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`) a u
-Minecraftu absolutní cestu k adresáři `mods`. Forge a Pixelmon tak mají vlastní
-inventář i porovnání modů; například Pixelmon může používat jednotku `pixelmon-srv`. Vypnutí služby je dostupné jen lokálně v režimu Server
-po PAM ověření; požadavky z LAN/Tailscale jsou odmítnuty.
+ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
+Minecraftu absolutní cestu k adresáři `mods` a politiku ovládání. Forge a Pixelmon
+tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
+`pixelmon-srv`. Volba `Tiché` používá stejný místní `api.token` jako funkce Moveru,
+volba `Vyžaduje PAM` vyžaduje přihlášení v Timekpr. Spouštění a vypínání je vždy
+odmítnuto z LAN/Tailscale. Po úspěšném vypnutí se také vyčistí systemd stav
+`failed`, který Minecraft může zanechat návratovým kódem 130.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
