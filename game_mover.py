@@ -514,6 +514,27 @@ class GameMover(QWidget):
                 self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
                 self.minecraft_mods_table.setAlternatingRowColors(True)
                 self.minecraft_mods_table.setSortingEnabled(True)
+                self.minecraft_mods_table.setStyleSheet("""
+                    QTableWidget {
+                        background-color: #12212a;
+                        alternate-background-color: #182b36;
+                        color: #ced8de;
+                        gridline-color: #304550;
+                        selection-background-color: #31566b;
+                        selection-color: #e3eaee;
+                    }
+                    QTableWidget::item {
+                        padding: 3px;
+                    }
+                    QHeaderView::section {
+                        background-color: #20323c;
+                        color: #c4cfd5;
+                        border: 0;
+                        border-right: 1px solid #3a4c56;
+                        border-bottom: 1px solid #3a4c56;
+                        padding: 4px;
+                    }
+                """)
                 self.minecraft_mods_table.verticalHeader().setVisible(False)
                 header = self.minecraft_mods_table.horizontalHeader()
                 header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
