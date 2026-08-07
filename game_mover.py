@@ -951,7 +951,7 @@ class GameMover(QWidget):
                 mods_button = QPushButton("Mody a porovnání", card)
                 mods_button.clicked.connect(
                     lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Minecraft"):
-                    self.load_server_mods(server_id, name)
+                    self.toggle_server_mods(server_id, name)
                 )
                 actions.addWidget(mods_button)
             if self.app_mode == "server":
@@ -960,7 +960,9 @@ class GameMover(QWidget):
                 auth_label = QLabel("Ovládání: PAM" if control_auth == "pam" else "Ovládání: tiché", card)
                 auth_label.setStyleSheet("color: #aab7c0;")
                 actions.addWidget(auth_label)
+                actions.addStretch()
                 start_button = QPushButton("Spustit", card)
+                start_button.setFixedWidth(120)
                 start_button.setEnabled(can_control and status in ("inactive", "failed"))
                 start_button.clicked.connect(
                     lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
@@ -968,6 +970,7 @@ class GameMover(QWidget):
                 )
                 actions.addWidget(start_button)
                 stop_button = QPushButton("Vypnout", card)
+                stop_button.setFixedWidth(120)
                 stop_button.setEnabled(can_control and status in ("active", "activating"))
                 stop_button.clicked.connect(
                     lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
@@ -1024,6 +1027,12 @@ class GameMover(QWidget):
     def reload_selected_server_mods(self):
         if getattr(self, "selected_minecraft_server_id", ""):
             self.load_server_mods(self.selected_minecraft_server_id, self.selected_minecraft_server_name)
+
+    def toggle_server_mods(self, server_id, server_name):
+        if server_id == getattr(self, "selected_minecraft_server_id", "") and not self.minecraft_details.isHidden():
+            self.minecraft_details.setVisible(False)
+            return
+        self.load_server_mods(server_id, server_name)
 
     def load_server_mods(self, server_id, server_name):
         self.selected_minecraft_server_id = server_id
