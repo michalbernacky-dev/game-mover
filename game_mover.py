@@ -326,6 +326,7 @@ class GameMover(QWidget):
         layout.addWidget(self.tabs)
         self.setLayout(layout)
         self.setWindowTitle('Game Mover')
+        self.setMaximumSize(1100, 850)
         self.resize(820, 720)
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
