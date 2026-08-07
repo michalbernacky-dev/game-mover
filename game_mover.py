@@ -506,9 +506,9 @@ class GameMover(QWidget):
                 self.minecraft_mods_summary = QLabel("Mody: dosud nenačteny")
                 card_layout.addWidget(self.minecraft_mods_summary)
                 self.minecraft_mods_table = QTableWidget(self)
-                self.minecraft_mods_table.setColumnCount(4)
+                self.minecraft_mods_table.setColumnCount(3)
                 self.minecraft_mods_table.setHorizontalHeaderLabels(
-                    ["Mod ID", "Název", "Verze", "JAR soubor"]
+                    ["Název", "Verze", "JAR soubor"]
                 )
                 self.minecraft_mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
                 self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -537,11 +537,10 @@ class GameMover(QWidget):
                 """)
                 self.minecraft_mods_table.verticalHeader().setVisible(False)
                 header = self.minecraft_mods_table.horizontalHeader()
-                header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(1, QHeaderView.Interactive)
-                header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(3, QHeaderView.Stretch)
-                self.minecraft_mods_table.setColumnWidth(1, 220)
+                header.setSectionResizeMode(0, QHeaderView.Interactive)
+                header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+                header.setSectionResizeMode(2, QHeaderView.Stretch)
+                self.minecraft_mods_table.setColumnWidth(0, 260)
                 self.minecraft_mods_table.setMinimumHeight(260)
                 card_layout.addWidget(self.minecraft_mods_table)
 
@@ -638,7 +637,6 @@ class GameMover(QWidget):
                 row = self.minecraft_mods_table.rowCount()
                 self.minecraft_mods_table.insertRow(row)
                 values = (
-                    mod.get("id", "?"),
                     mod.get("name", ""),
                     mod.get("version", ""),
                     jar.get("filename", "?"),
