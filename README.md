@@ -19,6 +19,39 @@ refreshes their systemd state every 10 seconds. Different unit names can be set
 with `GAME_MOVER_MINECRAFT_SERVICE` and `GAME_MOVER_SATISFACTORY_SERVICE` in a
 systemd override for `game_mover.service`.
 
+### Minecraft mod inventory and remote server
+
+The Minecraft card can load the server's JAR inventory and compare it with a
+client `mods` directory. Comparison uses mod IDs, versions and SHA-256 hashes;
+client files stay on the client computer. The protected inventory endpoint uses
+the separate `/etc/game_mover/read.token` token. Never copy `api.token` to a
+client computer.
+
+The API remains bound to localhost by default. For a trusted Tailscale network,
+bind it to the server's Tailscale address with a systemd override:
+
+```ini
+[Service]
+Environment=GAME_MOVER_BIND_HOST=100.x.y.z
+Environment=GAME_MOVER_MINECRAFT_MODS_DIR=/opt/forge_srv/mods
+```
+
+After `systemctl daemon-reload` and a service restart, copy only `read.token` to
+the client through a secure channel, for example to
+`~/.config/game-mover/server-read.token` with mode `0600`. Configure the client
+in `~/.config/game-mover/config.json`:
+
+```json
+{
+  "server_url": "http://100.x.y.z:5000",
+  "server_read_token_path": "/home/USER/.config/game-mover/server-read.token"
+}
+```
+
+The other Game Mover tabs continue to use the local backend. Do not expose this
+Flask service directly to the public internet; use Tailscale or an equivalent
+trusted encrypted network and restrict the firewall accordingly.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -140,6 +173,38 @@ Záložka **Servery** sleduje jednotky `forge-srv.service` a
 `satisfactory.service` a jejich systemd stav obnovuje každých 10 sekund. Jiné
 názvy jednotek lze nastavit proměnnými `GAME_MOVER_MINECRAFT_SERVICE` a
 `GAME_MOVER_SATISFACTORY_SERVICE` v systemd override pro `game_mover.service`.
+
+### Inventář Minecraft modů a vzdálený server
+
+Karta Minecraft umí načíst inventář JARů na serveru a porovnat ho s klientským
+adresářem `mods`. Porovnává ID modů, verze a SHA-256; klientské soubory přitom
+zůstávají na klientském počítači. Chráněný endpoint používá samostatný token
+`/etc/game_mover/read.token`. Na klienta nikdy nekopíruj `api.token`.
+
+API ve výchozím stavu nadále poslouchá jen lokálně. V důvěryhodné Tailscale síti
+ho lze navázat na Tailscale adresu serveru pomocí systemd override:
+
+```ini
+[Service]
+Environment=GAME_MOVER_BIND_HOST=100.x.y.z
+Environment=GAME_MOVER_MINECRAFT_MODS_DIR=/opt/forge_srv/mods
+```
+
+Po `systemctl daemon-reload` a restartu služby bezpečně zkopíruj pouze
+`read.token` na klienta, například jako
+`~/.config/game-mover/server-read.token` s právy `0600`. Na klientovi vytvoř
+`~/.config/game-mover/config.json`:
+
+```json
+{
+  "server_url": "http://100.x.y.z:5000",
+  "server_read_token_path": "/home/UZIVATEL/.config/game-mover/server-read.token"
+}
+```
+
+Ostatní záložky Game Moveru dál používají místní backend. Flask službu
+nevystavuj přímo do internetu; použij Tailscale nebo obdobnou důvěryhodnou
+šifrovanou síť a podle toho omez firewall.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

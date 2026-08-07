@@ -6,20 +6,45 @@ import requests
 import psutil
 import grp
 import re
+import json
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
-    QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame
+    QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
+    QFileDialog, QPlainTextEdit
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
+
+from game_mover_mods import compare_inventories, scan_mod_directory
 
 # ------------------------------------------------------------
 # KONFIGURACE
 # ------------------------------------------------------------
 FLASK_URL = "http://127.0.0.1:5000"
+CLIENT_CONFIG_PATH = os.path.expanduser("~/.config/game-mover/config.json")
+
+
+def load_client_config():
+    try:
+        with open(CLIENT_CONFIG_PATH, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+CLIENT_CONFIG = load_client_config()
+SERVER_API_URL = os.getenv(
+    "GAME_MOVER_SERVER_URL", CLIENT_CONFIG.get("server_url", FLASK_URL)
+).rstrip("/")
 LOCAL_ADMIN_TOKEN_PATH = "/etc/game_mover/api.token"
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
+SERVER_READ_TOKEN_PATH = os.getenv(
+    "GAME_MOVER_SERVER_READ_TOKEN_PATH",
+    CLIENT_CONFIG.get("server_read_token_path", "/etc/game_mover/read.token"),
+)
+SERVER_READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 PLATFORMS = ["steam", "gog", "epic", "ubisoft", "rockstar"]
 DAY_NAMES = {
     1: "Po",
@@ -135,6 +160,22 @@ def load_local_admin_token():
     except Exception:
         return ""
 
+
+def load_server_read_token():
+    token_from_env = os.getenv("GAME_MOVER_SERVER_READ_TOKEN", "").strip()
+    if token_from_env:
+        return token_from_env
+    try:
+        with open(SERVER_READ_TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def server_read_headers():
+    token = load_server_read_token()
+    return {SERVER_READ_TOKEN_HEADER: token} if token else {}
+
 # ------------------------------------------------------------
 # Worker pro přesun
 # ------------------------------------------------------------
@@ -160,6 +201,43 @@ class MoveThread(QThread):
         except Exception as e:
             self.finished.emit({"message": f"Chyba: {e}"}, self.game)
 
+
+class ServerModsThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def run(self):
+        try:
+            resp = requests.get(
+                f"{SERVER_API_URL}/servers/minecraft/mods",
+                headers=server_read_headers(),
+                timeout=60,
+            )
+            data = resp.json()
+            if resp.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {resp.status_code}"))
+            self.loaded.emit({"inventory": data})
+        except Exception as e:
+            self.loaded.emit({"error": str(e)})
+
+
+class CompareModsThread(QThread):
+    compared = pyqtSignal(dict)
+
+    def __init__(self, server_inventory, client_path):
+        super().__init__()
+        self.server_inventory = server_inventory
+        self.client_path = client_path
+
+    def run(self):
+        try:
+            client_inventory = scan_mod_directory(self.client_path)
+            self.compared.emit({
+                "result": compare_inventories(self.server_inventory, client_inventory),
+                "client": client_inventory,
+            })
+        except Exception as e:
+            self.compared.emit({"error": str(e)})
+
 # ------------------------------------------------------------
 # GUI
 # ------------------------------------------------------------
@@ -174,6 +252,9 @@ class GameMover(QWidget):
         self.timekpr_token = ""
         # uchovává "původní" plán pro dnešní den per-uživatel tak, jak se načetl z timekpra
         self.original_hours_today = {}
+        self.minecraft_mod_inventory = None
+        self.server_mods_thread = None
+        self.compare_mods_thread = None
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: white; }
@@ -395,6 +476,9 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         layout.addWidget(QLabel("Stav se automaticky obnovuje každých 10 sekund."))
+        endpoint_label = QLabel(f"Zdroj: {SERVER_API_URL}")
+        endpoint_label.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(endpoint_label)
 
         self.server_status_widgets = {}
         for server_id, name, service in (
@@ -416,6 +500,29 @@ class GameMover(QWidget):
             card_layout.addWidget(service_label)
 
             self.server_status_widgets[server_id] = (status_label, service_label)
+
+            if server_id == "minecraft":
+                self.minecraft_mods_summary = QLabel("Mody: dosud nenačteny")
+                card_layout.addWidget(self.minecraft_mods_summary)
+                self.minecraft_mods_list = QListWidget(self)
+                self.minecraft_mods_list.setMaximumHeight(180)
+                card_layout.addWidget(self.minecraft_mods_list)
+
+                mods_buttons = QHBoxLayout()
+                self.load_server_mods_button = QPushButton("Načíst seznam modů", self)
+                self.load_server_mods_button.clicked.connect(self.load_server_mods)
+                mods_buttons.addWidget(self.load_server_mods_button)
+                self.compare_mods_button = QPushButton("Porovnat klientské mody…", self)
+                self.compare_mods_button.clicked.connect(self.choose_client_mods)
+                self.compare_mods_button.setEnabled(False)
+                mods_buttons.addWidget(self.compare_mods_button)
+                card_layout.addLayout(mods_buttons)
+
+                self.minecraft_diff_output = QPlainTextEdit(self)
+                self.minecraft_diff_output.setReadOnly(True)
+                self.minecraft_diff_output.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
+                self.minecraft_diff_output.setMaximumHeight(230)
+                card_layout.addWidget(self.minecraft_diff_output)
             layout.addWidget(card)
 
         self.servers_updated_label = QLabel("Poslední aktualizace: —")
@@ -439,7 +546,11 @@ class GameMover(QWidget):
             "unknown": "#ff6666",
         }
         try:
-            resp = requests.get(f"{FLASK_URL}/servers/status", timeout=3)
+            resp = requests.get(
+                f"{SERVER_API_URL}/servers/status",
+                headers=server_read_headers(),
+                timeout=3,
+            )
             resp.raise_for_status()
             data = resp.json()
             for server in data.get("servers", []):
@@ -463,6 +574,90 @@ class GameMover(QWidget):
                 status_label.setText("● Backend není dostupný")
                 status_label.setStyleSheet("color: #ff6666; font-weight: bold;")
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({e})")
+
+    def load_server_mods(self):
+        self.load_server_mods_button.setEnabled(False)
+        self.compare_mods_button.setEnabled(False)
+        self.minecraft_mods_summary.setText("Mody: načítám inventář…")
+        self.server_mods_thread = ServerModsThread(self)
+        self.server_mods_thread.loaded.connect(self.on_server_mods_loaded)
+        self.server_mods_thread.start()
+
+    def on_server_mods_loaded(self, payload):
+        self.load_server_mods_button.setEnabled(True)
+        error = payload.get("error")
+        if error:
+            self.minecraft_mods_summary.setText(f"Mody: chyba ({error})")
+            self.compare_mods_button.setEnabled(False)
+            return
+
+        inventory = payload["inventory"]
+        self.minecraft_mod_inventory = inventory
+        self.minecraft_mods_list.clear()
+        for jar in inventory.get("jars", []):
+            mods = jar.get("mods", [])
+            labels = []
+            for mod in mods:
+                version = mod.get("version", "")
+                labels.append(f"{mod.get('id', '?')} {version}".strip())
+            self.minecraft_mods_list.addItem(f"{jar.get('filename', '?')}  —  {', '.join(labels)}")
+        count = inventory.get("jar_count", len(inventory.get("jars", [])))
+        self.minecraft_mods_summary.setText(f"Mody na serveru: {count} JAR souborů")
+        self.compare_mods_button.setEnabled(True)
+
+    def choose_client_mods(self):
+        path = QFileDialog.getExistingDirectory(self, "Vyber klientský adresář mods", os.path.expanduser("~"))
+        if not path:
+            return
+        self.compare_mods_button.setEnabled(False)
+        self.minecraft_diff_output.setPlainText(f"Prohledávám {path}…")
+        self.compare_mods_thread = CompareModsThread(self.minecraft_mod_inventory, path)
+        self.compare_mods_thread.compared.connect(self.on_mods_compared)
+        self.compare_mods_thread.start()
+
+    def on_mods_compared(self, payload):
+        self.compare_mods_button.setEnabled(self.minecraft_mod_inventory is not None)
+        error = payload.get("error")
+        if error:
+            self.minecraft_diff_output.setPlainText(f"Porovnání selhalo: {error}")
+            return
+
+        result = payload["result"]
+        lines = [
+            f"Server: {result['server_jar_count']} JAR, klient: {result['client_jar_count']} JAR",
+            "",
+        ]
+        sections = (
+            ("CHYBÍ NA KLIENTOVI", "missing"),
+            ("JINÁ VERZE", "version_mismatch"),
+            ("JINÝ OBSAH STEJNÉ VERZE", "content_mismatch"),
+            ("NAVÍC NA KLIENTOVI", "extra"),
+        )
+        problem_count = 0
+        for title, key in sections:
+            items = result.get(key, [])
+            problem_count += len(items) if key != "extra" else 0
+            lines.append(f"{title} ({len(items)}):")
+            if not items:
+                lines.append("  —")
+            for item in items:
+                if key == "version_mismatch":
+                    lines.append(
+                        f"  {item['id']}: server {item['server_version']} / klient {item['client_version']}"
+                    )
+                elif key == "content_mismatch":
+                    lines.append(
+                        f"  {item['id']}: {item['server_file']} / {item['client_file']}"
+                    )
+                else:
+                    version = f" {item.get('version')}" if item.get("version") else ""
+                    lines.append(f"  {item['id']}{version} ({item['file']})")
+            lines.append("")
+        if problem_count == 0:
+            lines.insert(0, "Nenalezen žádný chybějící mod ani rozdíl verze/obsahu.\n")
+        else:
+            lines.insert(0, f"Nalezeno {problem_count} potenciálních problémů.\n")
+        self.minecraft_diff_output.setPlainText("\n".join(lines))
 
     def update_disk_bars(self):
         for path, bar in [("/var/Games", self.var_bar), (f"/home/{self.user}", self.home_bar)]:

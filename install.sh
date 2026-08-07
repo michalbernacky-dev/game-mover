@@ -14,6 +14,7 @@ APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
 LOCAL_ADMIN_DIR="/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH="${LOCAL_ADMIN_DIR}/api.token"
+READ_TOKEN_PATH="${LOCAL_ADMIN_DIR}/read.token"
 GROUP_NAME="gemers"
 RESTART_SERVICE=1
 AUTOSTART=0
@@ -62,6 +63,12 @@ ensure_local_admin_token() {
   fi
   chown root:"${GROUP_NAME}" "${LOCAL_ADMIN_TOKEN_PATH}"
   chmod 0640 "${LOCAL_ADMIN_TOKEN_PATH}"
+  if [[ ! -f "${READ_TOKEN_PATH}" ]]; then
+    token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    printf '%s\n' "${token}" > "${READ_TOKEN_PATH}"
+  fi
+  chown root:"${GROUP_NAME}" "${READ_TOKEN_PATH}"
+  chmod 0640 "${READ_TOKEN_PATH}"
 }
 
 echo "[1/8] Kopíruji aplikaci do ${INSTALL_DIR}"
@@ -69,12 +76,14 @@ mkdir -p "${INSTALL_DIR}"
 rsync -a --delete \
   --include='/game_mover_flask.py' \
   --include='/game_mover.py' \
+  --include='/game_mover_mods.py' \
   --include='/game-mover' \
   --include='/requirements.txt' \
   --include='/game_mover_logo.jpg' \
   --exclude='*' \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
+chmod 0644 "${INSTALL_DIR}/game_mover_mods.py"
 
 echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"
 systemctl disable --now "${LEGACY_SERVICE_NAME}" >/dev/null 2>&1 || true

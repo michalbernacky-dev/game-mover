@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -40,6 +40,7 @@ mkdir -p %{buildroot}/opt/game_mover
 
 install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flask.py
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
+install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 requirements.txt %{buildroot}/opt/game_mover/requirements.txt
 install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo.jpg
@@ -62,6 +63,13 @@ fi
 chgrp gemers /etc/game_mover/api.token || :
 chmod 0640 /etc/game_mover/api.token || :
 
+if [ ! -f /etc/game_mover/read.token ]; then
+    token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+    printf '%s\n' "$token" > /etc/game_mover/read.token
+fi
+chgrp gemers /etc/game_mover/read.token || :
+chmod 0640 /etc/game_mover/read.token || :
+
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
 chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
@@ -73,6 +81,7 @@ chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
 %systemd_postun_with_restart game_mover.service
 if [ "$1" -eq 0 ]; then
     rm -f /etc/game_mover/api.token || :
+    rm -f /etc/game_mover/read.token || :
     rmdir /etc/game_mover 2>/dev/null || :
 fi
 
@@ -81,6 +90,7 @@ fi
 %dir /opt/game_mover
 /opt/game_mover/game_mover_flask.py
 /opt/game_mover/game_mover.py
+/opt/game_mover/game_mover_mods.py
 /opt/game_mover/game-mover
 /opt/game_mover/requirements.txt
 /opt/game_mover/game_mover_logo.jpg
@@ -89,5 +99,8 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Fri Aug 07 2026 Game Mover Packager <packager@example.invalid> - 0.2.0-1
+- Add remote Minecraft mod inventory and client comparison
+
 * Sat Feb 14 2026 Game Mover Packager <packager@example.invalid> - 0.1.0-1
 - Initial RPM packaging

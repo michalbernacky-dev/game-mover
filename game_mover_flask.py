@@ -15,6 +15,8 @@ import secrets
 import datetime
 import sys
 
+from game_mover_mods import scan_mod_directory
+
 app = Flask(__name__)
 
 # ------------------------------------------------------------
@@ -25,6 +27,9 @@ GROUP_NAME = "gemers"
 LOCAL_ADMIN_TOKEN_DIR = "/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "api.token")
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
+READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.token")
+READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
+MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
 
 # Názvy jednotek lze na konkrétním stroji změnit pomocí proměnných
 # prostředí v systemd override pro game_mover.service.
@@ -192,6 +197,31 @@ def load_local_admin_token():
 
 ensure_local_admin_token()
 
+
+def ensure_read_token():
+    token_dir = os.path.dirname(READ_TOKEN_PATH)
+    os.makedirs(token_dir, exist_ok=True)
+    if not os.path.exists(READ_TOKEN_PATH):
+        with open(READ_TOKEN_PATH, "w") as f:
+            f.write(secrets.token_hex(32) + "\n")
+    try:
+        gid = grp.getgrnam(GROUP_NAME).gr_gid
+        os.chown(READ_TOKEN_PATH, 0, gid)
+        os.chmod(READ_TOKEN_PATH, 0o640)
+    except Exception as e:
+        print(f"Permission setup error for read token: {e}")
+
+
+def load_read_token():
+    try:
+        with open(READ_TOKEN_PATH, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+ensure_read_token()
+
 def find_gog_prefix_dir(user, game_name):
     """
     Najde prefix (~/Games/gog/<prefix>) podle hry, která je uvnitř drive_c/GOG Games/<game_name>
@@ -210,6 +240,24 @@ def require_local_admin(req):
     token = req.headers.get(LOCAL_ADMIN_TOKEN_HEADER) or (req.json or {}).get("token")
     expected = load_local_admin_token()
     return bool(token and expected and secrets.compare_digest(token, expected))
+
+
+def require_read_access(req):
+    token = req.headers.get(READ_TOKEN_HEADER)
+    expected = load_read_token()
+    return bool(token and expected and secrets.compare_digest(token, expected))
+
+
+@app.before_request
+def restrict_remote_api():
+    """A remotely bound instance exposes only authenticated read-only server data."""
+    if request.remote_addr in ("127.0.0.1", "::1"):
+        return None
+    if request.path not in ("/servers/status", "/servers/minecraft/mods"):
+        return jsonify({"message": "Remote access is limited to server status endpoints"}), 403
+    if not require_read_access(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    return None
 
 # ------------------------------------------------------------
 # Systemctl helpers
@@ -773,6 +821,22 @@ def servers_status():
     })
 
 
+@app.route("/servers/minecraft/mods", methods=["GET"])
+def minecraft_mods():
+    if not require_read_access(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    try:
+        inventory = scan_mod_directory(MINECRAFT_MODS_DIR)
+    except FileNotFoundError as e:
+        return jsonify({"message": str(e)}), 404
+    except PermissionError:
+        return jsonify({"message": f"Nelze číst {MINECRAFT_MODS_DIR}"}), 403
+    except Exception as e:
+        return jsonify({"message": f"Inventář modů selhal: {e}"}), 500
+    inventory["updated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+    return jsonify(inventory)
+
+
 @app.route("/dnsmasq/status", methods=["GET"])
 def dnsmasq_status():
     rc, status, err = systemctl_is_active("dnsmasq")
@@ -982,4 +1046,8 @@ def timekpr_reset_today():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(
+        host=os.getenv("GAME_MOVER_BIND_HOST", "127.0.0.1"),
+        port=int(os.getenv("GAME_MOVER_PORT", "5000")),
+        debug=False,
+    )
