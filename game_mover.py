@@ -236,24 +236,26 @@ class MoveThread(QThread):
 class ServerModsThread(QThread):
     loaded = pyqtSignal(dict)
 
-    def __init__(self, server_url, headers):
+    def __init__(self, server_url, headers, server_id):
         super().__init__()
         self.server_url = server_url
         self.headers = headers
+        self.server_id = server_id
 
     def run(self):
         try:
             resp = requests.get(
                 f"{self.server_url}/servers/minecraft/mods",
                 headers=self.headers,
+                params={"server_id": self.server_id},
                 timeout=60,
             )
             data = resp.json()
             if resp.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {resp.status_code}"))
-            self.loaded.emit({"inventory": data})
+            self.loaded.emit({"inventory": data, "server_id": self.server_id})
         except Exception as e:
-            self.loaded.emit({"error": str(e)})
+            self.loaded.emit({"error": str(e), "server_id": self.server_id})
 
 
 class CompareModsThread(QThread):
@@ -588,6 +590,35 @@ class GameMover(QWidget):
         self.server_profile_test_button.clicked.connect(self.test_server_profile)
         registry_actions.addWidget(self.server_profile_test_button)
         layout.addLayout(registry_actions)
+
+        self.local_services_label = QLabel("Sledované služby tohoto počítače")
+        layout.addWidget(self.local_services_label)
+        self.local_services_table = QTableWidget(self)
+        self.local_services_table.setColumnCount(5)
+        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "systemd služba", "Typ", "Adresář mods"])
+        self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.local_services_table.setFixedHeight(190)
+        services_header = self.local_services_table.horizontalHeader()
+        services_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        services_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(4, QHeaderView.Stretch)
+        layout.addWidget(self.local_services_table)
+        services_actions = QHBoxLayout()
+        self.local_services_refresh = QPushButton("Načíst", self)
+        self.local_services_refresh.clicked.connect(self.load_local_services)
+        services_actions.addWidget(self.local_services_refresh)
+        self.local_services_add = QPushButton("Přidat službu", self)
+        self.local_services_add.clicked.connect(self.add_local_service_row)
+        services_actions.addWidget(self.local_services_add)
+        self.local_services_remove = QPushButton("Smazat vybranou", self)
+        self.local_services_remove.clicked.connect(self.remove_local_service_rows)
+        services_actions.addWidget(self.local_services_remove)
+        self.local_services_save = QPushButton("Uložit služby", self)
+        self.local_services_save.clicked.connect(self.save_local_services)
+        services_actions.addWidget(self.local_services_save)
+        layout.addLayout(services_actions)
         layout.addStretch()
 
         self.server_registry_widgets = [
@@ -597,6 +628,7 @@ class GameMover(QWidget):
         ]
         self.set_server_registry_enabled(False)
         self.reload_server_profile_combo()
+        self.update_server_mode_ui()
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Připojení")
 
@@ -616,85 +648,47 @@ class GameMover(QWidget):
         self.endpoint_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.endpoint_label)
 
-        self.server_status_widgets = {}
-        for server_id, name, service in (
-            ("minecraft", "Minecraft", "forge-srv.service"),
-            ("satisfactory", "Satisfactory", "satisfactory.service"),
-        ):
-            card = QFrame(self)
-            card.setFrameShape(QFrame.StyledPanel)
-            card_layout = QVBoxLayout(card)
+        self.server_cards_widget = QWidget(content)
+        self.server_cards_layout = QVBoxLayout(self.server_cards_widget)
+        self.server_cards_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.server_cards_widget)
 
-            name_label = QLabel(name)
-            name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-            card_layout.addWidget(name_label)
-
-            status_label = QLabel("● Načítám…")
-            card_layout.addWidget(status_label)
-            service_label = QLabel(service)
-            service_label.setStyleSheet("color: #aab7c0;")
-            card_layout.addWidget(service_label)
-
-            self.server_status_widgets[server_id] = (status_label, service_label)
-
-            if server_id == "minecraft":
-                self.minecraft_mods_summary = QLabel("Mody: dosud nenačteny")
-                card_layout.addWidget(self.minecraft_mods_summary)
-                self.minecraft_mods_table = QTableWidget(self)
-                self.minecraft_mods_table.setColumnCount(3)
-                self.minecraft_mods_table.setHorizontalHeaderLabels(
-                    ["Název", "Verze", "JAR soubor"]
-                )
-                self.minecraft_mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-                self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-                self.minecraft_mods_table.setAlternatingRowColors(True)
-                self.minecraft_mods_table.setSortingEnabled(True)
-                self.minecraft_mods_table.setStyleSheet("""
-                    QTableWidget {
-                        background-color: #12212a;
-                        alternate-background-color: #182b36;
-                        color: #ced8de;
-                        gridline-color: #304550;
-                        selection-background-color: #31566b;
-                        selection-color: #e3eaee;
-                    }
-                    QTableWidget::item {
-                        padding: 3px;
-                    }
-                    QHeaderView::section {
-                        background-color: #20323c;
-                        color: #c4cfd5;
-                        border: 0;
-                        border-right: 1px solid #3a4c56;
-                        border-bottom: 1px solid #3a4c56;
-                        padding: 4px;
-                    }
-                """)
-                self.minecraft_mods_table.verticalHeader().setVisible(False)
-                header = self.minecraft_mods_table.horizontalHeader()
-                header.setSectionResizeMode(0, QHeaderView.Interactive)
-                header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-                header.setSectionResizeMode(2, QHeaderView.Stretch)
-                self.minecraft_mods_table.setColumnWidth(0, 260)
-                self.minecraft_mods_table.setFixedHeight(220)
-                card_layout.addWidget(self.minecraft_mods_table)
-
-                mods_buttons = QHBoxLayout()
-                self.load_server_mods_button = QPushButton("Načíst seznam modů", self)
-                self.load_server_mods_button.clicked.connect(self.load_server_mods)
-                mods_buttons.addWidget(self.load_server_mods_button)
-                self.compare_mods_button = QPushButton("Porovnat klientské mody…", self)
-                self.compare_mods_button.clicked.connect(self.choose_client_mods)
-                self.compare_mods_button.setEnabled(False)
-                mods_buttons.addWidget(self.compare_mods_button)
-                card_layout.addLayout(mods_buttons)
-
-                self.minecraft_diff_output = QPlainTextEdit(self)
-                self.minecraft_diff_output.setReadOnly(True)
-                self.minecraft_diff_output.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
-                self.minecraft_diff_output.setFixedHeight(120)
-                card_layout.addWidget(self.minecraft_diff_output)
-            layout.addWidget(card)
+        self.minecraft_details = QFrame(content)
+        self.minecraft_details.setFrameShape(QFrame.StyledPanel)
+        minecraft_layout = QVBoxLayout(self.minecraft_details)
+        self.minecraft_mods_summary = QLabel("Vyber Minecraft server a načti jeho mody.")
+        minecraft_layout.addWidget(self.minecraft_mods_summary)
+        self.minecraft_mods_table = QTableWidget(self)
+        self.minecraft_mods_table.setColumnCount(3)
+        self.minecraft_mods_table.setHorizontalHeaderLabels(["Název", "Verze", "JAR soubor"])
+        self.minecraft_mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.minecraft_mods_table.setAlternatingRowColors(True)
+        self.minecraft_mods_table.setSortingEnabled(True)
+        self.minecraft_mods_table.verticalHeader().setVisible(False)
+        mods_header = self.minecraft_mods_table.horizontalHeader()
+        mods_header.setSectionResizeMode(0, QHeaderView.Interactive)
+        mods_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        mods_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.minecraft_mods_table.setColumnWidth(0, 260)
+        self.minecraft_mods_table.setFixedHeight(220)
+        minecraft_layout.addWidget(self.minecraft_mods_table)
+        mods_actions = QHBoxLayout()
+        self.load_server_mods_button = QPushButton("Znovu načíst mody", self)
+        self.load_server_mods_button.clicked.connect(self.reload_selected_server_mods)
+        mods_actions.addWidget(self.load_server_mods_button)
+        self.compare_mods_button = QPushButton("Porovnat klientské mody…", self)
+        self.compare_mods_button.clicked.connect(self.choose_client_mods)
+        self.compare_mods_button.setEnabled(False)
+        mods_actions.addWidget(self.compare_mods_button)
+        minecraft_layout.addLayout(mods_actions)
+        self.minecraft_diff_output = QPlainTextEdit(self)
+        self.minecraft_diff_output.setReadOnly(True)
+        self.minecraft_diff_output.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
+        self.minecraft_diff_output.setFixedHeight(120)
+        minecraft_layout.addWidget(self.minecraft_diff_output)
+        self.minecraft_details.setVisible(False)
+        layout.addWidget(self.minecraft_details)
 
         self.servers_updated_label = QLabel("Poslední aktualizace: —")
         layout.addWidget(self.servers_updated_label)
@@ -711,9 +705,93 @@ class GameMover(QWidget):
         self.app_mode = self.app_mode_combo.itemData(index)
         self.client_config["app_mode"] = self.app_mode
         save_client_config(self.client_config)
-        self.endpoint_label.setText(
-            "Zdroj: místní server" if self.app_mode == "server" else f"Zdroj: {self.server_api_url()}"
+        self.update_server_mode_ui()
+        self.refresh_server_statuses()
+
+    def update_server_mode_ui(self):
+        server_mode = self.app_mode == "server"
+        self.endpoint_label.setText("Zdroj: místní server" if server_mode else f"Zdroj: {self.server_api_url()}")
+        self.local_services_label.setText(
+            "Sledované služby tohoto počítače" if server_mode
+            else "Správa služeb je dostupná jen v režimu Server."
         )
+        authenticated = bool(self.timekpr_token)
+        for widget in self.server_registry_widgets:
+            widget.setEnabled(not server_mode and authenticated)
+        enabled = server_mode and authenticated
+        for widget in (
+            self.local_services_table, self.local_services_refresh, self.local_services_add,
+            self.local_services_remove, self.local_services_save,
+        ):
+            widget.setEnabled(enabled)
+        if server_mode and self.timekpr_token:
+            self.load_local_services()
+
+    def local_pam_headers(self):
+        return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
+
+    def load_local_services(self):
+        if self.app_mode != "server" or not self.timekpr_token:
+            return
+        try:
+            response = requests.get(f"{FLASK_URL}/servers/config", headers=self.local_pam_headers(), timeout=5)
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.local_services_table.setRowCount(0)
+            for service in data.get("servers", []):
+                self.add_local_service_row(service)
+        except Exception as error:
+            QMessageBox.critical(self, "Služby", f"Načtení služeb selhalo: {error}")
+
+    def add_local_service_row(self, service=None):
+        service = service if isinstance(service, dict) else {}
+        row = self.local_services_table.rowCount()
+        self.local_services_table.insertRow(row)
+        defaults = (
+            service.get("id", f"server-{int(time.time() * 1000)}"),
+            service.get("name", "Nový server"),
+            service.get("service", "server.service"),
+            service.get("kind", "generic"),
+            service.get("mods_dir", ""),
+        )
+        for column, value in enumerate(defaults):
+            self.local_services_table.setItem(row, column, QTableWidgetItem(str(value)))
+
+    def remove_local_service_rows(self):
+        rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
+        for row in rows:
+            self.local_services_table.removeRow(row)
+
+    def save_local_services(self):
+        if self.app_mode != "server" or not self.timekpr_token:
+            QMessageBox.warning(self, "Služby", "Přepni na Server a ověř se ve Timekpr.")
+            return
+        servers = []
+        for row in range(self.local_services_table.rowCount()):
+            values = []
+            for column in range(5):
+                item = self.local_services_table.item(row, column)
+                values.append(item.text().strip() if item else "")
+            server_id, name, service_name, kind, mods_dir = values
+            kind = kind.lower()
+            entry = {"id": server_id, "name": name, "service": service_name, "kind": kind}
+            if kind == "minecraft":
+                entry["mods_dir"] = mods_dir
+            servers.append(entry)
+        try:
+            response = requests.put(
+                f"{FLASK_URL}/servers/config", json={"servers": servers},
+                headers=self.local_pam_headers(), timeout=8,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            QMessageBox.information(self, "Služby", "Seznam služeb byl uložen.")
+            self.load_local_services()
+            self.refresh_server_statuses()
+        except Exception as error:
+            QMessageBox.critical(self, "Služby", f"Uložení služeb selhalo: {error}")
 
     def set_server_registry_enabled(self, enabled):
         for widget in getattr(self, "server_registry_widgets", []):
@@ -745,7 +823,9 @@ class GameMover(QWidget):
         self.server_profile_address.setText(host)
         self.server_profile_port.setValue(port)
         self.server_profile_token.setText(profile.get("read_token", ""))
-        self.endpoint_label.setText(f"Zdroj: {self.server_api_url()}")
+        self.endpoint_label.setText(
+            "Zdroj: místní server" if self.app_mode == "server" else f"Zdroj: {self.server_api_url()}"
+        )
 
     def on_server_profile_changed(self, index):
         profile_id = self.server_profile_combo.itemData(index)
@@ -806,50 +886,106 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "Servery", f"Spojení selhalo: {error}")
 
     # ----------------- pomocné -----------------
-    def refresh_server_statuses(self):
+    def server_request_target(self):
+        if self.app_mode == "server":
+            return FLASK_URL, {}
+        return self.server_api_url(), server_read_headers(self.active_server_profile())
+
+    def clear_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def render_server_cards(self, servers):
+        self.clear_layout(self.server_cards_layout)
         colors = {
-            "active": "#66cc66",
-            "activating": "#ffcc66",
-            "deactivating": "#ffcc66",
-            "inactive": "#aaaaaa",
-            "failed": "#ff6666",
-            "unknown": "#ff6666",
+            "active": "#66cc66", "activating": "#ffcc66", "deactivating": "#ffcc66",
+            "inactive": "#aaaaaa", "failed": "#ff6666", "unknown": "#ff6666",
         }
-        try:
-            resp = requests.get(
-                f"{self.server_api_url()}/servers/status",
-                headers=server_read_headers(self.active_server_profile()),
-                timeout=3,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            for server in data.get("servers", []):
-                widgets = self.server_status_widgets.get(server.get("id"))
-                if not widgets:
-                    continue
-                status_label, service_label = widgets
-                status = server.get("status", "unknown")
-                message = server.get("message", "Neznámý stav")
-                status_label.setText(f"● {message}")
-                status_label.setStyleSheet(
-                    f"color: {colors.get(status, '#ff6666')}; font-weight: bold;"
+        for server in servers:
+            card = QFrame(self.server_cards_widget)
+            card.setFrameShape(QFrame.StyledPanel)
+            card_layout = QVBoxLayout(card)
+            name_label = QLabel(server.get("name", server.get("service", "Server")))
+            name_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            card_layout.addWidget(name_label)
+            status = server.get("status", "unknown")
+            status_label = QLabel(f"● {server.get('message', 'Neznámý stav')}")
+            status_label.setStyleSheet(f"color: {colors.get(status, '#ff6666')}; font-weight: bold;")
+            card_layout.addWidget(status_label)
+            service_label = QLabel(server.get("service", ""))
+            service_label.setStyleSheet("color: #aab7c0;")
+            card_layout.addWidget(service_label)
+            actions = QHBoxLayout()
+            if server.get("kind") == "minecraft":
+                mods_button = QPushButton("Mody a porovnání", card)
+                mods_button.clicked.connect(
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Minecraft"):
+                    self.load_server_mods(server_id, name)
                 )
-                service_label.setText(server.get("service", ""))
+                actions.addWidget(mods_button)
+            if self.app_mode == "server":
+                stop_button = QPushButton("Vypnout", card)
+                stop_button.setEnabled(bool(self.timekpr_token) and status in ("active", "activating"))
+                stop_button.clicked.connect(
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"):
+                    self.stop_local_server(server_id, name)
+                )
+                actions.addWidget(stop_button)
+            if actions.count():
+                card_layout.addLayout(actions)
+            self.server_cards_layout.addWidget(card)
+        self.server_cards_layout.addStretch()
+
+    def refresh_server_statuses(self):
+        base_url, headers = self.server_request_target()
+        try:
+            response = requests.get(f"{base_url}/servers/status", headers=headers, timeout=3)
+            response.raise_for_status()
+            data = response.json()
+            self.render_server_cards(data.get("servers", []))
             updated_at = data.get("updated_at", "")
             if updated_at:
                 updated_at = updated_at.replace("T", " ").split("+")[0]
             self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
-        except Exception as e:
-            for status_label, _service_label in self.server_status_widgets.values():
-                status_label.setText("● Backend není dostupný")
-                status_label.setStyleSheet("color: #ff6666; font-weight: bold;")
-            self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({e})")
+        except Exception as error:
+            self.render_server_cards([])
+            self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
 
-    def load_server_mods(self):
+    def stop_local_server(self, server_id, name):
+        if self.app_mode != "server" or not self.timekpr_token:
+            return
+        answer = QMessageBox.question(self, "Vypnout server", f"Opravdu vypnout {name}?")
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/servers/stop", json={"id": server_id, "token": self.timekpr_token},
+                headers=self.local_pam_headers(), timeout=15,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            QMessageBox.information(self, "Server", data.get("message", "Server zastaven."))
+            self.refresh_server_statuses()
+        except Exception as error:
+            QMessageBox.critical(self, "Server", f"Vypnutí selhalo: {error}")
+
+    def reload_selected_server_mods(self):
+        if getattr(self, "selected_minecraft_server_id", ""):
+            self.load_server_mods(self.selected_minecraft_server_id, self.selected_minecraft_server_name)
+
+    def load_server_mods(self, server_id, server_name):
+        self.selected_minecraft_server_id = server_id
+        self.selected_minecraft_server_name = server_name
+        self.minecraft_details.setVisible(True)
         self.load_server_mods_button.setEnabled(False)
         self.compare_mods_button.setEnabled(False)
-        self.minecraft_mods_summary.setText("Mody: načítám inventář…")
-        self.server_mods_thread = ServerModsThread(self.server_api_url(), server_read_headers(self.active_server_profile()))
+        self.minecraft_mods_summary.setText(f"{server_name}: načítám inventář modů…")
+        base_url, headers = self.server_request_target()
+        self.server_mods_thread = ServerModsThread(base_url, headers, server_id)
         self.server_mods_thread.loaded.connect(self.on_server_mods_loaded)
         self.server_mods_thread.start()
 
@@ -860,21 +996,15 @@ class GameMover(QWidget):
             self.minecraft_mods_summary.setText(f"Mody: chyba ({error})")
             self.compare_mods_button.setEnabled(False)
             return
-
         inventory = payload["inventory"]
         self.minecraft_mod_inventory = inventory
         self.minecraft_mods_table.setSortingEnabled(False)
         self.minecraft_mods_table.setRowCount(0)
         for jar in inventory.get("jars", []):
-            mods = jar.get("mods", [])
-            for mod in mods:
+            for mod in jar.get("mods", []):
                 row = self.minecraft_mods_table.rowCount()
                 self.minecraft_mods_table.insertRow(row)
-                values = (
-                    mod.get("name", ""),
-                    mod.get("version", ""),
-                    jar.get("filename", "?"),
-                )
+                values = (mod.get("name", ""), mod.get("version", ""), jar.get("filename", "?"))
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(str(value))
                     item.setToolTip(str(value))
@@ -882,7 +1012,7 @@ class GameMover(QWidget):
         self.minecraft_mods_table.setSortingEnabled(True)
         self.minecraft_mods_table.sortItems(0, Qt.AscendingOrder)
         count = inventory.get("jar_count", len(inventory.get("jars", [])))
-        self.minecraft_mods_summary.setText(f"Mody na serveru: {count} JAR souborů")
+        self.minecraft_mods_summary.setText(f"{self.selected_minecraft_server_name}: {count} JAR souborů")
         self.compare_mods_button.setEnabled(True)
 
     def choose_client_mods(self):
@@ -901,17 +1031,11 @@ class GameMover(QWidget):
         if error:
             self.minecraft_diff_output.setPlainText(f"Porovnání selhalo: {error}")
             return
-
         result = payload["result"]
-        lines = [
-            f"Server: {result['server_jar_count']} JAR, klient: {result['client_jar_count']} JAR",
-            "",
-        ]
+        lines = [f"Server: {result['server_jar_count']} JAR, klient: {result['client_jar_count']} JAR", ""]
         sections = (
-            ("CHYBÍ NA KLIENTOVI", "missing"),
-            ("JINÁ VERZE", "version_mismatch"),
-            ("JINÝ OBSAH STEJNÉ VERZE", "content_mismatch"),
-            ("NAVÍC NA KLIENTOVI", "extra"),
+            ("CHYBÍ NA KLIENTOVI", "missing"), ("JINÁ VERZE", "version_mismatch"),
+            ("JINÝ OBSAH STEJNÉ VERZE", "content_mismatch"), ("NAVÍC NA KLIENTOVI", "extra"),
         )
         problem_count = 0
         for title, key in sections:
@@ -922,21 +1046,15 @@ class GameMover(QWidget):
                 lines.append("  —")
             for item in items:
                 if key == "version_mismatch":
-                    lines.append(
-                        f"  {item['id']}: server {item['server_version']} / klient {item['client_version']}"
-                    )
+                    lines.append(f"  {item['id']}: server {item['server_version']} / klient {item['client_version']}")
                 elif key == "content_mismatch":
-                    lines.append(
-                        f"  {item['id']}: {item['server_file']} / {item['client_file']}"
-                    )
+                    lines.append(f"  {item['id']}: {item['server_file']} / {item['client_file']}")
                 else:
                     version = f" {item.get('version')}" if item.get("version") else ""
                     lines.append(f"  {item['id']}{version} ({item['file']})")
             lines.append("")
-        if problem_count == 0:
-            lines.insert(0, "Nenalezen žádný chybějící mod ani rozdíl verze/obsahu.\n")
-        else:
-            lines.insert(0, f"Nalezeno {problem_count} potenciálních problémů.\n")
+        prefix = "Nenalezen žádný chybějící mod ani rozdíl verze/obsahu." if problem_count == 0 else f"Nalezeno {problem_count} potenciálních problémů."
+        lines.insert(0, prefix + "\n")
         self.minecraft_diff_output.setPlainText("\n".join(lines))
 
     def update_disk_bars(self):
@@ -1274,6 +1392,8 @@ class GameMover(QWidget):
                 self.timekpr_status_label.setText(f"Odemčeno ({username}, mode: {mode_label})")
                 self.set_timekpr_controls_enabled(True)
                 self.set_server_registry_enabled(True)
+                self.update_server_mode_ui()
+                self.refresh_server_statuses()
                 self.fetch_day_plan()
             else:
                 detail = data.get("error") or "server nevrátil podporovaný mód"

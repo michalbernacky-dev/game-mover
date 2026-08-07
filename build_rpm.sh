@@ -14,7 +14,7 @@ if [[ -z "${version}" ]]; then
   exit 1
 fi
 
-topdir="${TMPDIR:-/tmp}/game-mover-rpmbuild"
+topdir="${TMPDIR:-/tmp}/game-mover-rpmbuild-${UID}"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "${tmpdir}"' EXIT
 

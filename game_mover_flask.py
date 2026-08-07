@@ -58,8 +58,11 @@ def save_game_servers(servers):
     with open(temporary_path, "w") as config_file:
         json.dump(servers, config_file, indent=2)
         config_file.write("\n")
-    os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
-    os.chmod(temporary_path, 0o640)
+    try:
+        os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
+        os.chmod(temporary_path, 0o640)
+    except (KeyError, PermissionError):
+        os.chmod(temporary_path, 0o600)
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
 
 
@@ -905,7 +908,7 @@ def servers_stop():
 
 @app.route("/servers/minecraft/mods", methods=["GET"])
 def minecraft_mods():
-    if not require_read_access(request):
+    if request.remote_addr not in ("127.0.0.1", "::1") and not require_read_access(request):
         return jsonify({"message": "Unauthorized"}), 403
     server = find_game_server(request.args.get("server_id", "minecraft"))
     if not server or server.get("kind") != "minecraft":

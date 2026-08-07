@@ -61,6 +61,17 @@ used only for the two remote read-only endpoints. Tokens entered in the registry
 are stored in `~/.config/game-mover/config.json` with file mode `0600`; do not
 enter the local `api.token` there.
 
+### Client and server modes
+
+The **Connection** tab selects either Client mode for remote read-only monitoring
+or Server mode for local administration. In Server mode, authenticate as a wheel
+user in the **Timekpr** tab, then edit the local service registry. Each row has an
+ID, display name, systemd unit, type (`generic` or `minecraft`), and an absolute
+`mods` directory for Minecraft services. Multiple Minecraft instances such as
+Forge and Pixelmon each get their own mod inventory and comparison action; for example, Pixelmon can use the `pixelmon-srv` systemd unit.
+Stopping a service is available only in Server mode after PAM authentication and
+is rejected for LAN/Tailscale requests.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -223,6 +234,16 @@ stejný HTTP port; Game Mover předvyplní `5000`. Vybraný profil používají 
 vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
 `~/.config/game-mover/config.json` s právy `0600`; nikdy sem nezadávej lokální
 `api.token`.
+
+### Režimy Klient a Server
+
+V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only dohled,
+nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
+v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
+ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`) a u
+Minecraftu absolutní cestu k adresáři `mods`. Forge a Pixelmon tak mají vlastní
+inventář i porovnání modů; například Pixelmon může používat jednotku `pixelmon-srv`. Vypnutí služby je dostupné jen lokálně v režimu Server
+po PAM ověření; požadavky z LAN/Tailscale jsou odmítnuty.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
