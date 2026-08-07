@@ -52,6 +52,15 @@ The other Game Mover tabs continue to use the local backend. Do not expose this
 Flask service directly to the public internet; use Tailscale or an equivalent
 trusted encrypted network and restrict the firewall accordingly.
 
+### Server registry in the GUI
+
+The **Servers** tab includes a local registry of server profiles. Unlock it using
+the existing wheel/PAM login in the **Timekpr** tab, then add a Local, Tailscale,
+or LAN profile with its address, port, and read token. The selected profile is
+used only for the two remote read-only endpoints. Tokens entered in the registry
+are stored in `~/.config/game-mover/config.json` with file mode `0600`; do not
+enter the local `api.token` there.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -205,6 +214,15 @@ Po `systemctl daemon-reload` a restartu služby bezpečně zkopíruj pouze
 Ostatní záložky Game Moveru dál používají místní backend. Flask službu
 nevystavuj přímo do internetu; použij Tailscale nebo obdobnou důvěryhodnou
 šifrovanou síť a podle toho omez firewall.
+
+### Registr serverů v GUI
+
+Záložka **Servery** obsahuje lokální registr profilů. Odemkni jej existujícím
+wheel/PAM přihlášením v záložce **Timekpr**, poté přidej lokální, Tailscale nebo
+LAN profil s adresou, portem a read tokenem. Vybraný profil používají jen dvě
+vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
+`~/.config/game-mover/config.json` s právy `0600`; nikdy sem nezadávej lokální
+`api.token`.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

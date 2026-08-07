@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
     QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView
+    QHeaderView, QAbstractItemView, QFormLayout
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
@@ -36,9 +36,6 @@ def load_client_config():
 
 
 CLIENT_CONFIG = load_client_config()
-SERVER_API_URL = os.getenv(
-    "GAME_MOVER_SERVER_URL", CLIENT_CONFIG.get("server_url", FLASK_URL)
-).rstrip("/")
 LOCAL_ADMIN_TOKEN_PATH = "/etc/game_mover/api.token"
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 SERVER_READ_TOKEN_PATH = os.getenv(
@@ -173,8 +170,40 @@ def load_server_read_token():
         return ""
 
 
-def server_read_headers():
-    token = load_server_read_token()
+def save_client_config(config):
+    config_dir = os.path.dirname(CLIENT_CONFIG_PATH)
+    os.makedirs(config_dir, mode=0o700, exist_ok=True)
+    os.chmod(config_dir, 0o700)
+    temporary_path = f"{CLIENT_CONFIG_PATH}.tmp"
+    with open(temporary_path, "w") as f:
+        json.dump(config, f, indent=2)
+        f.write("\n")
+    os.chmod(temporary_path, 0o600)
+    os.replace(temporary_path, CLIENT_CONFIG_PATH)
+
+
+def server_profiles(config):
+    profiles = config.get("server_profiles", [])
+    if isinstance(profiles, list) and profiles:
+        return [profile for profile in profiles if isinstance(profile, dict)]
+    return [{
+        "id": "local",
+        "name": "Lokální počítač",
+        "mode": "local",
+        "address": "127.0.0.1:5000",
+        "read_token_path": config.get("server_read_token_path", "/etc/game_mover/read.token"),
+    }]
+
+
+def server_read_headers(profile):
+    token = profile.get("read_token", "").strip()
+    token_path = profile.get("read_token_path", "")
+    if not token and token_path:
+        try:
+            with open(token_path, "r") as f:
+                token = f.read().strip()
+        except Exception:
+            token = ""
     return {SERVER_READ_TOKEN_HEADER: token} if token else {}
 
 # ------------------------------------------------------------
@@ -206,11 +235,16 @@ class MoveThread(QThread):
 class ServerModsThread(QThread):
     loaded = pyqtSignal(dict)
 
+    def __init__(self, server_url, headers):
+        super().__init__()
+        self.server_url = server_url
+        self.headers = headers
+
     def run(self):
         try:
             resp = requests.get(
-                f"{SERVER_API_URL}/servers/minecraft/mods",
-                headers=server_read_headers(),
+                f"{self.server_url}/servers/minecraft/mods",
+                headers=self.headers,
                 timeout=60,
             )
             data = resp.json()
@@ -251,6 +285,11 @@ class GameMover(QWidget):
         self.timekpra_add_flag = None
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
+        self.client_config = load_client_config()
+        self.server_profiles = server_profiles(self.client_config)
+        self.active_server_profile_id = self.client_config.get(
+            "active_server_profile", self.server_profiles[0]["id"]
+        )
         # uchovává "původní" plán pro dnešní den per-uživatel tak, jak se načetl z timekpra
         self.original_hours_today = {}
         self.minecraft_mod_inventory = None
@@ -281,6 +320,16 @@ class GameMover(QWidget):
         self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.server_refresh_timer.start(10_000)
         self.show()
+
+    def active_server_profile(self):
+        for profile in self.server_profiles:
+            if profile.get("id") == self.active_server_profile_id:
+                return profile
+        return self.server_profiles[0]
+
+    def server_api_url(self):
+        address = self.active_server_profile().get("address", "127.0.0.1:5000").strip().rstrip("/")
+        return address if address.startswith(("http://", "https://")) else f"http://{address}"
 
     def local_admin_headers(self):
         self.local_admin_token = load_local_admin_token()
@@ -477,9 +526,57 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         layout.addWidget(QLabel("Stav se automaticky obnovuje každých 10 sekund."))
-        endpoint_label = QLabel(f"Zdroj: {SERVER_API_URL}")
-        endpoint_label.setStyleSheet("color: #aab7c0;")
-        layout.addWidget(endpoint_label)
+        self.endpoint_label = QLabel(f"Zdroj: {self.server_api_url()}")
+        self.endpoint_label.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(self.endpoint_label)
+
+        registry = QFrame(self)
+        registry.setFrameShape(QFrame.StyledPanel)
+        registry_layout = QVBoxLayout(registry)
+        registry_layout.addWidget(QLabel("Registr serverů (odemkne se po ověření ve Timekpr)"))
+        profile_row = QHBoxLayout()
+        self.server_profile_combo = QComboBox(self)
+        self.server_profile_combo.currentIndexChanged.connect(self.on_server_profile_changed)
+        profile_row.addWidget(self.server_profile_combo)
+        self.server_profile_new_button = QPushButton("Nový", self)
+        self.server_profile_new_button.clicked.connect(self.new_server_profile)
+        profile_row.addWidget(self.server_profile_new_button)
+        self.server_profile_delete_button = QPushButton("Smazat", self)
+        self.server_profile_delete_button.clicked.connect(self.delete_server_profile)
+        profile_row.addWidget(self.server_profile_delete_button)
+        registry_layout.addLayout(profile_row)
+        form = QFormLayout()
+        self.server_profile_name = QLineEdit(self)
+        form.addRow("Název:", self.server_profile_name)
+        self.server_profile_mode = QComboBox(self)
+        self.server_profile_mode.addItem("Lokální", "local")
+        self.server_profile_mode.addItem("Tailscale", "tailscale")
+        self.server_profile_mode.addItem("LAN", "lan")
+        form.addRow("Režim:", self.server_profile_mode)
+        self.server_profile_address = QLineEdit(self)
+        self.server_profile_address.setPlaceholderText("100.x.y.z:5000 nebo 192.168.x.x:5000")
+        form.addRow("Adresa:", self.server_profile_address)
+        self.server_profile_token = QLineEdit(self)
+        self.server_profile_token.setEchoMode(QLineEdit.Password)
+        self.server_profile_token.setPlaceholderText("read.token ze vzdáleného serveru")
+        form.addRow("Read token:", self.server_profile_token)
+        registry_layout.addLayout(form)
+        registry_actions = QHBoxLayout()
+        self.server_profile_save_button = QPushButton("Uložit profil", self)
+        self.server_profile_save_button.clicked.connect(self.save_server_profile)
+        registry_actions.addWidget(self.server_profile_save_button)
+        self.server_profile_test_button = QPushButton("Otestovat spojení", self)
+        self.server_profile_test_button.clicked.connect(self.test_server_profile)
+        registry_actions.addWidget(self.server_profile_test_button)
+        registry_layout.addLayout(registry_actions)
+        layout.addWidget(registry)
+        self.server_registry_widgets = [
+            self.server_profile_combo, self.server_profile_new_button, self.server_profile_delete_button,
+            self.server_profile_name, self.server_profile_mode, self.server_profile_address,
+            self.server_profile_token, self.server_profile_save_button, self.server_profile_test_button,
+        ]
+        self.set_server_registry_enabled(False)
+        self.reload_server_profile_combo()
 
         self.server_status_widgets = {}
         for server_id, name, service in (
@@ -571,6 +668,91 @@ class GameMover(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Servery")
 
+    # ----------------- registr serverů -----------------
+    def set_server_registry_enabled(self, enabled):
+        for widget in getattr(self, "server_registry_widgets", []):
+            widget.setEnabled(enabled)
+
+    def reload_server_profile_combo(self):
+        self.server_profile_combo.blockSignals(True)
+        self.server_profile_combo.clear()
+        active_index = 0
+        for index, profile in enumerate(self.server_profiles):
+            self.server_profile_combo.addItem(profile.get("name", "Server"), profile.get("id"))
+            if profile.get("id") == self.active_server_profile_id:
+                active_index = index
+        self.server_profile_combo.setCurrentIndex(active_index)
+        self.server_profile_combo.blockSignals(False)
+        self.load_active_server_profile()
+
+    def load_active_server_profile(self):
+        profile = self.active_server_profile()
+        self.server_profile_name.setText(profile.get("name", ""))
+        self.server_profile_address.setText(profile.get("address", ""))
+        self.server_profile_token.setText(profile.get("read_token", ""))
+        mode_index = self.server_profile_mode.findData(profile.get("mode", "local"))
+        self.server_profile_mode.setCurrentIndex(max(mode_index, 0))
+        self.endpoint_label.setText(f"Zdroj: {self.server_api_url()}")
+
+    def on_server_profile_changed(self, index):
+        profile_id = self.server_profile_combo.itemData(index)
+        if profile_id:
+            self.active_server_profile_id = profile_id
+            self.load_active_server_profile()
+            self.refresh_server_statuses()
+
+    def new_server_profile(self):
+        profile_id = f"server-{int(time.time() * 1000)}"
+        self.server_profiles.append({"id": profile_id, "name": "Nový server", "mode": "tailscale", "address": "", "read_token": ""})
+        self.active_server_profile_id = profile_id
+        self.reload_server_profile_combo()
+
+    def delete_server_profile(self):
+        if len(self.server_profiles) == 1:
+            QMessageBox.warning(self, "Servery", "Musí zůstat alespoň jeden profil.")
+            return
+        profile = self.active_server_profile()
+        self.server_profiles = [item for item in self.server_profiles if item is not profile]
+        self.active_server_profile_id = self.server_profiles[0]["id"]
+        self.save_server_profiles()
+        self.reload_server_profile_combo()
+        self.refresh_server_statuses()
+
+    def save_server_profiles(self):
+        self.client_config["server_profiles"] = self.server_profiles
+        self.client_config["active_server_profile"] = self.active_server_profile_id
+        save_client_config(self.client_config)
+
+    def save_server_profile(self):
+        profile = self.active_server_profile()
+        address = self.server_profile_address.text().strip()
+        if not address:
+            QMessageBox.warning(self, "Servery", "Zadej adresu serveru včetně portu.")
+            return
+        profile.update({
+            "name": self.server_profile_name.text().strip() or "Server",
+            "mode": self.server_profile_mode.currentData(),
+            "address": address,
+            "read_token": self.server_profile_token.text().strip(),
+        })
+        self.save_server_profiles()
+        self.reload_server_profile_combo()
+        self.refresh_server_statuses()
+        QMessageBox.information(self, "Servery", "Profil byl uložen do uživatelské konfigurace s právy 0600.")
+
+    def test_server_profile(self):
+        profile = self.active_server_profile()
+        try:
+            response = requests.get(
+                f"{self.server_api_url()}/servers/status",
+                headers=server_read_headers(profile), timeout=5,
+            )
+            if response.status_code != 200:
+                raise RuntimeError(response.json().get("message", f"HTTP {response.status_code}"))
+            QMessageBox.information(self, "Servery", "Spojení se serverem funguje.")
+        except Exception as error:
+            QMessageBox.critical(self, "Servery", f"Spojení selhalo: {error}")
+
     # ----------------- pomocné -----------------
     def refresh_server_statuses(self):
         colors = {
@@ -583,8 +765,8 @@ class GameMover(QWidget):
         }
         try:
             resp = requests.get(
-                f"{SERVER_API_URL}/servers/status",
-                headers=server_read_headers(),
+                f"{self.server_api_url()}/servers/status",
+                headers=server_read_headers(self.active_server_profile()),
                 timeout=3,
             )
             resp.raise_for_status()
@@ -615,7 +797,7 @@ class GameMover(QWidget):
         self.load_server_mods_button.setEnabled(False)
         self.compare_mods_button.setEnabled(False)
         self.minecraft_mods_summary.setText("Mody: načítám inventář…")
-        self.server_mods_thread = ServerModsThread(self)
+        self.server_mods_thread = ServerModsThread(self.server_api_url(), server_read_headers(self.active_server_profile()))
         self.server_mods_thread.loaded.connect(self.on_server_mods_loaded)
         self.server_mods_thread.start()
 
@@ -1026,6 +1208,7 @@ class GameMover(QWidget):
                 msg = data.get("message") if isinstance(data, dict) else resp.text
                 QMessageBox.critical(self, "Timekpr", msg or "Přihlášení selhalo")
                 self.set_timekpr_controls_enabled(False)
+                self.set_server_registry_enabled(False)
                 return
             # nový login → smaž cache plánů
             self.original_hours_today = {}
@@ -1038,15 +1221,18 @@ class GameMover(QWidget):
                 mode_label = "settimeleft" if self.timekpra_mode == "settimeleft" else self.timekpra_add_flag
                 self.timekpr_status_label.setText(f"Odemčeno ({username}, mode: {mode_label})")
                 self.set_timekpr_controls_enabled(True)
+                self.set_server_registry_enabled(True)
                 self.fetch_day_plan()
             else:
                 detail = data.get("error") or "server nevrátil podporovaný mód"
                 self.timekpr_status_label.setText("Timekpr neumí přidat čas")
                 self.set_timekpr_controls_enabled(False)
+                self.set_server_registry_enabled(bool(self.timekpr_token))
                 QMessageBox.critical(self, "Timekpr", f"Přihlášení proběhlo, ale Timekpr není použitelný: {detail}")
         except Exception as e:
             QMessageBox.critical(self, "Timekpr", str(e))
             self.set_timekpr_controls_enabled(False)
+            self.set_server_registry_enabled(False)
 
     def load_timekpr_status(self):
         """Načte schopnosti timekpra z Flasku běžícího jako root, požaduje tajný klíč."""
