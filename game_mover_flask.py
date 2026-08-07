@@ -14,6 +14,7 @@ import time
 import secrets
 import datetime
 import sys
+import json
 
 from game_mover_mods import scan_mod_directory
 
@@ -30,13 +31,43 @@ LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.token")
 READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
+GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
 
-# Názvy jednotek lze na konkrétním stroji změnit pomocí proměnných
-# prostředí v systemd override pro game_mover.service.
-GAME_SERVER_SERVICES = (
-    ("minecraft", "Minecraft", os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service")),
-    ("satisfactory", "Satisfactory", os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service")),
-)
+
+def default_game_servers():
+    return [
+        {"id": "minecraft", "name": "Minecraft", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR},
+        {"id": "satisfactory", "name": "Satisfactory", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic"},
+    ]
+
+
+def load_game_servers():
+    try:
+        with open(GAME_SERVERS_CONFIG_PATH, "r") as config_file:
+            servers = json.load(config_file)
+        if isinstance(servers, list):
+            return [server for server in servers if isinstance(server, dict)]
+    except Exception:
+        pass
+    return default_game_servers()
+
+
+def save_game_servers(servers):
+    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    temporary_path = f"{GAME_SERVERS_CONFIG_PATH}.tmp"
+    with open(temporary_path, "w") as config_file:
+        json.dump(servers, config_file, indent=2)
+        config_file.write("\n")
+    os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
+    os.chmod(temporary_path, 0o640)
+    os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
+
+
+def find_game_server(server_id):
+    for server in load_game_servers():
+        if server.get("id") == server_id:
+            return server
+    return None
 
 EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton")
 EXCLUDE_LIST = {
@@ -293,7 +324,8 @@ def systemctl_stop(service_name: str):
         return 1, "", str(e)
 
 
-def game_server_status(server_id: str, label: str, service_name: str):
+def game_server_status(server):
+    service_name = server.get("service", "")
     rc, status, err = systemctl_is_active(service_name)
     messages = {
         "active": "Běží",
@@ -304,9 +336,10 @@ def game_server_status(server_id: str, label: str, service_name: str):
         "unknown": "Jednotka nenalezena",
     }
     return {
-        "id": server_id,
-        "name": label,
+        "id": server.get("id", ""),
+        "name": server.get("name", service_name),
         "service": service_name,
+        "kind": server.get("kind", "generic"),
         "status": status,
         "message": messages.get(status, err or f"Stav: {status}"),
         "error": err if rc == 127 else "",
@@ -445,6 +478,10 @@ def require_token(req):
         del TIMEKPRA_TOKENS[tok]
         return None
     return user
+
+def require_local_pam_session(req):
+    return req.remote_addr in ("127.0.0.1", "::1") and bool(require_token(req))
+
 
 
 def limit_for_today(user: str) -> Optional[int]:
@@ -816,21 +853,70 @@ def set_steam_cache():
 @app.route("/servers/status", methods=["GET"])
 def servers_status():
     return jsonify({
-        "servers": [game_server_status(*server) for server in GAME_SERVER_SERVICES],
+        "servers": [game_server_status(server) for server in load_game_servers()],
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
+
+
+@app.route("/servers/config", methods=["GET", "PUT"])
+def servers_config():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    if request.method == "GET":
+        return jsonify({"servers": load_game_servers()})
+    servers = (request.json or {}).get("servers")
+    if not isinstance(servers, list):
+        return jsonify({"message": "Invalid server list"}), 400
+    seen_ids = set()
+    validated = []
+    for server in servers:
+        if not isinstance(server, dict):
+            return jsonify({"message": "Invalid server entry"}), 400
+        server_id = str(server.get("id", "")).strip()
+        name = str(server.get("name", "")).strip()
+        service = str(server.get("service", "")).strip()
+        kind = str(server.get("kind", "generic"))
+        if not server_id or not server_id.replace("-", "").replace("_", "").isalnum() or server_id in seen_ids or not name or not service or "\n" in service or kind not in ("generic", "minecraft"):
+            return jsonify({"message": "Invalid server entry"}), 400
+        item = {"id": server_id, "name": name, "service": service, "kind": kind}
+        if kind == "minecraft":
+            mods_dir = str(server.get("mods_dir", "")).strip()
+            if not mods_dir.startswith("/"):
+                return jsonify({"message": "Minecraft needs an absolute mods directory"}), 400
+            item["mods_dir"] = mods_dir
+        validated.append(item)
+        seen_ids.add(server_id)
+    save_game_servers(validated)
+    return jsonify({"servers": validated})
+
+
+@app.route("/servers/stop", methods=["POST"])
+def servers_stop():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    server = find_game_server((request.json or {}).get("id", ""))
+    if not server:
+        return jsonify({"message": "Server not found"}), 404
+    rc, out, err = systemctl_stop(server.get("service", ""))
+    if rc == 0:
+        return jsonify({"message": f"{server.get('name')} zastaven"})
+    return jsonify({"message": err or out or "Nepodařilo se zastavit službu"}), 500
 
 
 @app.route("/servers/minecraft/mods", methods=["GET"])
 def minecraft_mods():
     if not require_read_access(request):
         return jsonify({"message": "Unauthorized"}), 403
+    server = find_game_server(request.args.get("server_id", "minecraft"))
+    if not server or server.get("kind") != "minecraft":
+        return jsonify({"message": "Minecraft server not found"}), 404
+    mods_dir = server.get("mods_dir", MINECRAFT_MODS_DIR)
     try:
-        inventory = scan_mod_directory(MINECRAFT_MODS_DIR)
+        inventory = scan_mod_directory(mods_dir)
     except FileNotFoundError as e:
         return jsonify({"message": str(e)}), 404
     except PermissionError:
-        return jsonify({"message": f"Nelze číst {MINECRAFT_MODS_DIR}"}), 403
+        return jsonify({"message": f"Nelze číst {mods_dir}"}), 403
     except Exception as e:
         return jsonify({"message": f"Inventář modů selhal: {e}"}), 500
     inventory["updated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
