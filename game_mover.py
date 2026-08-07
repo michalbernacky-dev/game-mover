@@ -11,7 +11,8 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
-    QFileDialog, QPlainTextEdit
+    QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
@@ -504,9 +505,24 @@ class GameMover(QWidget):
             if server_id == "minecraft":
                 self.minecraft_mods_summary = QLabel("Mody: dosud nenačteny")
                 card_layout.addWidget(self.minecraft_mods_summary)
-                self.minecraft_mods_list = QListWidget(self)
-                self.minecraft_mods_list.setMaximumHeight(180)
-                card_layout.addWidget(self.minecraft_mods_list)
+                self.minecraft_mods_table = QTableWidget(self)
+                self.minecraft_mods_table.setColumnCount(4)
+                self.minecraft_mods_table.setHorizontalHeaderLabels(
+                    ["Mod ID", "Název", "Verze", "JAR soubor"]
+                )
+                self.minecraft_mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+                self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+                self.minecraft_mods_table.setAlternatingRowColors(True)
+                self.minecraft_mods_table.setSortingEnabled(True)
+                self.minecraft_mods_table.verticalHeader().setVisible(False)
+                header = self.minecraft_mods_table.horizontalHeader()
+                header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+                header.setSectionResizeMode(1, QHeaderView.Interactive)
+                header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+                header.setSectionResizeMode(3, QHeaderView.Stretch)
+                self.minecraft_mods_table.setColumnWidth(1, 220)
+                self.minecraft_mods_table.setMinimumHeight(260)
+                card_layout.addWidget(self.minecraft_mods_table)
 
                 mods_buttons = QHBoxLayout()
                 self.load_server_mods_button = QPushButton("Načíst seznam modů", self)
@@ -593,14 +609,25 @@ class GameMover(QWidget):
 
         inventory = payload["inventory"]
         self.minecraft_mod_inventory = inventory
-        self.minecraft_mods_list.clear()
+        self.minecraft_mods_table.setSortingEnabled(False)
+        self.minecraft_mods_table.setRowCount(0)
         for jar in inventory.get("jars", []):
             mods = jar.get("mods", [])
-            labels = []
             for mod in mods:
-                version = mod.get("version", "")
-                labels.append(f"{mod.get('id', '?')} {version}".strip())
-            self.minecraft_mods_list.addItem(f"{jar.get('filename', '?')}  —  {', '.join(labels)}")
+                row = self.minecraft_mods_table.rowCount()
+                self.minecraft_mods_table.insertRow(row)
+                values = (
+                    mod.get("id", "?"),
+                    mod.get("name", ""),
+                    mod.get("version", ""),
+                    jar.get("filename", "?"),
+                )
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    item.setToolTip(str(value))
+                    self.minecraft_mods_table.setItem(row, column, item)
+        self.minecraft_mods_table.setSortingEnabled(True)
+        self.minecraft_mods_table.sortItems(0, Qt.AscendingOrder)
         count = inventory.get("jar_count", len(inventory.get("jars", [])))
         self.minecraft_mods_summary.setText(f"Mody na serveru: {count} JAR souborů")
         self.compare_mods_button.setEnabled(True)
