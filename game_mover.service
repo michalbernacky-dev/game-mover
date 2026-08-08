@@ -11,6 +11,8 @@ Group=gemers
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
+Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
 
 [Install]
 WantedBy=multi-user.target

@@ -17,6 +17,7 @@ import sys
 import json
 
 from game_mover_mods import scan_mod_directory
+from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
 app = Flask(__name__)
 
@@ -32,13 +33,39 @@ READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.
 READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
 GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
+PODMAN_USER = os.getenv("GAME_PLATFORM_PODMAN_USER", "gameplatform")
+PODMAN_SOCKET_PATH = os.getenv("GAME_PLATFORM_PODMAN_SOCKET", "").strip() or None
+PODMAN_DATA_ROOT = os.path.realpath(
+    os.getenv("GAME_PLATFORM_DATA_ROOT", "/var/lib/game-platform/servers")
+)
 
 
 def default_game_servers():
     return [
-        {"id": "minecraft", "name": "Minecraft", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "control_auth": "silent"},
-        {"id": "satisfactory", "name": "Satisfactory", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "control_auth": "silent"},
+        {"id": "minecraft", "name": "Minecraft", "backend": "systemd", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "control_auth": "silent"},
+        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "control_auth": "silent"},
     ]
+
+
+def normalize_game_server(server):
+    """Normalize legacy systemd entries without rewriting servers.json."""
+    item = dict(server)
+    backend = str(item.get("backend", "systemd")).strip().lower() or "systemd"
+    item["backend"] = backend
+    runtime = item.get("runtime") if isinstance(item.get("runtime"), dict) else {}
+    if backend == "systemd":
+        unit = str(runtime.get("unit") or item.get("service") or "").strip()
+        item["service"] = unit
+        item["runtime"] = {**runtime, "unit": unit}
+    elif backend == "podman":
+        container = str(runtime.get("container_name") or item.get("container") or "").strip()
+        item["container"] = container
+        item["runtime"] = {**runtime, "container_name": container}
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        if not item.get("mods_dir") and data.get("directory"):
+            relative = str(data.get("mods_relative_path", "mods")).strip() or "mods"
+            item["mods_dir"] = os.path.join(str(data["directory"]), relative)
+    return item
 
 
 def load_game_servers():
@@ -46,10 +73,10 @@ def load_game_servers():
         with open(GAME_SERVERS_CONFIG_PATH, "r") as config_file:
             servers = json.load(config_file)
         if isinstance(servers, list):
-            return [server for server in servers if isinstance(server, dict)]
+            return [normalize_game_server(server) for server in servers if isinstance(server, dict)]
     except Exception:
         pass
-    return default_game_servers()
+    return [normalize_game_server(server) for server in default_game_servers()]
 
 
 def save_game_servers(servers):
@@ -327,39 +354,45 @@ def systemctl_action(action: str, service_name: str):
         return 1, "", str(e)
 
 
-def systemctl_start(service_name: str):
-    return systemctl_action("start", service_name)
-
-
 def systemctl_stop(service_name: str):
     return systemctl_action("stop", service_name)
 
 
-def systemctl_reset_failed(service_name: str):
-    return systemctl_action("reset-failed", service_name)
-
-
 def game_server_status(server):
-    service_name = server.get("service", "")
-    rc, status, err = systemctl_is_active(service_name)
-    messages = {
-        "active": "Běží",
-        "activating": "Spouští se",
-        "deactivating": "Zastavuje se",
-        "inactive": "Neběží",
-        "failed": "Chyba",
-        "unknown": "Jednotka nenalezena",
-    }
+    backend_name = server.get("backend", "systemd")
+    runtime = server.get("runtime", {})
+    reference = (
+        runtime.get("container_name", "")
+        if backend_name == "podman"
+        else runtime.get("unit", server.get("service", ""))
+    )
+    try:
+        backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        state = backend.status(server)
+    except (KeyError, ValueError) as error:
+        state = WorkloadState(
+            status="unknown",
+            native_status="unknown",
+            message="Backend není dostupný",
+            error=str(error),
+        )
     return {
         "id": server.get("id", ""),
-        "name": server.get("name", service_name),
-        "service": service_name,
+        "name": server.get("name", reference),
+        "backend": backend_name,
+        "service": server.get("service", ""),
+        "runtime_label": f"{backend_name}: {reference}",
         "kind": server.get("kind", "generic"),
         "has_mods": bool(server.get("mods_dir")),
         "control_auth": server.get("control_auth", "silent"),
-        "status": status,
-        "message": messages.get(status, err or f"Stav: {status}"),
-        "error": err if rc == 127 else "",
+        "status": state.status,
+        "native_status": state.native_status,
+        "message": state.message,
+        "error": state.error,
     }
 
 # ------------------------------------------------------------
@@ -882,6 +915,80 @@ def servers_status():
     })
 
 
+def validate_game_server_entry(server, seen_ids):
+    if not isinstance(server, dict):
+        raise ValueError("Invalid server entry")
+
+    server_id = str(server.get("id", "")).strip()
+    name = str(server.get("name", "")).strip()
+    kind = str(server.get("kind", "generic")).strip().lower()
+    backend_name = str(server.get("backend", "systemd")).strip().lower()
+    control_auth = str(server.get("control_auth", "silent")).strip().lower()
+    if (
+        not server_id
+        or not server_id.replace("-", "").replace("_", "").isalnum()
+        or server_id in seen_ids
+        or not name
+        or len(name) > 120
+        or kind not in ("generic", "minecraft")
+        or backend_name not in ("systemd", "podman")
+        or control_auth not in ("silent", "pam")
+    ):
+        raise ValueError("Invalid server entry")
+
+    item = {
+        "id": server_id,
+        "name": name,
+        "backend": backend_name,
+        "kind": kind,
+        "control_auth": control_auth,
+    }
+    runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+    if backend_name == "systemd":
+        unit = str(runtime.get("unit") or server.get("service") or "").strip()
+        if not SYSTEMD_UNIT_RE.fullmatch(unit):
+            raise ValueError("Invalid systemd unit")
+        item["service"] = unit
+        item["runtime"] = {"unit": unit}
+    else:
+        container = str(runtime.get("container_name") or server.get("container") or "").strip()
+        if not CONTAINER_NAME_RE.fullmatch(container):
+            raise ValueError("Invalid Podman container name")
+        item["runtime"] = {"container_name": container}
+        item["management_mode"] = "adopted"
+
+    if kind == "minecraft":
+        mods_dir = str(server.get("mods_dir", "")).strip()
+        if not mods_dir.startswith("/"):
+            raise ValueError("Minecraft needs an absolute mods directory")
+        item["mods_dir"] = os.path.realpath(mods_dir)
+        if backend_name == "podman":
+            data = server.get("data") if isinstance(server.get("data"), dict) else {}
+            data_directory = os.path.realpath(
+                str(data.get("directory") or os.path.dirname(mods_dir)).strip()
+            )
+            expected_data_directory = os.path.realpath(
+                os.path.join(PODMAN_DATA_ROOT, server_id, "data")
+            )
+            expected_mods_directory = os.path.join(expected_data_directory, "mods")
+            if data_directory != expected_data_directory:
+                raise ValueError("Podman data directory must match the registered workload ID")
+            if item["mods_dir"] != expected_mods_directory:
+                raise ValueError("Podman mods directory must be the managed data/mods path")
+            item["data"] = {
+                "directory": data_directory,
+                "mods_relative_path": "mods",
+            }
+
+    connection = server.get("connection")
+    if backend_name == "podman" and isinstance(connection, dict) and connection.get("direct_port") is not None:
+        direct_port = int(connection["direct_port"])
+        if not 1 <= direct_port <= 65535:
+            raise ValueError("Invalid game port")
+        item["connection"] = {"direct_port": direct_port}
+    return item
+
+
 @app.route("/servers/config", methods=["GET", "PUT"])
 def servers_config():
     if not require_local_pam_session(request):
@@ -894,23 +1001,12 @@ def servers_config():
     seen_ids = set()
     validated = []
     for server in servers:
-        if not isinstance(server, dict):
-            return jsonify({"message": "Invalid server entry"}), 400
-        server_id = str(server.get("id", "")).strip()
-        name = str(server.get("name", "")).strip()
-        service = str(server.get("service", "")).strip()
-        kind = str(server.get("kind", "generic")).strip().lower()
-        control_auth = str(server.get("control_auth", "silent")).strip().lower()
-        if not server_id or not server_id.replace("-", "").replace("_", "").isalnum() or server_id in seen_ids or not name or not service or "\n" in service or kind not in ("generic", "minecraft") or control_auth not in ("silent", "pam"):
-            return jsonify({"message": "Invalid server entry"}), 400
-        item = {"id": server_id, "name": name, "service": service, "kind": kind, "control_auth": control_auth}
-        if kind == "minecraft":
-            mods_dir = str(server.get("mods_dir", "")).strip()
-            if not mods_dir.startswith("/"):
-                return jsonify({"message": "Minecraft needs an absolute mods directory"}), 400
-            item["mods_dir"] = mods_dir
+        try:
+            item = validate_game_server_entry(server, seen_ids)
+        except (TypeError, ValueError) as error:
+            return jsonify({"message": str(error)}), 400
         validated.append(item)
-        seen_ids.add(server_id)
+        seen_ids.add(item["id"])
     save_game_servers(validated)
     return jsonify({"servers": validated})
 
@@ -921,21 +1017,24 @@ def control_game_server(action):
         return jsonify({"message": "Server not found"}), 404
     if not require_local_server_control(request, server):
         return jsonify({"message": "Unauthorized"}), 403
-    service_name = server.get("service", "")
-    if action == "start":
-        systemctl_reset_failed(service_name)
-        rc, out, err = systemctl_start(service_name)
-        success_message = f"{server.get('name')} spuštěn"
-        failure_message = "Nepodařilo se spustit službu"
-    else:
-        rc, out, err = systemctl_stop(service_name)
-        if rc == 0:
-            systemctl_reset_failed(service_name)
-        success_message = f"{server.get('name')} zastaven"
-        failure_message = "Nepodařilo se zastavit službu"
-    if rc == 0:
-        return jsonify({"message": success_message})
-    return jsonify({"message": err or out or failure_message}), 500
+    try:
+        backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        result = getattr(backend, action)(server)
+    except (AttributeError, KeyError, ValueError) as error:
+        return jsonify({"message": str(error)}), 500
+
+    success_messages = {
+        "start": f"{server.get('name')} spuštěn",
+        "stop": f"{server.get('name')} zastaven",
+        "restart": f"{server.get('name')} restartován",
+    }
+    if result.returncode == 0:
+        return jsonify({"message": success_messages[action]})
+    return jsonify({"message": result.error or result.output or "Lifecycle operace selhala"}), 500
 
 
 @app.route("/servers/start", methods=["POST"])
@@ -946,6 +1045,11 @@ def servers_start():
 @app.route("/servers/stop", methods=["POST"])
 def servers_stop():
     return control_game_server("stop")
+
+
+@app.route("/servers/restart", methods=["POST"])
+def servers_restart():
+    return control_game_server("restart")
 
 
 @app.route("/servers/minecraft/mods", methods=["GET"])

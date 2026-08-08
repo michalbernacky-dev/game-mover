@@ -594,17 +594,19 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(6)
-        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "systemd služba", "Typ", "Adresář mods", "Ovládání"])
+        self.local_services_table.setColumnCount(8)
+        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "Backend", "Jednotka / container", "Typ", "Adresář mods", "Herní port", "Ovládání"])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
         services_header = self.local_services_table.horizontalHeader()
         services_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        services_header.setSectionResizeMode(2, QHeaderView.Stretch)
-        services_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        services_header.setSectionResizeMode(4, QHeaderView.Stretch)
-        services_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(3, QHeaderView.Stretch)
+        services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(5, QHeaderView.Stretch)
+        services_header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
         layout.addWidget(self.local_services_table)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
@@ -749,26 +751,43 @@ class GameMover(QWidget):
         service = service if isinstance(service, dict) else {}
         row = self.local_services_table.rowCount()
         self.local_services_table.insertRow(row)
+        backend = service.get("backend", "systemd")
+        runtime = service.get("runtime") if isinstance(service.get("runtime"), dict) else {}
+        reference = (
+            runtime.get("container_name", service.get("container", "mc-server"))
+            if backend == "podman"
+            else runtime.get("unit", service.get("service", "server.service"))
+        )
+        connection = service.get("connection") if isinstance(service.get("connection"), dict) else {}
         values = {
             0: service.get("id", f"server-{int(time.time() * 1000)}"),
             1: service.get("name", "Nový server"),
-            2: service.get("service", "server.service"),
-            4: service.get("mods_dir", ""),
+            3: reference,
+            5: service.get("mods_dir", ""),
+            6: connection.get("direct_port", ""),
         }
         for column, value in values.items():
-            self.local_services_table.setItem(row, column, QTableWidgetItem(str(value)))
+            item = QTableWidgetItem(str(value))
+            if column == 0:
+                item.setData(Qt.UserRole, dict(service))
+            self.local_services_table.setItem(row, column, item)
+        backend_combo = QComboBox(self.local_services_table)
+        backend_combo.addItem("systemd", "systemd")
+        backend_combo.addItem("Podman", "podman")
+        backend_combo.setCurrentIndex(max(0, backend_combo.findData(backend)))
+        self.local_services_table.setCellWidget(row, 2, backend_combo)
         kind_combo = QComboBox(self.local_services_table)
         kind_combo.addItem("Obecná", "generic")
         kind_combo.addItem("Minecraft", "minecraft")
         kind = service.get("kind", "generic")
         kind_combo.setCurrentIndex(max(0, kind_combo.findData(kind)))
-        self.local_services_table.setCellWidget(row, 3, kind_combo)
+        self.local_services_table.setCellWidget(row, 4, kind_combo)
         control_combo = QComboBox(self.local_services_table)
         control_combo.addItem("Tiché", "silent")
         control_combo.addItem("Vyžaduje PAM", "pam")
         control_auth = service.get("control_auth", "silent")
         control_combo.setCurrentIndex(max(0, control_combo.findData(control_auth)))
-        self.local_services_table.setCellWidget(row, 5, control_combo)
+        self.local_services_table.setCellWidget(row, 7, control_combo)
 
     def remove_local_service_rows(self):
         rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
@@ -785,21 +804,52 @@ class GameMover(QWidget):
                 item = self.local_services_table.item(row, column)
                 return item.text().strip() if item else ""
 
-            kind_combo = self.local_services_table.cellWidget(row, 3)
-            control_combo = self.local_services_table.cellWidget(row, 5)
+            backend_combo = self.local_services_table.cellWidget(row, 2)
+            kind_combo = self.local_services_table.cellWidget(row, 4)
+            control_combo = self.local_services_table.cellWidget(row, 7)
+            backend = backend_combo.currentData() if backend_combo else "systemd"
             kind = kind_combo.currentData() if kind_combo else "generic"
             control_auth = control_combo.currentData() if control_combo else "silent"
-            mods_dir = cell_text(4)
+            runtime_reference = cell_text(3)
+            mods_dir = cell_text(5)
+            direct_port = cell_text(6)
             if kind == "minecraft" and not mods_dir.startswith("/"):
-                QMessageBox.warning(self, "Služby", "Minecraft služba musí mít absolutní cestu k adresáři mods.")
-                self.local_services_table.setCurrentCell(row, 4)
+                QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní cestu k adresáři mods.")
+                self.local_services_table.setCurrentCell(row, 5)
                 return
-            entry = {
-                "id": cell_text(0), "name": cell_text(1), "service": cell_text(2),
+            id_item = self.local_services_table.item(row, 0)
+            original = id_item.data(Qt.UserRole) if id_item else {}
+            entry = dict(original) if isinstance(original, dict) else {}
+            entry.update({
+                "id": cell_text(0), "name": cell_text(1), "backend": backend,
                 "kind": kind, "control_auth": control_auth,
-            }
+            })
+            if backend == "systemd":
+                entry["service"] = runtime_reference
+                entry["runtime"] = {"unit": runtime_reference}
+                entry.pop("container", None)
+            else:
+                entry["runtime"] = {"container_name": runtime_reference}
+                entry.pop("service", None)
+                entry["management_mode"] = "adopted"
+                if direct_port:
+                    try:
+                        port = int(direct_port)
+                    except ValueError:
+                        QMessageBox.warning(self, "Služby", "Herní port musí být číslo.")
+                        self.local_services_table.setCurrentCell(row, 6)
+                        return
+                    entry["connection"] = {"direct_port": port}
             if kind == "minecraft":
                 entry["mods_dir"] = mods_dir
+                if backend == "podman":
+                    entry["data"] = {
+                        "directory": os.path.dirname(mods_dir),
+                        "mods_relative_path": "mods",
+                    }
+            else:
+                entry.pop("mods_dir", None)
+                entry.pop("data", None)
             servers.append(entry)
         try:
             response = requests.put(
@@ -942,7 +992,7 @@ class GameMover(QWidget):
             status_label = QLabel(f"● {server.get('message', 'Neznámý stav')}")
             status_label.setStyleSheet(f"color: {colors.get(status, '#ff6666')}; font-weight: bold;")
             card_layout.addWidget(status_label)
-            service_label = QLabel(server.get("service", ""))
+            service_label = QLabel(server.get("runtime_label", server.get("service", "")))
             service_label.setStyleSheet("color: #aab7c0;")
             card_layout.addWidget(service_label)
             actions = QHBoxLayout()
@@ -969,6 +1019,14 @@ class GameMover(QWidget):
                     self.control_local_server("start", server_id, name, auth)
                 )
                 actions.addWidget(start_button)
+                restart_button = QPushButton("Restartovat", card)
+                restart_button.setFixedWidth(120)
+                restart_button.setEnabled(can_control and status in ("active", "activating"))
+                restart_button.clicked.connect(
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
+                    self.control_local_server("restart", server_id, name, auth)
+                )
+                actions.addWidget(restart_button)
                 stop_button = QPushButton("Vypnout", card)
                 stop_button.setFixedWidth(120)
                 stop_button.setEnabled(can_control and status in ("active", "activating"))
@@ -1003,18 +1061,24 @@ class GameMover(QWidget):
     def control_local_server(self, action, server_id, name, control_auth):
         if self.app_mode != "server":
             return
-        if action == "stop":
-            answer = QMessageBox.question(self, "Vypnout server", f"Opravdu vypnout {name}?")
+        if action in ("stop", "restart"):
+            verb = "vypnout" if action == "stop" else "restartovat"
+            title = "Vypnout server" if action == "stop" else "Restartovat server"
+            answer = QMessageBox.question(self, title, f"Opravdu {verb} {name}?")
             if answer != QMessageBox.Yes:
                 return
         headers = self.local_pam_headers() if control_auth == "pam" else self.local_admin_headers()
         if not headers:
             QMessageBox.warning(self, "Server", "Pro zvolený způsob ovládání chybí oprávnění.")
             return
-        action_label = "Spuštění" if action == "start" else "Vypnutí"
+        action_label = {
+            "start": "Spuštění",
+            "stop": "Vypnutí",
+            "restart": "Restart",
+        }[action]
         try:
             response = requests.post(
-                f"{FLASK_URL}/servers/{action}", json={"id": server_id}, headers=headers, timeout=30,
+                f"{FLASK_URL}/servers/{action}", json={"id": server_id}, headers=headers, timeout=210,
             )
             data = response.json()
             if response.status_code != 200:

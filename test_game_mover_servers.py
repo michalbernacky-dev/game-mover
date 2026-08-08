@@ -2,9 +2,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import game_mover_flask as backend
+from game_mover_workloads import BackendResult, WorkloadState
 
 
 class ServerRegistryTest(unittest.TestCase):
@@ -63,7 +64,11 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["path"], str(self.pixelmon_mods.resolve()))
-        with patch.object(backend, "systemctl_is_active", return_value=(0, "inactive", "")):
+        fake_backend = Mock()
+        fake_backend.status.return_value = WorkloadState(
+            "inactive", "inactive", "Neběží",
+        )
+        with patch.object(backend, "backend_for", return_value=fake_backend):
             response = self.client.get("/servers/status", **self.local_options())
         statuses = {item["id"]: item for item in response.json["servers"]}
         self.assertTrue(statuses["forge"]["has_mods"])
@@ -72,11 +77,12 @@ class ServerRegistryTest(unittest.TestCase):
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):
         self.save_servers()
+        fake_backend = Mock()
+        fake_backend.start.return_value = BackendResult(0)
+        fake_backend.stop.return_value = BackendResult(0)
         with (
             patch.object(backend, "load_local_admin_token", return_value="local-secret"),
-            patch.object(backend, "systemctl_start", return_value=(0, "", "")) as start,
-            patch.object(backend, "systemctl_stop", return_value=(0, "", "")) as stop,
-            patch.object(backend, "systemctl_reset_failed", return_value=(0, "", "")) as reset,
+            patch.object(backend, "backend_for", return_value=fake_backend),
         ):
             response = self.client.post(
                 "/servers/start", json={"id": "pixelmon"},
@@ -88,16 +94,17 @@ class ServerRegistryTest(unittest.TestCase):
                 **self.local_options(self.admin_headers),
             )
             self.assertEqual(response.status_code, 200)
-        start.assert_called_once_with("pixelmon-srv")
-        stop.assert_called_once_with("pixelmon-srv")
-        self.assertEqual(reset.call_count, 2)
+        fake_backend.start.assert_called_once()
+        fake_backend.stop.assert_called_once()
+        self.assertEqual(fake_backend.start.call_args.args[0]["backend"], "systemd")
 
     def test_pam_policy_and_remote_control_are_enforced(self):
         self.save_servers()
+        fake_backend = Mock()
+        fake_backend.stop.return_value = BackendResult(0)
         with (
             patch.object(backend, "load_local_admin_token", return_value="local-secret"),
-            patch.object(backend, "systemctl_stop", return_value=(0, "", "")) as stop,
-            patch.object(backend, "systemctl_reset_failed", return_value=(0, "", "")),
+            patch.object(backend, "backend_for", return_value=fake_backend),
         ):
             response = self.client.post(
                 "/servers/stop", json={"id": "forge"},
@@ -114,8 +121,73 @@ class ServerRegistryTest(unittest.TestCase):
                 environ_base={"REMOTE_ADDR": "192.0.2.10"},
             )
             self.assertEqual(response.status_code, 403)
-        stop.assert_called_once_with("forge-srv.service")
+        fake_backend.stop.assert_called_once()
 
+
+    def test_podman_registry_restart_and_remote_rejection(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        data_directory = data_root / "mc-test" / "data"
+        mods_directory = data_directory / "mods"
+        mods_directory.mkdir(parents=True)
+        podman_server = {
+            "id": "mc-test",
+            "name": "Minecraft Test",
+            "backend": "podman",
+            "kind": "minecraft",
+            "control_auth": "pam",
+            "runtime": {"container_name": "mc-test"},
+            "management_mode": "adopted",
+            "connection": {"direct_port": 25570},
+            "data": {"directory": str(data_directory), "mods_relative_path": "mods"},
+            "mods_dir": str(mods_directory),
+        }
+        fake_backend = Mock()
+        fake_backend.restart.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root.resolve())),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+        ):
+            invalid_container = {
+                **podman_server,
+                "runtime": {"container_name": "mc-test;systemctl"},
+            }
+            response = self.client.put(
+                "/servers/config", json={"servers": [invalid_container]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 400)
+
+            wrong_data = {
+                **podman_server,
+                "data": {"directory": str(data_root / "other" / "data")},
+            }
+            response = self.client.put(
+                "/servers/config", json={"servers": [wrong_data]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 400)
+
+            response = self.client.put(
+                "/servers/config", json={"servers": [podman_server]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+            saved = response.json["servers"][0]
+            self.assertEqual(saved["backend"], "podman")
+            self.assertEqual(saved["runtime"]["container_name"], "mc-test")
+            self.assertEqual(saved["connection"]["direct_port"], 25570)
+
+            response = self.client.post(
+                "/servers/restart", json={"id": "mc-test"},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 200)
+            response = self.client.post(
+                "/servers/restart", json={"id": "mc-test"},
+                headers=self.pam_headers, environ_base={"REMOTE_ADDR": "192.0.2.10"},
+            )
+            self.assertEqual(response.status_code, 403)
+        fake_backend.restart.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

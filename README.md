@@ -75,6 +75,50 @@ login. Starting and stopping services is always rejected over LAN/Tailscale.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
 
+### Rootless Podman workloads
+
+The first Podman milestone adopts existing containers and exposes only
+status/start/stop/restart. Podman runs as the dedicated `gameplatform` account;
+the root Flask service reaches its private Unix socket. The socket is never
+exposed to clients, and remote API access remains read-only.
+
+Host defaults:
+
+```text
+user:      gameplatform
+home:      /var/lib/game-platform
+socket:    /run/user/<uid>/podman/podman.sock
+data root: /var/lib/game-platform/servers
+```
+
+Example entry in `/etc/game_mover/servers.json`:
+
+```json
+{
+  "id": "mc-test",
+  "name": "Minecraft Test",
+  "backend": "podman",
+  "kind": "minecraft",
+  "control_auth": "pam",
+  "management_mode": "adopted",
+  "runtime": {
+    "container_name": "mc-test"
+  },
+  "connection": {
+    "direct_port": 25570
+  },
+  "data": {
+    "directory": "/var/lib/game-platform/servers/mc-test/data",
+    "mods_relative_path": "mods"
+  },
+  "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods"
+}
+```
+
+The workload ID fixes the allowed data path to
+`<data root>/<id>/data`. This milestone does not create containers or delete
+containers/data.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -250,6 +294,50 @@ tak mají vlastní cestu i porovnání modů; například Pixelmon může použ�
 volba `Vyžaduje PAM` vyžaduje přihlášení v Timekpr. Spouštění a vypínání je vždy
 odmítnuto z LAN/Tailscale. Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
+
+### Rootless Podman workloady
+
+První Podman milestone přebírá existující containery a zpřístupňuje pouze
+status/start/stop/restart. Podman běží pod dedikovaným účtem `gameplatform`;
+root Flask služba používá jeho privátní Unix socket. Socket není dostupný
+klientům a vzdálené API zůstává read-only.
+
+Výchozí hostitelské uspořádání:
+
+```text
+uživatel:  gameplatform
+home:      /var/lib/game-platform
+socket:    /run/user/<uid>/podman/podman.sock
+data root: /var/lib/game-platform/servers
+```
+
+Příklad záznamu v `/etc/game_mover/servers.json`:
+
+```json
+{
+  "id": "mc-test",
+  "name": "Minecraft Test",
+  "backend": "podman",
+  "kind": "minecraft",
+  "control_auth": "pam",
+  "management_mode": "adopted",
+  "runtime": {
+    "container_name": "mc-test"
+  },
+  "connection": {
+    "direct_port": 25570
+  },
+  "data": {
+    "directory": "/var/lib/game-platform/servers/mc-test/data",
+    "mods_relative_path": "mods"
+  },
+  "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods"
+}
+```
+
+ID workloadu určuje povolenou datovou cestu
+`<data root>/<id>/data`. Tento milestone containery nevytváří a neumožňuje
+mazání containerů ani dat.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
