@@ -1147,7 +1147,7 @@ class GameMover(QWidget):
     def refresh_server_statuses(self):
         base_url, headers = self.server_request_target()
         try:
-            response = requests.get(f"{base_url}/servers/status", headers=headers, timeout=3)
+            response = requests.get(f"{base_url}/servers/status", headers=headers, timeout=8)
             response.raise_for_status()
             data = response.json()
             self.render_server_cards(data.get("servers", []))

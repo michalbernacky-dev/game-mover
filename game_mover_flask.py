@@ -16,6 +16,7 @@ import datetime
 import sys
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
 from game_mover_mods import scan_mod_directory
@@ -466,12 +467,21 @@ def game_server_status(server):
             "known": count_known_players(data.get("directory")),
         }
         if state.status == "active" and direct_port is not None:
-            for probe_host in local_server_addresses():
+            probe_hosts = local_server_addresses()
+
+            def probe(probe_host):
                 try:
-                    players.update(query_server_status(probe_host, direct_port))
-                    break
+                    return query_server_status(probe_host, direct_port)
                 except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                    continue
+                    return None
+
+            if probe_hosts:
+                with ThreadPoolExecutor(max_workers=min(8, len(probe_hosts))) as executor:
+                    probe_results = list(executor.map(probe, probe_hosts))
+                for probe_result in probe_results:
+                    if probe_result is not None:
+                        players.update(probe_result)
+                        break
         result["players"] = players
     return result
 
@@ -1003,9 +1013,15 @@ def set_steam_cache():
 # ------------------------------------------------------------
 @app.route("/servers/status", methods=["GET"])
 def servers_status():
+    servers = load_game_servers()
+    if servers:
+        with ThreadPoolExecutor(max_workers=min(8, len(servers))) as executor:
+            statuses = list(executor.map(game_server_status, servers))
+    else:
+        statuses = []
     return jsonify({
         "version": __version__,
-        "servers": [game_server_status(server) for server in load_game_servers()],
+        "servers": statuses,
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 
