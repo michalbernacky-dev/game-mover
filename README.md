@@ -67,8 +67,8 @@ The **Connection** tab selects either Client mode for remote read-only monitorin
 or Server mode for local administration. In Server mode, authenticate as a wheel
 user in the **Timekpr** tab, then edit the local service registry. Each row has an
 ID, display name, systemd unit, type (`generic` or `minecraft`), an absolute
-data and `mods` directories for Minecraft services, a direct game port, and a
-control policy. Multiple Minecraft
+data and `mods` directories for Minecraft services, and a control policy. The
+game port is discovered from the workload at runtime. Multiple Minecraft
 instances such as Forge and Pixelmon each keep their own mod path and comparison;
 for example, Pixelmon can use the `pixelmon-srv` systemd unit. The `silent` policy
 uses the same local `api.token` as Mover actions, while `pam` requires Timekpr
@@ -105,9 +105,6 @@ Example entry in `/etc/game_mover/servers.json`:
   "runtime": {
     "container_name": "mc-test"
   },
-  "connection": {
-    "direct_port": 25570
-  },
   "data": {
     "directory": "/var/lib/game-platform/servers/mc-test/data",
     "mods_relative_path": "mods"
@@ -120,13 +117,12 @@ The workload ID fixes the allowed data path to
 `<data root>/<id>/data`. This milestone does not create containers or delete
 containers/data.
 
-For Minecraft entries, `direct_port` is also used for read-only status polling.
-The server performs a standard Minecraft status ping on loopback and returns the
-current and maximum player counts from `/servers/status`. The total number of
-known players is counted from UUIDs in persistent world data and `usercache.json`.
-No RCON access is required. Remote clients combine `direct_port` with
-the host from their configured Game Mover connection and display the resulting
-game address.
+For Minecraft entries, the systemd port is read from `server.properties` and the
+Podman host port is read from the container's published `25565/tcp` mapping. The
+resolved port is used for a standard read-only Minecraft status ping and is
+combined with the remote client's configured host to display the game address.
+The total number of known players is counted from UUIDs in persistent world data
+and `usercache.json`. No RCON access is required.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -297,8 +293,8 @@ V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only do
 nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
 v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
-Minecraftu absolutní cestu k datovému adresáři a adresáři `mods`, přímý herní
-port a politiku ovládání. Forge a Pixelmon
+Minecraftu absolutní cestu k datovému adresáři a adresáři `mods` a politiku
+ovládání. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
 `pixelmon-srv`. Volba `Tiché` používá stejný místní `api.token` jako funkce Moveru,
 volba `Vyžaduje PAM` vyžaduje přihlášení v Timekpr. Spouštění a vypínání je vždy
@@ -334,9 +330,6 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
   "runtime": {
     "container_name": "mc-test"
   },
-  "connection": {
-    "direct_port": 25570
-  },
   "data": {
     "directory": "/var/lib/game-platform/servers/mc-test/data",
     "mods_relative_path": "mods"
@@ -349,12 +342,11 @@ ID workloadu určuje povolenou datovou cestu
 `<data root>/<id>/data`. Tento milestone containery nevytváří a neumožňuje
 mazání containerů ani dat.
 
-U Minecraft záznamů slouží `direct_port` také k read-only zjištění stavu. Server
-provede standardní Minecraft status ping přes loopback a endpoint
-`/servers/status` vrátí aktuální a maximální počet hráčů. Celkový počet známých
-hráčů se počítá ze UUID v persistentních datech světa a v `usercache.json`.
-RCON k tomu není potřeba. Vzdálený klient spojí `direct_port` s hostitelem ze
-svého profilu Game Moveru a zobrazí výslednou herní adresu.
+U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
+mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní
+read-only Minecraft status ping a vzdálený klient jej spojí s hostitelem ze svého
+profilu. Celkový počet známých hráčů se počítá ze UUID v persistentních datech
+světa a v `usercache.json`. RCON k tomu není potřeba.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

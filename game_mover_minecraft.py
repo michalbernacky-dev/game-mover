@@ -97,6 +97,23 @@ def _level_name(data_directory):
     return "world"
 
 
+def configured_server_port(data_directory):
+    """Read the effective Minecraft TCP port from server.properties."""
+    if not data_directory:
+        return None
+    properties_path = os.path.join(data_directory, "server.properties")
+    try:
+        with open(properties_path, "r", encoding="utf-8") as properties:
+            for line in properties:
+                key, separator, value = line.partition("=")
+                if separator and key.strip() == "server-port":
+                    port = int(value.strip())
+                    return port if 1 <= port <= 65535 else None
+    except (OSError, UnicodeError, ValueError):
+        pass
+    return None
+
+
 def count_known_players(data_directory):
     """Count distinct UUIDs found in persistent world data or user cache."""
     if not data_directory:

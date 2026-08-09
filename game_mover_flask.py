@@ -17,7 +17,7 @@ import sys
 import json
 
 from game_mover_mods import scan_mod_directory
-from game_mover_minecraft import count_known_players, query_server_status
+from game_mover_minecraft import configured_server_port, count_known_players, query_server_status
 from game_mover_version import __version__
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
@@ -374,6 +374,7 @@ def game_server_status(server):
         if backend_name == "podman"
         else runtime.get("unit", server.get("service", ""))
     )
+    backend = None
     try:
         backend = backend_for(
             server,
@@ -403,11 +404,25 @@ def game_server_status(server):
         "error": state.error,
     }
     connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
-    direct_port = connection.get("direct_port")
+    configured_port = connection.get("direct_port")
+    direct_port = None
+    port_source = None
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    if server.get("kind") == "minecraft" and backend_name == "systemd":
+        direct_port = configured_server_port(data.get("directory"))
+        if direct_port is not None:
+            port_source = "server.properties"
+    elif server.get("kind") == "minecraft" and backend_name == "podman" and backend is not None:
+        runtime_port = backend.published_port(server, 25565)
+        if isinstance(runtime_port, int) and not isinstance(runtime_port, bool):
+            direct_port = runtime_port
+            port_source = "podman"
+    if direct_port is None and isinstance(configured_port, int) and not isinstance(configured_port, bool):
+        direct_port = configured_port
+        port_source = "registry"
     if direct_port is not None:
-        result["connection"] = {"direct_port": direct_port}
+        result["connection"] = {"direct_port": direct_port, "source": port_source}
     if server.get("kind") == "minecraft":
-        data = server.get("data") if isinstance(server.get("data"), dict) else {}
         players = {
             "online": None,
             "max": None,

@@ -173,6 +173,20 @@ class PodmanBackend:
         }
         return WorkloadState(normalized, native, messages.get(native, f"Stav: {native}"))
 
+    def published_port(self, workload: dict, container_port: int) -> int | None:
+        result = self._command([
+            "port", self.reference(workload), f"{int(container_port)}/tcp",
+        ], 15)
+        if result.returncode != 0:
+            return None
+        for line in result.output.splitlines():
+            match = re.search(r":([0-9]{1,5})$", line.strip())
+            if match:
+                port = int(match.group(1))
+                if 1 <= port <= 65535:
+                    return port
+        return None
+
     def start(self, workload: dict) -> BackendResult:
         return self._command(["start", self.reference(workload)], 60)
 

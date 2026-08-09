@@ -83,6 +83,15 @@ class MinecraftStatusTest(unittest.TestCase):
             )
             self.assertEqual(minecraft.count_known_players(str(data)), 1)
 
+    def test_configured_server_port_reads_and_validates_properties(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data = Path(temporary_directory)
+            properties = data / "server.properties"
+            properties.write_text("server-port=25565\n", encoding="utf-8")
+            self.assertEqual(minecraft.configured_server_port(str(data)), 25565)
+            properties.write_text("server-port=70000\n", encoding="utf-8")
+            self.assertIsNone(minecraft.configured_server_port(str(data)))
+
 
 if __name__ == "__main__":
     unittest.main()

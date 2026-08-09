@@ -29,7 +29,6 @@ class ServerRegistryTest(unittest.TestCase):
             {
                 "id": "forge", "name": "Forge", "service": "forge-srv.service",
                 "kind": "minecraft", "mods_dir": str(self.forge_mods), "control_auth": "pam",
-                "connection": {"direct_port": 25565},
             },
             {
                 "id": "pixelmon", "name": "Pixelmon", "service": "pixelmon-srv",
@@ -57,12 +56,15 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
 
     def test_config_preserves_each_minecraft_mods_path(self):
+        (self.forge_data / "server.properties").write_text(
+            "server-port=25565\n", encoding="utf-8",
+        )
         self.save_servers()
         response = self.client.get("/servers/config", **self.local_options(self.pam_headers))
         saved = {item["id"]: item for item in response.json["servers"]}
         self.assertEqual(saved["forge"]["mods_dir"], str(self.forge_mods))
         self.assertEqual(saved["forge"]["data"]["directory"], str(self.forge_data))
-        self.assertEqual(saved["forge"]["connection"]["direct_port"], 25565)
+        self.assertNotIn("connection", saved["forge"])
         self.assertEqual(saved["pixelmon"]["mods_dir"], str(self.pixelmon_mods))
         self.assertEqual(saved["pixelmon"]["data"]["directory"], str(self.pixelmon_data))
         response = self.client.get(
@@ -82,7 +84,9 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertTrue(statuses["forge"]["has_mods"])
         self.assertTrue(statuses["pixelmon"]["has_mods"])
         self.assertFalse(statuses["satisfactory"]["has_mods"])
-        self.assertEqual(statuses["forge"]["connection"]["direct_port"], 25565)
+        self.assertEqual(statuses["forge"]["connection"], {
+            "direct_port": 25565, "source": "server.properties",
+        })
 
     def test_minecraft_status_exposes_read_only_player_statistics(self):
         data_directory = Path(self.temp_dir.name) / "managed-servers" / "mc-test" / "data"
@@ -92,17 +96,17 @@ class ServerRegistryTest(unittest.TestCase):
         server = {
             "id": "mc-test", "name": "Minecraft Test", "backend": "podman",
             "kind": "minecraft", "runtime": {"container_name": "mc-test"},
-            "connection": {"direct_port": 25570},
             "data": {"directory": str(data_directory)},
         }
         fake_backend = Mock()
         fake_backend.status.return_value = WorkloadState("active", "running", "Běží")
+        fake_backend.published_port.return_value = 25570
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
             patch.object(backend, "query_server_status", return_value={"online": 1, "max": 20}),
         ):
             status = backend.game_server_status(server)
-        self.assertEqual(status["connection"], {"direct_port": 25570})
+        self.assertEqual(status["connection"], {"direct_port": 25570, "source": "podman"})
         self.assertEqual(status["players"], {"online": 1, "max": 20, "known": 1})
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):

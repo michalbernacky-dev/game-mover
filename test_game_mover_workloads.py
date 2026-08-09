@@ -100,6 +100,21 @@ class WorkloadBackendTest(unittest.TestCase):
         ])
         self.assertEqual([call[1] for call in runner.calls], [60, 150, 180])
 
+    def test_podman_discovers_published_minecraft_port(self):
+        runner = RecordingRunner([BackendResult(0, "0.0.0.0:25570")])
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+        workload = {
+            "backend": "podman",
+            "runtime": {"container_name": "mc-test"},
+        }
+
+        self.assertEqual(backend.published_port(workload, 25565), 25570)
+        self.assertEqual(runner.calls[0][0][4:], [
+            "port", "mc-test", "25565/tcp",
+        ])
+
     def test_podman_rejects_unvalidated_reference_before_execution(self):
         runner = RecordingRunner()
         backend = PodmanBackend(
