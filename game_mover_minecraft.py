@@ -9,9 +9,9 @@ import struct
 
 
 MAX_STATUS_PACKET = 1024 * 1024
-PLAYER_DATA_RE = re.compile(
+UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.dat$"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
@@ -98,7 +98,7 @@ def _level_name(data_directory):
 
 
 def count_known_players(data_directory):
-    """Count UUID player files without reading or changing world contents."""
+    """Count distinct UUIDs found in persistent world data or user cache."""
     if not data_directory:
         return None
     data_root = os.path.realpath(data_directory)
@@ -108,11 +108,37 @@ def count_known_players(data_directory):
             return None
     except ValueError:
         return None
-    player_data = os.path.join(world_directory, "playerdata")
+    player_ids = set()
+    source_found = False
+    for relative_directory, suffix in (
+        ("playerdata", ".dat"),
+        ("stats", ".json"),
+        ("advancements", ".json"),
+    ):
+        directory = os.path.join(world_directory, relative_directory)
+        try:
+            names = os.listdir(directory)
+            source_found = True
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(suffix):
+                continue
+            player_id = name[:-len(suffix)]
+            if UUID_RE.fullmatch(player_id):
+                player_ids.add(player_id.lower())
+
+    user_cache_path = os.path.join(data_root, "usercache.json")
     try:
-        return sum(
-            1 for name in os.listdir(player_data)
-            if PLAYER_DATA_RE.fullmatch(name)
-        )
-    except OSError:
-        return None
+        with open(user_cache_path, "r", encoding="utf-8") as user_cache:
+            entries = json.load(user_cache)
+        source_found = True
+        if isinstance(entries, list):
+            for entry in entries:
+                player_id = entry.get("uuid") if isinstance(entry, dict) else None
+                if isinstance(player_id, str) and UUID_RE.fullmatch(player_id):
+                    player_ids.add(player_id.lower())
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        pass
+
+    return len(player_ids) if source_found else None

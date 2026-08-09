@@ -122,8 +122,8 @@ containers/data.
 For Minecraft entries, `direct_port` is also used for read-only status polling.
 The server performs a standard Minecraft status ping on loopback and returns the
 current and maximum player counts from `/servers/status`. The total number of
-known players is counted from UUID files in the configured world's `playerdata`
-directory. No RCON access is required. Remote clients combine `direct_port` with
+known players is counted from UUIDs in persistent world data and `usercache.json`.
+No RCON access is required. Remote clients combine `direct_port` with
 the host from their configured Game Mover connection and display the resulting
 game address.
 
@@ -350,7 +350,7 @@ mazání containerů ani dat.
 U Minecraft záznamů slouží `direct_port` také k read-only zjištění stavu. Server
 provede standardní Minecraft status ping přes loopback a endpoint
 `/servers/status` vrátí aktuální a maximální počet hráčů. Celkový počet známých
-hráčů se počítá z UUID souborů v adresáři `playerdata` nakonfigurovaného světa.
+hráčů se počítá ze UUID v persistentních datech světa a v `usercache.json`.
 RCON k tomu není potřeba. Vzdálený klient spojí `direct_port` s hostitelem ze
 svého profilu Game Moveru a zobrazí výslednou herní adresu.
 

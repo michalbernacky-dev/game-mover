@@ -56,6 +56,33 @@ class MinecraftStatusTest(unittest.TestCase):
             (data / "server.properties").write_text("level-name=../other\n", encoding="utf-8")
             self.assertIsNone(minecraft.count_known_players(str(data)))
 
+    def test_known_players_falls_back_to_user_cache(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data = Path(temporary_directory)
+            (data / "usercache.json").write_text(
+                json.dumps([
+                    {
+                        "name": "Bernye",
+                        "uuid": "17aeaf09-24d4-47b4-a1dd-2aa945960095",
+                    }
+                ]),
+                encoding="utf-8",
+            )
+            self.assertEqual(minecraft.count_known_players(str(data)), 1)
+
+    def test_known_players_deduplicates_world_and_user_cache(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data = Path(temporary_directory)
+            player_id = "17aeaf09-24d4-47b4-a1dd-2aa945960095"
+            player_data = data / "world" / "playerdata"
+            player_data.mkdir(parents=True)
+            (player_data / f"{player_id}.dat").touch()
+            (data / "usercache.json").write_text(
+                json.dumps([{"name": "Bernye", "uuid": player_id}]),
+                encoding="utf-8",
+            )
+            self.assertEqual(minecraft.count_known_players(str(data)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
