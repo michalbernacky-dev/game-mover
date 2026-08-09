@@ -18,6 +18,7 @@ import json
 
 from game_mover_mods import scan_mod_directory
 from game_mover_minecraft import count_known_players, query_server_status
+from game_mover_version import __version__
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
 app = Flask(__name__)
@@ -929,6 +930,7 @@ def set_steam_cache():
 @app.route("/servers/status", methods=["GET"])
 def servers_status():
     return jsonify({
+        "version": __version__,
         "servers": [game_server_status(server) for server in load_game_servers()],
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })

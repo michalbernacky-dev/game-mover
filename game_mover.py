@@ -19,6 +19,7 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
+from game_mover_version import __version__
 
 # ------------------------------------------------------------
 # KONFIGURACE
@@ -320,6 +321,10 @@ class GameMover(QWidget):
 
     def initUI(self):
         self.tabs = QTabWidget(self)
+        version_label = QLabel(__version__, self.tabs)
+        version_label.setStyleSheet("color: #8fa1ab; padding: 0 8px;")
+        version_label.setToolTip(f"Game Mover {__version__}")
+        self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
         self.init_servers_tab()
         self.init_server_registry_tab()

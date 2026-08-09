@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import game_mover_flask as backend
+from game_mover_version import __version__
 from game_mover_workloads import BackendResult, WorkloadState
 
 
@@ -73,6 +74,7 @@ class ServerRegistryTest(unittest.TestCase):
         with patch.object(backend, "backend_for", return_value=fake_backend):
             response = self.client.get("/servers/status", **self.local_options())
         statuses = {item["id"]: item for item in response.json["servers"]}
+        self.assertEqual(response.json["version"], __version__)
         self.assertTrue(statuses["forge"]["has_mods"])
         self.assertTrue(statuses["pixelmon"]["has_mods"])
         self.assertFalse(statuses["satisfactory"]["has_mods"])
