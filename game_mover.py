@@ -651,6 +651,13 @@ class GameMover(QWidget):
         self.endpoint_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.endpoint_label)
 
+        servers_separator = QFrame(content)
+        servers_separator.setFrameShape(QFrame.HLine)
+        servers_separator.setFrameShadow(QFrame.Sunken)
+        layout.addSpacing(4)
+        layout.addWidget(servers_separator)
+        layout.addSpacing(4)
+
         self.server_cards_widget = QWidget(content)
         self.server_cards_layout = QVBoxLayout(self.server_cards_widget)
         self.server_cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -1017,7 +1024,7 @@ class GameMover(QWidget):
                 card_layout.addWidget(QLabel("Hráči: nezjištěno"))
             known = players.get("known")
             if known is not None:
-                card_layout.addWidget(QLabel(f"Celkem známých hráčů: {known}"))
+                card_layout.addWidget(QLabel(f"Již viděno hráčů: {known}"))
             service_label = QLabel(server.get("runtime_label", server.get("service", "")))
             service_label.setStyleSheet("color: #aab7c0;")
             card_layout.addWidget(service_label)
