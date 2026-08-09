@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.4.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -58,6 +58,10 @@ getent group gemers >/dev/null || groupadd -r gemers
 %post
 %systemd_post game_mover.service
 
+# Runtime bytecode is not packaged and can survive an RPM replacement. Remove
+# it after installing new sources; normal launchers use -B and do not recreate it.
+find /opt/game_mover -type d -name __pycache__ -prune -exec rm -rf -- {} + 2>/dev/null || :
+
 mkdir -p /etc/game_mover
 if [ ! -f /etc/game_mover/api.token ]; then
     token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
@@ -105,6 +109,9 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.4.0-2
+- Prevent stale Python bytecode after RPM replacement
+
 * Fri Aug 07 2026 Game Mover Packager <packager@example.invalid> - 0.2.0-1
 - Add remote Minecraft mod inventory and client comparison
 

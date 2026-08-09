@@ -87,6 +87,7 @@ rsync -a --delete \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
 chmod 0644 "${INSTALL_DIR}/game_mover_mods.py" "${INSTALL_DIR}/game_mover_minecraft.py" "${INSTALL_DIR}/game_mover_version.py" "${INSTALL_DIR}/game_mover_workloads.py"
+find "${INSTALL_DIR}" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"
 systemctl disable --now "${LEGACY_SERVICE_NAME}" >/dev/null 2>&1 || true
@@ -109,13 +110,14 @@ Description=Flask Server for Game Mover
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/env python3 /opt/game_mover/game_mover_flask.py
+ExecStart=/usr/bin/env python3 -B /opt/game_mover/game_mover_flask.py
 WorkingDirectory=/opt/game_mover
 User=root
 Group=gemers
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
 Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
 
@@ -133,7 +135,7 @@ cat >"${desktop_tmp}" <<'EOF'
 Type=Application
 Name=Game Mover
 Comment=Správa sdílené herní knihovny
-Exec=/usr/bin/env python3 /opt/game_mover/game_mover.py
+Exec=/usr/bin/env python3 -B /opt/game_mover/game_mover.py
 Icon=/opt/game_mover/game_mover_logo.jpg
 Terminal=false
 Categories=Game;Utility;
@@ -148,7 +150,7 @@ cat >"${autostart_tmp}" <<'EOF'
 Type=Application
 Name=Game Mover
 Comment=Správa sdílené herní knihovny
-Exec=/usr/bin/env python3 /opt/game_mover/game_mover.py
+Exec=/usr/bin/env python3 -B /opt/game_mover/game_mover.py
 Icon=/opt/game_mover/game_mover_logo.jpg
 X-GNOME-Autostart-enabled=true
 NoDisplay=false

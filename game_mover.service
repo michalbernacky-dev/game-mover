@@ -4,13 +4,14 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/game_mover/game_mover_flask.py
+ExecStart=/usr/bin/python3 -B /opt/game_mover/game_mover_flask.py
 WorkingDirectory=/opt/game_mover
 User=root
 Group=gemers
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
 Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
 
