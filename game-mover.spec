@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.3.0
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 

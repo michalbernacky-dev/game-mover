@@ -67,7 +67,8 @@ The **Connection** tab selects either Client mode for remote read-only monitorin
 or Server mode for local administration. In Server mode, authenticate as a wheel
 user in the **Timekpr** tab, then edit the local service registry. Each row has an
 ID, display name, systemd unit, type (`generic` or `minecraft`), an absolute
-`mods` directory for Minecraft services, and a control policy. Multiple Minecraft
+data and `mods` directories for Minecraft services, a direct game port, and a
+control policy. Multiple Minecraft
 instances such as Forge and Pixelmon each keep their own mod path and comparison;
 for example, Pixelmon can use the `pixelmon-srv` systemd unit. The `silent` policy
 uses the same local `api.token` as Mover actions, while `pam` requires Timekpr
@@ -296,7 +297,8 @@ V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only do
 nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
 v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
-Minecraftu absolutní cestu k adresáři `mods` a politiku ovládání. Forge a Pixelmon
+Minecraftu absolutní cestu k datovému adresáři a adresáři `mods`, přímý herní
+port a politiku ovládání. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
 `pixelmon-srv`. Volba `Tiché` používá stejný místní `api.token` jako funkce Moveru,
 volba `Vyžaduje PAM` vyžaduje přihlášení v Timekpr. Spouštění a vypínání je vždy

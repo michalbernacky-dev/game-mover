@@ -19,10 +19,12 @@ class ServerRegistryTest(unittest.TestCase):
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
         self.client = backend.app.test_client()
-        self.forge_mods = Path(self.temp_dir.name) / "forge-mods"
-        self.pixelmon_mods = Path(self.temp_dir.name) / "pixelmon-mods"
-        self.forge_mods.mkdir()
-        self.pixelmon_mods.mkdir()
+        self.forge_data = Path(self.temp_dir.name) / "forge-data"
+        self.pixelmon_data = Path(self.temp_dir.name) / "pixelmon-data"
+        self.forge_mods = self.forge_data / "mods"
+        self.pixelmon_mods = self.pixelmon_data / "mods"
+        self.forge_mods.mkdir(parents=True)
+        self.pixelmon_mods.mkdir(parents=True)
         self.servers = [
             {
                 "id": "forge", "name": "Forge", "service": "forge-srv.service",
@@ -59,8 +61,10 @@ class ServerRegistryTest(unittest.TestCase):
         response = self.client.get("/servers/config", **self.local_options(self.pam_headers))
         saved = {item["id"]: item for item in response.json["servers"]}
         self.assertEqual(saved["forge"]["mods_dir"], str(self.forge_mods))
+        self.assertEqual(saved["forge"]["data"]["directory"], str(self.forge_data))
         self.assertEqual(saved["forge"]["connection"]["direct_port"], 25565)
         self.assertEqual(saved["pixelmon"]["mods_dir"], str(self.pixelmon_mods))
+        self.assertEqual(saved["pixelmon"]["data"]["directory"], str(self.pixelmon_data))
         response = self.client.get(
             "/servers/minecraft/mods?server_id=pixelmon",
             environ_base={"REMOTE_ADDR": "127.0.0.1"},

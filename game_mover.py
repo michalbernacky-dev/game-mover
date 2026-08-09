@@ -599,8 +599,11 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(8)
-        self.local_services_table.setHorizontalHeaderLabels(["ID", "Název", "Backend", "Jednotka / container", "Typ", "Adresář mods", "Herní port", "Ovládání"])
+        self.local_services_table.setColumnCount(9)
+        self.local_services_table.setHorizontalHeaderLabels([
+            "ID", "Název", "Backend", "Jednotka / container", "Typ",
+            "Datový adresář", "Adresář mods", "Herní port", "Ovládání",
+        ])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
         services_header = self.local_services_table.horizontalHeader()
@@ -610,8 +613,9 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(3, QHeaderView.Stretch)
         services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(5, QHeaderView.Stretch)
-        services_header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(6, QHeaderView.Stretch)
         services_header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        services_header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
         layout.addWidget(self.local_services_table)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
@@ -771,12 +775,14 @@ class GameMover(QWidget):
             else runtime.get("unit", service.get("service", "server.service"))
         )
         connection = service.get("connection") if isinstance(service.get("connection"), dict) else {}
+        data = service.get("data") if isinstance(service.get("data"), dict) else {}
         values = {
             0: service.get("id", f"server-{int(time.time() * 1000)}"),
             1: service.get("name", "Nový server"),
             3: reference,
-            5: service.get("mods_dir", ""),
-            6: connection.get("direct_port", ""),
+            5: data.get("directory", ""),
+            6: service.get("mods_dir", ""),
+            7: connection.get("direct_port", ""),
         }
         for column, value in values.items():
             item = QTableWidgetItem(str(value))
@@ -799,7 +805,7 @@ class GameMover(QWidget):
         control_combo.addItem("Vyžaduje PAM", "pam")
         control_auth = service.get("control_auth", "silent")
         control_combo.setCurrentIndex(max(0, control_combo.findData(control_auth)))
-        self.local_services_table.setCellWidget(row, 7, control_combo)
+        self.local_services_table.setCellWidget(row, 8, control_combo)
 
     def remove_local_service_rows(self):
         rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
@@ -818,17 +824,23 @@ class GameMover(QWidget):
 
             backend_combo = self.local_services_table.cellWidget(row, 2)
             kind_combo = self.local_services_table.cellWidget(row, 4)
-            control_combo = self.local_services_table.cellWidget(row, 7)
+            control_combo = self.local_services_table.cellWidget(row, 8)
             backend = backend_combo.currentData() if backend_combo else "systemd"
             kind = kind_combo.currentData() if kind_combo else "generic"
             control_auth = control_combo.currentData() if control_combo else "silent"
             runtime_reference = cell_text(3)
-            mods_dir = cell_text(5)
-            direct_port = cell_text(6)
-            if kind == "minecraft" and not mods_dir.startswith("/"):
-                QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní cestu k adresáři mods.")
-                self.local_services_table.setCurrentCell(row, 5)
-                return
+            data_directory = cell_text(5)
+            mods_dir = cell_text(6)
+            direct_port = cell_text(7)
+            if kind == "minecraft":
+                if not data_directory.startswith("/"):
+                    QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní datový adresář.")
+                    self.local_services_table.setCurrentCell(row, 5)
+                    return
+                if not mods_dir.startswith("/"):
+                    QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní cestu k adresáři mods.")
+                    self.local_services_table.setCurrentCell(row, 6)
+                    return
             id_item = self.local_services_table.item(row, 0)
             original = id_item.data(Qt.UserRole) if id_item else {}
             entry = dict(original) if isinstance(original, dict) else {}
@@ -840,6 +852,7 @@ class GameMover(QWidget):
                 entry["service"] = runtime_reference
                 entry["runtime"] = {"unit": runtime_reference}
                 entry.pop("container", None)
+                entry.pop("management_mode", None)
             else:
                 entry["runtime"] = {"container_name": runtime_reference}
                 entry.pop("service", None)
@@ -849,18 +862,16 @@ class GameMover(QWidget):
                     port = int(direct_port)
                 except ValueError:
                     QMessageBox.warning(self, "Služby", "Herní port musí být číslo.")
-                    self.local_services_table.setCurrentCell(row, 6)
+                    self.local_services_table.setCurrentCell(row, 7)
                     return
                 entry["connection"] = {"direct_port": port}
             else:
                 entry.pop("connection", None)
             if kind == "minecraft":
                 entry["mods_dir"] = mods_dir
+                entry["data"] = {"directory": data_directory}
                 if backend == "podman":
-                    entry["data"] = {
-                        "directory": os.path.dirname(mods_dir),
-                        "mods_relative_path": "mods",
-                    }
+                    entry["data"]["mods_relative_path"] = "mods"
             else:
                 entry.pop("mods_dir", None)
                 entry.pop("data", None)

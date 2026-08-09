@@ -63,7 +63,13 @@ def normalize_game_server(server):
         container = str(runtime.get("container_name") or item.get("container") or "").strip()
         item["container"] = container
         item["runtime"] = {**runtime, "container_name": container}
+    if item.get("kind") == "minecraft":
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        data_directory = str(data.get("directory") or "").strip()
+        if not data_directory and item.get("mods_dir"):
+            data_directory = os.path.dirname(str(item["mods_dir"]))
+        if data_directory:
+            item["data"] = {**data, "directory": data_directory}
         if not item.get("mods_dir") and data.get("directory"):
             relative = str(data.get("mods_relative_path", "mods")).strip() or "mods"
             item["mods_dir"] = os.path.join(str(data["directory"]), relative)
@@ -983,11 +989,13 @@ def validate_game_server_entry(server, seen_ids):
         if not mods_dir.startswith("/"):
             raise ValueError("Minecraft needs an absolute mods directory")
         item["mods_dir"] = os.path.realpath(mods_dir)
+        data = server.get("data") if isinstance(server.get("data"), dict) else {}
+        raw_data_directory = str(data.get("directory") or os.path.dirname(mods_dir)).strip()
+        if not raw_data_directory.startswith("/"):
+            raise ValueError("Minecraft needs an absolute data directory")
+        data_directory = os.path.realpath(raw_data_directory)
+        item["data"] = {"directory": data_directory}
         if backend_name == "podman":
-            data = server.get("data") if isinstance(server.get("data"), dict) else {}
-            data_directory = os.path.realpath(
-                str(data.get("directory") or os.path.dirname(mods_dir)).strip()
-            )
             expected_data_directory = os.path.realpath(
                 os.path.join(PODMAN_DATA_ROOT, server_id, "data")
             )
