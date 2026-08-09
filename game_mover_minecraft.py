@@ -46,7 +46,7 @@ def _read_varint(stream):
     raise ValueError("Minecraft status VarInt is too large")
 
 
-def query_server_status(host, port, timeout=1.0):
+def query_server_status(host, port, timeout=1.0, protocol_version=763):
     """Return online/max player counts using the Minecraft status protocol."""
     encoded_host = host.encode("utf-8")
     if len(encoded_host) > 255:
@@ -54,7 +54,7 @@ def query_server_status(host, port, timeout=1.0):
 
     handshake = (
         _encode_varint(0)
-        + _encode_varint(0)
+        + _encode_varint(protocol_version)
         + _encode_varint(len(encoded_host))
         + encoded_host
         + struct.pack(">H", int(port))

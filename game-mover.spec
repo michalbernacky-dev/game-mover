@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.4.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -109,6 +109,9 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.4.0-3
+- Use the Minecraft 1.20.1 protocol for Forge-compatible status polling
+
 * Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.4.0-2
 - Prevent stale Python bytecode after RPM replacement
 
