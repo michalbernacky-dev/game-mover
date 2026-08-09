@@ -1,6 +1,6 @@
 Name:           game-mover
-Version:        0.4.0
-Release:        4%{?dist}
+Version:        0.5.0
+Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -42,6 +42,7 @@ install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flas
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
+install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
@@ -99,6 +100,7 @@ fi
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
 /opt/game_mover/game_mover_minecraft.py
+/opt/game_mover/game_mover_backups.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py
@@ -109,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-1
+- Add verified full-data backups for locally managed Podman workloads
+- Add per-action silent, PAM, or disabled server authorization policies
+
 * Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.4.0-4
 - Probe Minecraft status through the host's routable local address
 

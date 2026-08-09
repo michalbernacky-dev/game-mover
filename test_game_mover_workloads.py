@@ -115,6 +115,26 @@ class WorkloadBackendTest(unittest.TestCase):
             "port", "mc-test", "25565/tcp",
         ])
 
+    def test_podman_backup_metadata_excludes_environment(self):
+        runner = RecordingRunner([
+            BackendResult(0, "docker.io/itzg/minecraft-server:latest"),
+            BackendResult(0, "sha256:image-id"),
+            BackendResult(0, "25565/tcp -> 0.0.0.0:25570"),
+            BackendResult(0, "sha256:image-digest"),
+        ])
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+        workload = {
+            "backend": "podman", "runtime": {"container_name": "mc-test"},
+        }
+
+        metadata = backend.runtime_metadata(workload)
+
+        self.assertEqual(metadata["image_digest"], "sha256:image-digest")
+        self.assertEqual(metadata["published_ports"], ["25565/tcp -> 0.0.0.0:25570"])
+        self.assertNotIn("environment", metadata)
+
     def test_podman_rejects_unvalidated_reference_before_execution(self):
         runner = RecordingRunner()
         backend = PodmanBackend(

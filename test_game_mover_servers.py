@@ -62,6 +62,13 @@ class ServerRegistryTest(unittest.TestCase):
         self.save_servers()
         response = self.client.get("/servers/config", **self.local_options(self.pam_headers))
         saved = {item["id"]: item for item in response.json["servers"]}
+        self.assertNotIn("control_auth", saved["forge"])
+        self.assertEqual(saved["forge"]["permissions"], {
+            "start": "pam", "stop": "pam", "restart": "pam", "backup": "pam",
+        })
+        self.assertEqual(saved["pixelmon"]["permissions"], {
+            "start": "silent", "stop": "silent", "restart": "silent", "backup": "pam",
+        })
         self.assertEqual(saved["forge"]["mods_dir"], str(self.forge_mods))
         self.assertEqual(saved["forge"]["data"]["directory"], str(self.forge_data))
         self.assertNotIn("connection", saved["forge"])
@@ -87,6 +94,8 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(statuses["forge"]["connection"], {
             "direct_port": 25565, "source": "server.properties",
         })
+        self.assertEqual(statuses["forge"]["permissions"]["start"], "pam")
+        self.assertEqual(statuses["pixelmon"]["permissions"]["backup"], "pam")
 
     def test_minecraft_status_exposes_read_only_player_statistics(self):
         data_directory = Path(self.temp_dir.name) / "managed-servers" / "mc-test" / "data"
@@ -195,6 +204,16 @@ class ServerRegistryTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 400)
 
+            invalid_permissions = {
+                **podman_server,
+                "permissions": {"start": "everyone"},
+            }
+            response = self.client.put(
+                "/servers/config", json={"servers": [invalid_permissions]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 400)
+
             wrong_data = {
                 **podman_server,
                 "data": {"directory": str(data_root / "other" / "data")},
@@ -226,6 +245,84 @@ class ServerRegistryTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 403)
         fake_backend.restart.assert_called_once()
+
+    def test_podman_backup_requires_local_pam_and_rejects_systemd(self):
+        self.servers[0]["backend"] = "systemd"
+        self.save_servers()
+        response = self.client.post(
+            "/servers/backup", json={"id": "forge"},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 400)
+
+        podman_server = {
+            "id": "mc-test", "name": "Minecraft Test", "backend": "podman",
+            "kind": "minecraft", "control_auth": "silent",
+            "runtime": {"container_name": "mc-test"},
+            "data": {"directory": "/var/lib/game-platform/servers/mc-test/data"},
+            "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods",
+        }
+        with (
+            patch.object(backend, "find_game_server", return_value=podman_server),
+            patch.object(backend, "backend_for", return_value=Mock()),
+            patch.object(backend, "create_workload_backup", return_value={"id": "backup-1"}) as create,
+        ):
+            response = self.client.post(
+                "/servers/backup", json={"id": "mc-test"},
+                **self.local_options(self.admin_headers),
+            )
+            self.assertEqual(response.status_code, 403)
+            response = self.client.post(
+                "/servers/backup", json={"id": "mc-test"},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 200)
+            response = self.client.post(
+                "/servers/backup", json={"id": "mc-test"}, headers=self.pam_headers,
+                environ_base={"REMOTE_ADDR": "192.0.2.10"},
+            )
+            self.assertEqual(response.status_code, 403)
+        create.assert_called_once()
+
+    def test_each_server_action_has_an_independent_policy(self):
+        server = {
+            "id": "mc-test", "name": "Minecraft Test", "backend": "podman",
+            "kind": "minecraft", "runtime": {"container_name": "mc-test"},
+            "permissions": {
+                "start": "silent", "stop": "pam", "restart": "disabled", "backup": "silent",
+            },
+            "data": {"directory": "/var/lib/game-platform/servers/mc-test/data"},
+            "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods",
+        }
+        fake_backend = Mock()
+        fake_backend.start.return_value = BackendResult(0)
+        fake_backend.stop.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "find_game_server", return_value=server),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "load_local_admin_token", return_value="local-secret"),
+            patch.object(backend, "create_workload_backup", return_value={"id": "backup-1"}),
+        ):
+            self.assertEqual(self.client.post(
+                "/servers/start", json={"id": "mc-test"},
+                **self.local_options(self.admin_headers),
+            ).status_code, 200)
+            self.assertEqual(self.client.post(
+                "/servers/stop", json={"id": "mc-test"},
+                **self.local_options(self.admin_headers),
+            ).status_code, 403)
+            self.assertEqual(self.client.post(
+                "/servers/stop", json={"id": "mc-test"},
+                **self.local_options(self.pam_headers),
+            ).status_code, 200)
+            self.assertEqual(self.client.post(
+                "/servers/restart", json={"id": "mc-test"},
+                **self.local_options(self.pam_headers),
+            ).status_code, 403)
+            self.assertEqual(self.client.post(
+                "/servers/backup", json={"id": "mc-test"},
+                **self.local_options(self.admin_headers),
+            ).status_code, 200)
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
 Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
+Environment=GAME_PLATFORM_BACKUP_ROOT=/var/lib/game-platform/backups
 
 [Install]
 WantedBy=multi-user.target

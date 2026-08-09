@@ -187,6 +187,26 @@ class PodmanBackend:
                     return port
         return None
 
+    def runtime_metadata(self, workload: dict) -> dict:
+        """Return only non-secret fields needed for a future recreation."""
+        container = self.reference(workload)
+        image_name = self._command(["inspect", "--format", "{{.ImageName}}", container], 15)
+        image_id = self._command(["inspect", "--format", "{{.Image}}", container], 15)
+        ports = self._command(["port", container], 15)
+        metadata = {"container_name": container}
+        if image_name.returncode == 0 and image_name.output:
+            metadata["image_name"] = image_name.output
+        if image_id.returncode == 0 and image_id.output:
+            metadata["image_id"] = image_id.output
+            digest = self._command([
+                "image", "inspect", "--format", "{{.Digest}}", image_id.output,
+            ], 15)
+            if digest.returncode == 0 and digest.output:
+                metadata["image_digest"] = digest.output
+        if ports.returncode == 0 and ports.output:
+            metadata["published_ports"] = ports.output.splitlines()
+        return metadata
+
     def start(self, workload: dict) -> BackendResult:
         return self._command(["start", self.reference(workload)], 60)
 

@@ -15,7 +15,9 @@ import secrets
 import datetime
 import sys
 import json
+import threading
 
+from game_mover_backups import BackupError, create_workload_backup
 from game_mover_mods import scan_mod_directory
 from game_mover_minecraft import (
     configured_server_port,
@@ -45,12 +47,24 @@ PODMAN_SOCKET_PATH = os.getenv("GAME_PLATFORM_PODMAN_SOCKET", "").strip() or Non
 PODMAN_DATA_ROOT = os.path.realpath(
     os.getenv("GAME_PLATFORM_DATA_ROOT", "/var/lib/game-platform/servers")
 )
+BACKUP_ROOT = os.path.realpath(
+    os.getenv("GAME_PLATFORM_BACKUP_ROOT", "/var/lib/game-platform/backups")
+)
+WORKLOAD_LOCKS = {}
+WORKLOAD_LOCKS_GUARD = threading.Lock()
+SERVER_ACTIONS = ("start", "stop", "restart", "backup")
+SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
+
+
+def workload_lock(workload_id):
+    with WORKLOAD_LOCKS_GUARD:
+        return WORKLOAD_LOCKS.setdefault(workload_id, threading.Lock())
 
 
 def default_game_servers():
     return [
-        {"id": "minecraft", "name": "Minecraft", "backend": "systemd", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "control_auth": "silent"},
-        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "control_auth": "silent"},
+        {"id": "minecraft", "name": "Minecraft", "backend": "systemd", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
+        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
     ]
 
 
@@ -59,6 +73,21 @@ def normalize_game_server(server):
     item = dict(server)
     backend = str(item.get("backend", "systemd")).strip().lower() or "systemd"
     item["backend"] = backend
+    legacy_policy = str(item.get("control_auth", "silent")).strip().lower()
+    if legacy_policy not in ("silent", "pam"):
+        legacy_policy = "silent"
+    configured_permissions = (
+        item.get("permissions") if isinstance(item.get("permissions"), dict) else {}
+    )
+    item["permissions"] = {
+        action: (
+            configured_permissions.get(action)
+            if configured_permissions.get(action) in SERVER_AUTH_POLICIES
+            else (legacy_policy if action in ("start", "stop", "restart") else "pam")
+        )
+        for action in SERVER_ACTIONS
+    }
+    item.pop("control_auth", None)
     runtime = item.get("runtime") if isinstance(item.get("runtime"), dict) else {}
     if backend == "systemd":
         unit = str(runtime.get("unit") or item.get("service") or "").strip()
@@ -402,7 +431,9 @@ def game_server_status(server):
         "runtime_label": f"{backend_name}: {reference}",
         "kind": server.get("kind", "generic"),
         "has_mods": bool(server.get("mods_dir")),
-        "control_auth": server.get("control_auth", "silent"),
+        "permissions": {
+            action: server_action_policy(server, action) for action in SERVER_ACTIONS
+        },
         "status": state.status,
         "native_status": state.native_status,
         "message": state.message,
@@ -413,6 +444,7 @@ def game_server_status(server):
     direct_port = None
     port_source = None
     data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    result["backup_supported"] = backend_name == "podman" and bool(data.get("directory"))
     if server.get("kind") == "minecraft" and backend_name == "systemd":
         direct_port = configured_server_port(data.get("directory"))
         if direct_port is not None:
@@ -581,12 +613,26 @@ def require_local_pam_session(req):
     return req.remote_addr in ("127.0.0.1", "::1") and bool(require_token(req))
 
 
-def require_local_server_control(req, server):
+def server_action_policy(server, action):
+    permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+    policy = permissions.get(action)
+    if policy in SERVER_AUTH_POLICIES:
+        return policy
+    legacy_policy = server.get("control_auth", "silent")
+    if action in ("start", "stop", "restart") and legacy_policy in ("silent", "pam"):
+        return legacy_policy
+    return "pam" if action == "backup" else "disabled"
+
+
+def require_local_server_action(req, server, action):
     if req.remote_addr not in ("127.0.0.1", "::1"):
         return False
-    if server.get("control_auth", "silent") == "pam":
+    policy = server_action_policy(server, action)
+    if policy == "pam":
         return bool(require_token(req))
-    return require_local_admin(req)
+    if policy == "silent":
+        return require_local_admin(req)
+    return False
 
 
 def limit_for_today(user: str) -> Optional[int]:
@@ -972,7 +1018,7 @@ def validate_game_server_entry(server, seen_ids):
     name = str(server.get("name", "")).strip()
     kind = str(server.get("kind", "generic")).strip().lower()
     backend_name = str(server.get("backend", "systemd")).strip().lower()
-    control_auth = str(server.get("control_auth", "silent")).strip().lower()
+    legacy_policy = str(server.get("control_auth", "silent")).strip().lower()
     if (
         not server_id
         or not server_id.replace("-", "").replace("_", "").isalnum()
@@ -981,7 +1027,7 @@ def validate_game_server_entry(server, seen_ids):
         or len(name) > 120
         or kind not in ("generic", "minecraft")
         or backend_name not in ("systemd", "podman")
-        or control_auth not in ("silent", "pam")
+        or legacy_policy not in ("silent", "pam")
     ):
         raise ValueError("Invalid server entry")
 
@@ -990,8 +1036,21 @@ def validate_game_server_entry(server, seen_ids):
         "name": name,
         "backend": backend_name,
         "kind": kind,
-        "control_auth": control_auth,
     }
+    raw_permissions = server.get("permissions")
+    if raw_permissions is not None and not isinstance(raw_permissions, dict):
+        raise ValueError("Invalid server permissions")
+    raw_permissions = raw_permissions or {}
+    unknown_actions = set(raw_permissions) - set(SERVER_ACTIONS)
+    if unknown_actions:
+        raise ValueError("Invalid server permission action")
+    item["permissions"] = {}
+    for action in SERVER_ACTIONS:
+        default_policy = legacy_policy if action in ("start", "stop", "restart") else "pam"
+        policy = str(raw_permissions.get(action, default_policy)).strip().lower()
+        if policy not in SERVER_AUTH_POLICIES:
+            raise ValueError("Invalid server permission policy")
+        item["permissions"][action] = policy
     runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
     if backend_name == "systemd":
         unit = str(runtime.get("unit") or server.get("service") or "").strip()
@@ -1066,7 +1125,7 @@ def control_game_server(action):
     server = find_game_server((request.json or {}).get("id", ""))
     if not server:
         return jsonify({"message": "Server not found"}), 404
-    if not require_local_server_control(request, server):
+    if not require_local_server_action(request, server, action):
         return jsonify({"message": "Unauthorized"}), 403
     try:
         backend = backend_for(
@@ -1074,7 +1133,8 @@ def control_game_server(action):
             podman_user=PODMAN_USER,
             podman_socket_path=PODMAN_SOCKET_PATH,
         )
-        result = getattr(backend, action)(server)
+        with workload_lock(server["id"]):
+            result = getattr(backend, action)(server)
     except (AttributeError, KeyError, ValueError) as error:
         return jsonify({"message": str(error)}), 500
 
@@ -1101,6 +1161,36 @@ def servers_stop():
 @app.route("/servers/restart", methods=["POST"])
 def servers_restart():
     return control_game_server("restart")
+
+
+@app.route("/servers/backup", methods=["POST"])
+def servers_backup():
+    server = find_game_server((request.json or {}).get("id", ""))
+    if not server:
+        return jsonify({"message": "Server not found"}), 404
+    if server.get("backend") != "podman":
+        return jsonify({"message": "Zálohy jsou zatím podporované pouze pro Podman servery"}), 400
+    if not require_local_server_action(request, server, "backup"):
+        return jsonify({"message": "Unauthorized"}), 403
+    try:
+        backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock(server["id"]):
+            backup = create_workload_backup(
+                server,
+                backend,
+                backup_root=BACKUP_ROOT,
+                owner_user=PODMAN_USER,
+            )
+    except (BackupError, KeyError, OSError, ValueError) as error:
+        return jsonify({"message": str(error)}), 500
+    return jsonify({
+        "message": f"Záloha serveru {server.get('name', server['id'])} byla vytvořena a ověřena",
+        "backup": backup,
+    })
 
 
 @app.route("/servers/minecraft/mods", methods=["GET"])

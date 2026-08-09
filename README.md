@@ -66,20 +66,22 @@ enter the local `api.token` there.
 The **Connection** tab selects either Client mode for remote read-only monitoring
 or Server mode for local administration. In Server mode, authenticate as a wheel
 user in the **Timekpr** tab, then edit the local service registry. Each row has an
-ID, display name, systemd unit, type (`generic` or `minecraft`), an absolute
-data and `mods` directories for Minecraft services, and a control policy. The
+ID, display name, systemd unit, type (`generic` or `minecraft`), absolute
+data and `mods` directories for Minecraft services, and an independent policy
+for every available action. The
 game port is discovered from the workload at runtime. Multiple Minecraft
 instances such as Forge and Pixelmon each keep their own mod path and comparison;
-for example, Pixelmon can use the `pixelmon-srv` systemd unit. The `silent` policy
-uses the same local `api.token` as Mover actions, while `pam` requires Timekpr
-login. Starting and stopping services is always rejected over LAN/Tailscale.
+for example, Pixelmon can use the `pixelmon-srv` systemd unit. A `silent` action
+uses the same local `api.token` as Mover actions, `pam` requires Timekpr login,
+and `disabled` rejects the action. Server registry editing itself remains behind
+wheel/PAM authentication. All control is always rejected over LAN/Tailscale.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
 
 ### Rootless Podman workloads
 
-The first Podman milestone adopts existing containers and exposes only
-status/start/stop/restart. Podman runs as the dedicated `gameplatform` account;
+The Podman backend adopts existing containers and exposes status/start/stop/restart
+plus local full-data backups. Podman runs as the dedicated `gameplatform` account;
 the root Flask service reaches its private Unix socket. The socket is never
 exposed to clients, and remote API access remains read-only.
 
@@ -90,6 +92,7 @@ user:      gameplatform
 home:      /var/lib/game-platform
 socket:    /run/user/<uid>/podman/podman.sock
 data root: /var/lib/game-platform/servers
+backups:   /var/lib/game-platform/backups/<workload-id>
 ```
 
 Example entry in `/etc/game_mover/servers.json`:
@@ -100,7 +103,12 @@ Example entry in `/etc/game_mover/servers.json`:
   "name": "Minecraft Test",
   "backend": "podman",
   "kind": "minecraft",
-  "control_auth": "pam",
+  "permissions": {
+    "start": "silent",
+    "stop": "silent",
+    "restart": "silent",
+    "backup": "pam"
+  },
   "management_mode": "adopted",
   "runtime": {
     "container_name": "mc-test"
@@ -113,9 +121,15 @@ Example entry in `/etc/game_mover/servers.json`:
 }
 ```
 
-The workload ID fixes the allowed data path to
-`<data root>/<id>/data`. This milestone does not create containers or delete
-containers/data.
+The workload ID fixes the allowed data path to `<data root>/<id>/data`. Each
+local action has an independent `silent`, `pam`, or `disabled` policy. `silent`
+uses the local group-readable capability token, `pam` requires an administrator
+session, and `disabled` rejects the action. These policies never enable remote
+control. If a workload is running during backup, it is cleanly
+stopped, the complete data directory is archived and verified, and its previous
+running state is restored. Each gzip archive has a SHA-256 file and a JSON
+manifest with selected non-secret image/runtime metadata. Restore, container
+creation and deletion of containers/data are deliberately not enabled yet.
 
 For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
@@ -293,18 +307,19 @@ V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only do
 nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
 v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
-Minecraftu absolutní cestu k datovému adresáři a adresáři `mods` a politiku
-ovládání. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
+Minecraftu absolutní cestu k datovému adresáři a adresáři `mods` a samostatnou
+politiku každé dostupné akce. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
-`pixelmon-srv`. Volba `Tiché` používá stejný místní `api.token` jako funkce Moveru,
-volba `Vyžaduje PAM` vyžaduje přihlášení v Timekpr. Spouštění a vypínání je vždy
+`pixelmon-srv`. Tichá akce používá stejný místní `api.token` jako funkce Moveru,
+PAM akce vyžaduje přihlášení v Timekpr a zakázaná akce je vždy odmítnuta. Úprava
+registru samotného zůstává za wheel/PAM ověřením. Veškeré ovládání je vždy
 odmítnuto z LAN/Tailscale. Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
 
 ### Rootless Podman workloady
 
-První Podman milestone přebírá existující containery a zpřístupňuje pouze
-status/start/stop/restart. Podman běží pod dedikovaným účtem `gameplatform`;
+Podman backend přebírá existující containery a zpřístupňuje status/start/stop/restart
+a místní úplné zálohy dat. Podman běží pod dedikovaným účtem `gameplatform`;
 root Flask služba používá jeho privátní Unix socket. Socket není dostupný
 klientům a vzdálené API zůstává read-only.
 
@@ -315,6 +330,7 @@ uživatel:  gameplatform
 home:      /var/lib/game-platform
 socket:    /run/user/<uid>/podman/podman.sock
 data root: /var/lib/game-platform/servers
+zálohy:    /var/lib/game-platform/backups/<id-workloadu>
 ```
 
 Příklad záznamu v `/etc/game_mover/servers.json`:
@@ -325,7 +341,12 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
   "name": "Minecraft Test",
   "backend": "podman",
   "kind": "minecraft",
-  "control_auth": "pam",
+  "permissions": {
+    "start": "silent",
+    "stop": "silent",
+    "restart": "silent",
+    "backup": "pam"
+  },
   "management_mode": "adopted",
   "runtime": {
     "container_name": "mc-test"
@@ -338,9 +359,15 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
 }
 ```
 
-ID workloadu určuje povolenou datovou cestu
-`<data root>/<id>/data`. Tento milestone containery nevytváří a neumožňuje
-mazání containerů ani dat.
+ID workloadu určuje povolenou datovou cestu `<data root>/<id>/data`. Každá místní
+akce má vlastní politiku `silent`, `pam` nebo `disabled`. `silent` používá místní
+token dostupný skupině, `pam` vyžaduje administrátorskou relaci a `disabled` akci
+zakáže. Žádná z těchto politik nepovoluje vzdálené ovládání. Běžící workload se
+korektně zastaví, zazálohuje
+se celý datový adresář, archiv se ověří a následně se obnoví původní stav běhu.
+Ke gzip archivu vznikne SHA-256 soubor a JSON manifest s vybranými nesekretními
+údaji o image/runtime. Restore, vytváření a mazání containerů či dat zatím
+záměrně nejsou povolené.
 
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní

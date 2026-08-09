@@ -66,6 +66,11 @@ EXCLUDE_LIST = {
 }
 
 TIMEKPRA_DISABLE_SECONDS = 24 * 3600       # kolik času nastavit pro "vypnout kontrolu na dnešek"
+SERVER_ACTIONS = ("start", "stop", "restart", "backup")
+SERVER_ACTION_LABELS = {
+    "start": "Spuštění", "stop": "Vypnutí", "restart": "Restart", "backup": "Záloha",
+}
+SERVER_POLICY_LABELS = {"silent": "tiché", "pam": "PAM", "disabled": "zakázáno"}
 
 # ------------------------------------------------------------
 # Pomocné funkce
@@ -277,6 +282,30 @@ class CompareModsThread(QThread):
         except Exception as e:
             self.compared.emit({"error": str(e)})
 
+
+class ServerBackupThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, server_id, headers):
+        super().__init__()
+        self.server_id = server_id
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/servers/backup",
+                json={"id": self.server_id},
+                headers=self.headers,
+                timeout=3600,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit(data)
+        except Exception as error:
+            self.completed.emit({"error": str(error)})
+
 # ------------------------------------------------------------
 # GUI
 # ------------------------------------------------------------
@@ -300,6 +329,7 @@ class GameMover(QWidget):
         self.minecraft_mod_inventory = None
         self.server_mods_thread = None
         self.compare_mods_thread = None
+        self.server_backup_thread = None
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
@@ -599,10 +629,10 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(8)
+        self.local_services_table.setColumnCount(11)
         self.local_services_table.setHorizontalHeaderLabels([
             "ID", "Název", "Backend", "Jednotka / container", "Typ",
-            "Datový adresář", "Adresář mods", "Ovládání",
+            "Datový adresář", "Adresář mods", "Spuštění", "Vypnutí", "Restart", "Záloha",
         ])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
@@ -614,7 +644,8 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(5, QHeaderView.Stretch)
         services_header.setSectionResizeMode(6, QHeaderView.Stretch)
-        services_header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+        for column in range(7, 11):
+            services_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         layout.addWidget(self.local_services_table)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
@@ -797,12 +828,17 @@ class GameMover(QWidget):
         kind = service.get("kind", "generic")
         kind_combo.setCurrentIndex(max(0, kind_combo.findData(kind)))
         self.local_services_table.setCellWidget(row, 4, kind_combo)
-        control_combo = QComboBox(self.local_services_table)
-        control_combo.addItem("Tiché", "silent")
-        control_combo.addItem("Vyžaduje PAM", "pam")
-        control_auth = service.get("control_auth", "silent")
-        control_combo.setCurrentIndex(max(0, control_combo.findData(control_auth)))
-        self.local_services_table.setCellWidget(row, 7, control_combo)
+        permissions = service.get("permissions") if isinstance(service.get("permissions"), dict) else {}
+        legacy_policy = service.get("control_auth", "silent")
+        for column, action in enumerate(SERVER_ACTIONS, start=7):
+            policy_combo = QComboBox(self.local_services_table)
+            policy_combo.addItem("Tiché", "silent")
+            policy_combo.addItem("Vyžaduje PAM", "pam")
+            policy_combo.addItem("Zakázáno", "disabled")
+            default_policy = legacy_policy if action != "backup" else "pam"
+            policy = permissions.get(action, default_policy)
+            policy_combo.setCurrentIndex(max(0, policy_combo.findData(policy)))
+            self.local_services_table.setCellWidget(row, column, policy_combo)
 
     def remove_local_service_rows(self):
         rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
@@ -821,10 +857,12 @@ class GameMover(QWidget):
 
             backend_combo = self.local_services_table.cellWidget(row, 2)
             kind_combo = self.local_services_table.cellWidget(row, 4)
-            control_combo = self.local_services_table.cellWidget(row, 7)
             backend = backend_combo.currentData() if backend_combo else "systemd"
             kind = kind_combo.currentData() if kind_combo else "generic"
-            control_auth = control_combo.currentData() if control_combo else "silent"
+            permissions = {}
+            for column, action in enumerate(SERVER_ACTIONS, start=7):
+                policy_combo = self.local_services_table.cellWidget(row, column)
+                permissions[action] = policy_combo.currentData() if policy_combo else "disabled"
             runtime_reference = cell_text(3)
             data_directory = cell_text(5)
             mods_dir = cell_text(6)
@@ -842,8 +880,9 @@ class GameMover(QWidget):
             entry = dict(original) if isinstance(original, dict) else {}
             entry.update({
                 "id": cell_text(0), "name": cell_text(1), "backend": backend,
-                "kind": kind, "control_auth": control_auth,
+                "kind": kind, "permissions": permissions,
             })
+            entry.pop("control_auth", None)
             if backend == "systemd":
                 entry["service"] = runtime_reference
                 entry["runtime"] = {"unit": runtime_reference}
@@ -1040,36 +1079,63 @@ class GameMover(QWidget):
                 )
                 actions.addWidget(mods_button)
             if self.app_mode == "server":
-                control_auth = server.get("control_auth", "silent")
-                can_control = bool(self.timekpr_token) if control_auth == "pam" else bool(self.local_admin_headers())
-                auth_label = QLabel("Ovládání: PAM" if control_auth == "pam" else "Ovládání: tiché", card)
+                permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+                auth_summary = " · ".join(
+                    f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"
+                    for action in SERVER_ACTIONS
+                    if action != "backup" or server.get("backup_supported")
+                )
+                auth_label = QLabel(f"Oprávnění: {auth_summary}", card)
                 auth_label.setStyleSheet("color: #aab7c0;")
-                actions.addWidget(auth_label)
+                auth_label.setWordWrap(True)
+                card_layout.addWidget(auth_label)
                 actions.addStretch()
+                start_policy = permissions.get("start", "disabled")
                 start_button = QPushButton("Spustit", card)
                 start_button.setFixedWidth(120)
-                start_button.setEnabled(can_control and status in ("inactive", "failed"))
+                start_button.setEnabled(
+                    bool(self.local_server_action_headers(start_policy))
+                    and status in ("inactive", "failed")
+                )
                 start_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
-                    self.control_local_server("start", server_id, name, auth)
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=start_policy:
+                    self.control_local_server("start", server_id, name, policy)
                 )
                 actions.addWidget(start_button)
+                restart_policy = permissions.get("restart", "disabled")
                 restart_button = QPushButton("Restartovat", card)
                 restart_button.setFixedWidth(120)
-                restart_button.setEnabled(can_control and status in ("active", "activating"))
+                restart_button.setEnabled(
+                    bool(self.local_server_action_headers(restart_policy))
+                    and status in ("active", "activating")
+                )
                 restart_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
-                    self.control_local_server("restart", server_id, name, auth)
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=restart_policy:
+                    self.control_local_server("restart", server_id, name, policy)
                 )
                 actions.addWidget(restart_button)
+                stop_policy = permissions.get("stop", "disabled")
                 stop_button = QPushButton("Vypnout", card)
                 stop_button.setFixedWidth(120)
-                stop_button.setEnabled(can_control and status in ("active", "activating"))
+                stop_button.setEnabled(
+                    bool(self.local_server_action_headers(stop_policy))
+                    and status in ("active", "activating")
+                )
                 stop_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), auth=control_auth:
-                    self.control_local_server("stop", server_id, name, auth)
+                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=stop_policy:
+                    self.control_local_server("stop", server_id, name, policy)
                 )
                 actions.addWidget(stop_button)
+                if server.get("backup_supported"):
+                    backup_policy = permissions.get("backup", "disabled")
+                    backup_button = QPushButton("Vytvořit zálohu", card)
+                    backup_button.setFixedWidth(150)
+                    backup_button.setEnabled(bool(self.local_server_action_headers(backup_policy)))
+                    backup_button.clicked.connect(
+                        lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=backup_policy:
+                        self.backup_local_server(server_id, name, policy)
+                    )
+                    actions.addWidget(backup_button)
             if actions.count():
                 card_layout.addLayout(actions)
             if details_open and server_id == getattr(self, "selected_minecraft_server_id", ""):
@@ -1093,7 +1159,14 @@ class GameMover(QWidget):
             self.render_server_cards([])
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
 
-    def control_local_server(self, action, server_id, name, control_auth):
+    def local_server_action_headers(self, policy):
+        if policy == "pam":
+            return self.local_pam_headers()
+        if policy == "silent":
+            return self.local_admin_headers()
+        return {}
+
+    def control_local_server(self, action, server_id, name, policy):
         if self.app_mode != "server":
             return
         if action in ("stop", "restart"):
@@ -1102,7 +1175,7 @@ class GameMover(QWidget):
             answer = QMessageBox.question(self, title, f"Opravdu {verb} {name}?")
             if answer != QMessageBox.Yes:
                 return
-        headers = self.local_pam_headers() if control_auth == "pam" else self.local_admin_headers()
+        headers = self.local_server_action_headers(policy)
         if not headers:
             QMessageBox.warning(self, "Server", "Pro zvolený způsob ovládání chybí oprávnění.")
             return
@@ -1122,6 +1195,51 @@ class GameMover(QWidget):
             self.refresh_server_statuses()
         except Exception as error:
             QMessageBox.critical(self, "Server", f"{action_label} selhalo: {error}")
+
+    def backup_local_server(self, server_id, name, policy):
+        if self.app_mode != "server":
+            return
+        if self.server_backup_thread and self.server_backup_thread.isRunning():
+            QMessageBox.information(self, "Záloha serveru", "Jiná záloha právě probíhá.")
+            return
+        headers = self.local_server_action_headers(policy)
+        if not headers:
+            QMessageBox.warning(self, "Záloha serveru", "Pro vytvoření zálohy chybí zvolené oprávnění.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Vytvořit zálohu",
+            f"Vytvořit úplnou zálohu dat serveru {name}?\n\n"
+            "Pokud server běží, bude po dobu zálohování korektně vypnut a poté znovu spuštěn.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.server_backup_thread = ServerBackupThread(server_id, headers)
+        self.server_backup_thread.completed.connect(self.on_server_backup_completed)
+        self.server_backup_thread.start()
+        QMessageBox.information(
+            self,
+            "Záloha serveru",
+            "Záloha byla spuštěna. Okno zůstává použitelné; výsledek se zobrazí po dokončení.",
+        )
+
+    def on_server_backup_completed(self, payload):
+        error = payload.get("error")
+        if error:
+            QMessageBox.critical(self, "Záloha serveru", f"Záloha selhala: {error}")
+        else:
+            backup = payload.get("backup", {})
+            size_mib = int(backup.get("size_bytes", 0)) / (1024 * 1024)
+            QMessageBox.information(
+                self,
+                "Záloha serveru",
+                f"{payload.get('message', 'Záloha byla dokončena.')}\n"
+                f"Velikost: {size_mib:.1f} MiB\n"
+                f"Archiv: {backup.get('archive', '—')}",
+            )
+        self.refresh_server_statuses()
 
     def reload_selected_server_mods(self):
         if getattr(self, "selected_minecraft_server_id", ""):
