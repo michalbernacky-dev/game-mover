@@ -468,20 +468,11 @@ def game_server_status(server):
         }
         if state.status == "active" and direct_port is not None:
             probe_hosts = local_server_addresses()
-
-            def probe(probe_host):
-                try:
-                    return query_server_status(probe_host, direct_port)
-                except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                    return None
-
             if probe_hosts:
-                with ThreadPoolExecutor(max_workers=min(8, len(probe_hosts))) as executor:
-                    probe_results = list(executor.map(probe, probe_hosts))
-                for probe_result in probe_results:
-                    if probe_result is not None:
-                        players.update(probe_result)
-                        break
+                try:
+                    players.update(query_server_status(probe_hosts[0], direct_port))
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    pass
         result["players"] = players
     return result
 
