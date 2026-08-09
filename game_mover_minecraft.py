@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Read-only Minecraft status and persisted-player helpers."""
+
+import json
+import os
+import re
+import socket
+import struct
+
+
+MAX_STATUS_PACKET = 1024 * 1024
+PLAYER_DATA_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\.dat$"
+)
+
+
+def _encode_varint(value):
+    value &= 0xFFFFFFFF
+    encoded = bytearray()
+    while True:
+        byte = value & 0x7F
+        value >>= 7
+        encoded.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(encoded)
+
+
+def _read_exact(stream, length):
+    chunks = bytearray()
+    while len(chunks) < length:
+        chunk = stream.recv(length - len(chunks))
+        if not chunk:
+            raise OSError("Minecraft status connection closed unexpectedly")
+        chunks.extend(chunk)
+    return bytes(chunks)
+
+
+def _read_varint(stream):
+    value = 0
+    for index in range(5):
+        byte = _read_exact(stream, 1)[0]
+        value |= (byte & 0x7F) << (7 * index)
+        if not byte & 0x80:
+            return value
+    raise ValueError("Minecraft status VarInt is too large")
+
+
+def query_server_status(host, port, timeout=1.0):
+    """Return online/max player counts using the Minecraft status protocol."""
+    encoded_host = host.encode("utf-8")
+    if len(encoded_host) > 255:
+        raise ValueError("Minecraft host name is too long")
+
+    handshake = (
+        _encode_varint(0)
+        + _encode_varint(0)
+        + _encode_varint(len(encoded_host))
+        + encoded_host
+        + struct.pack(">H", int(port))
+        + _encode_varint(1)
+    )
+    with socket.create_connection((host, int(port)), timeout=timeout) as stream:
+        stream.settimeout(timeout)
+        stream.sendall(_encode_varint(len(handshake)) + handshake)
+        stream.sendall(b"\x01\x00")
+        packet_length = _read_varint(stream)
+        if not 0 < packet_length <= MAX_STATUS_PACKET:
+            raise ValueError("Invalid Minecraft status packet length")
+        packet_id = _read_varint(stream)
+        if packet_id != 0:
+            raise ValueError("Unexpected Minecraft status packet")
+        json_length = _read_varint(stream)
+        if not 0 <= json_length <= packet_length <= MAX_STATUS_PACKET:
+            raise ValueError("Invalid Minecraft status JSON length")
+        payload = json.loads(_read_exact(stream, json_length).decode("utf-8"))
+
+    players = payload.get("players") if isinstance(payload, dict) else None
+    if not isinstance(players, dict):
+        raise ValueError("Minecraft status does not contain player counts")
+    return {
+        "online": int(players.get("online", 0)),
+        "max": int(players.get("max", 0)),
+    }
+
+
+def _level_name(data_directory):
+    properties_path = os.path.join(data_directory, "server.properties")
+    try:
+        with open(properties_path, "r", encoding="utf-8") as properties:
+            for line in properties:
+                key, separator, value = line.partition("=")
+                if separator and key.strip() == "level-name":
+                    return value.strip() or "world"
+    except (OSError, UnicodeError):
+        pass
+    return "world"
+
+
+def count_known_players(data_directory):
+    """Count UUID player files without reading or changing world contents."""
+    if not data_directory:
+        return None
+    data_root = os.path.realpath(data_directory)
+    world_directory = os.path.realpath(os.path.join(data_root, _level_name(data_root)))
+    try:
+        if os.path.commonpath((data_root, world_directory)) != data_root:
+            return None
+    except ValueError:
+        return None
+    player_data = os.path.join(world_directory, "playerdata")
+    try:
+        return sum(
+            1 for name in os.listdir(player_data)
+            if PLAYER_DATA_RE.fullmatch(name)
+        )
+    except OSError:
+        return None

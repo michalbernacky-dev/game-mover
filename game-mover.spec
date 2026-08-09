@@ -41,6 +41,7 @@ mkdir -p %{buildroot}/opt/game_mover
 install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flask.py
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
+install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
 install -Dpm0644 requirements.txt %{buildroot}/opt/game_mover/requirements.txt
@@ -92,6 +93,7 @@ fi
 /opt/game_mover/game_mover_flask.py
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
+/opt/game_mover/game_mover_minecraft.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py
 /opt/game_mover/requirements.txt

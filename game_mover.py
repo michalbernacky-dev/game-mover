@@ -832,14 +832,16 @@ class GameMover(QWidget):
                 entry["runtime"] = {"container_name": runtime_reference}
                 entry.pop("service", None)
                 entry["management_mode"] = "adopted"
-                if direct_port:
-                    try:
-                        port = int(direct_port)
-                    except ValueError:
-                        QMessageBox.warning(self, "Služby", "Herní port musí být číslo.")
-                        self.local_services_table.setCurrentCell(row, 6)
-                        return
-                    entry["connection"] = {"direct_port": port}
+            if direct_port:
+                try:
+                    port = int(direct_port)
+                except ValueError:
+                    QMessageBox.warning(self, "Služby", "Herní port musí být číslo.")
+                    self.local_services_table.setCurrentCell(row, 6)
+                    return
+                entry["connection"] = {"direct_port": port}
+            else:
+                entry.pop("connection", None)
             if kind == "minecraft":
                 entry["mods_dir"] = mods_dir
                 if backend == "podman":
@@ -992,6 +994,30 @@ class GameMover(QWidget):
             status_label = QLabel(f"● {server.get('message', 'Neznámý stav')}")
             status_label.setStyleSheet(f"color: {colors.get(status, '#ff6666')}; font-weight: bold;")
             card_layout.addWidget(status_label)
+            connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
+            direct_port = connection.get("direct_port")
+            if direct_port is not None:
+                if self.app_mode == "server":
+                    connection_host = "127.0.0.1"
+                else:
+                    connection_host, _api_port = self.split_server_address(
+                        self.active_server_profile().get("address", "")
+                    )
+                if ":" in connection_host and not connection_host.startswith("["):
+                    connection_host = f"[{connection_host}]"
+                connection_label = QLabel(f"Připojení: {connection_host}:{direct_port}")
+                connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                card_layout.addWidget(connection_label)
+            players = server.get("players") if isinstance(server.get("players"), dict) else {}
+            online = players.get("online")
+            maximum = players.get("max")
+            if online is not None and maximum is not None:
+                card_layout.addWidget(QLabel(f"Hráči: {online} / {maximum} online"))
+            elif server.get("kind") == "minecraft":
+                card_layout.addWidget(QLabel("Hráči: nezjištěno"))
+            known = players.get("known")
+            if known is not None:
+                card_layout.addWidget(QLabel(f"Celkem známých hráčů: {known}"))
             service_label = QLabel(server.get("runtime_label", server.get("service", "")))
             service_label.setStyleSheet("color: #aab7c0;")
             card_layout.addWidget(service_label)

@@ -17,6 +17,7 @@ import sys
 import json
 
 from game_mover_mods import scan_mod_directory
+from game_mover_minecraft import count_known_players, query_server_status
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
 app = Flask(__name__)
@@ -88,7 +89,7 @@ def save_game_servers(servers):
     try:
         os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
         os.chmod(temporary_path, 0o640)
-    except (KeyError, PermissionError):
+    except (KeyError, OSError):
         os.chmod(temporary_path, 0o600)
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
 
@@ -380,7 +381,7 @@ def game_server_status(server):
             message="Backend není dostupný",
             error=str(error),
         )
-    return {
+    result = {
         "id": server.get("id", ""),
         "name": server.get("name", reference),
         "backend": backend_name,
@@ -394,6 +395,24 @@ def game_server_status(server):
         "message": state.message,
         "error": state.error,
     }
+    connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
+    direct_port = connection.get("direct_port")
+    if direct_port is not None:
+        result["connection"] = {"direct_port": direct_port}
+    if server.get("kind") == "minecraft":
+        data = server.get("data") if isinstance(server.get("data"), dict) else {}
+        players = {
+            "online": None,
+            "max": None,
+            "known": count_known_players(data.get("directory")),
+        }
+        if state.status == "active" and direct_port is not None:
+            try:
+                players.update(query_server_status("127.0.0.1", direct_port))
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                pass
+        result["players"] = players
+    return result
 
 # ------------------------------------------------------------
 # Timekpr detection & helpers
@@ -981,7 +1000,7 @@ def validate_game_server_entry(server, seen_ids):
             }
 
     connection = server.get("connection")
-    if backend_name == "podman" and isinstance(connection, dict) and connection.get("direct_port") is not None:
+    if isinstance(connection, dict) and connection.get("direct_port") is not None:
         direct_port = int(connection["direct_port"])
         if not 1 <= direct_port <= 65535:
             raise ValueError("Invalid game port")
