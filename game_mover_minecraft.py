@@ -15,6 +15,32 @@ UUID_RE = re.compile(
 )
 
 
+def local_server_addresses():
+    """Return local addresses suitable for probing services bound on this host."""
+    addresses = []
+
+    def add(address):
+        if address and address not in ("0.0.0.0", "::") and address not in addresses:
+            addresses.append(address)
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+            route_socket.connect(("192.0.2.1", 9))
+            add(route_socket.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for address_info in socket.getaddrinfo(
+            socket.gethostname(), None, type=socket.SOCK_STREAM,
+        ):
+            add(address_info[4][0])
+    except OSError:
+        pass
+    add("127.0.0.1")
+    add("::1")
+    return addresses
+
+
 def _encode_varint(value):
     value &= 0xFFFFFFFF
     encoded = bytearray()

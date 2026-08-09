@@ -31,6 +31,11 @@ class FakeSocket:
 
 
 class MinecraftStatusTest(unittest.TestCase):
+    def test_local_server_addresses_include_loopback_fallbacks(self):
+        addresses = minecraft.local_server_addresses()
+        self.assertIn("127.0.0.1", addresses)
+        self.assertIn("::1", addresses)
+
     def test_status_ping_reads_online_and_max_players(self):
         payload = json.dumps({"players": {"online": 3, "max": 20}}).encode("utf-8")
         body = b"\x00" + minecraft._encode_varint(len(payload)) + payload

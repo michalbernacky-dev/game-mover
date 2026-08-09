@@ -17,7 +17,12 @@ import sys
 import json
 
 from game_mover_mods import scan_mod_directory
-from game_mover_minecraft import configured_server_port, count_known_players, query_server_status
+from game_mover_minecraft import (
+    configured_server_port,
+    count_known_players,
+    local_server_addresses,
+    query_server_status,
+)
 from game_mover_version import __version__
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
@@ -429,10 +434,12 @@ def game_server_status(server):
             "known": count_known_players(data.get("directory")),
         }
         if state.status == "active" and direct_port is not None:
-            try:
-                players.update(query_server_status("127.0.0.1", direct_port))
-            except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                pass
+            for probe_host in local_server_addresses():
+                try:
+                    players.update(query_server_status(probe_host, direct_port))
+                    break
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
         result["players"] = players
     return result
 

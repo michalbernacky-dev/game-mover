@@ -103,11 +103,15 @@ class ServerRegistryTest(unittest.TestCase):
         fake_backend.published_port.return_value = 25570
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
-            patch.object(backend, "query_server_status", return_value={"online": 1, "max": 20}),
+            patch.object(backend, "local_server_addresses", return_value=["192.0.2.66"]),
+            patch.object(
+                backend, "query_server_status", return_value={"online": 1, "max": 20},
+            ) as status_query,
         ):
             status = backend.game_server_status(server)
         self.assertEqual(status["connection"], {"direct_port": 25570, "source": "podman"})
         self.assertEqual(status["players"], {"online": 1, "max": 20, "known": 1})
+        status_query.assert_called_once_with("192.0.2.66", 25570)
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):
         self.save_servers()
