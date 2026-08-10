@@ -17,6 +17,7 @@ import sys
 import json
 import threading
 import ipaddress
+import socket
 from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
@@ -170,13 +171,18 @@ def load_velocity_config():
         return normalize_velocity_config(default_velocity_config())
 
 
+def check_velocity_tcp_ready(host, port, timeout=1.5):
+    with socket.create_connection((host, int(port)), timeout=timeout):
+        return True
+
+
 def wait_for_velocity_ready(host, port, timeout=120):
     deadline = time.monotonic() + timeout
-    last_error = "Velocity ještě neodpovídá"
+    last_error = "Velocity ještě neposlouchá"
     while time.monotonic() < deadline:
         try:
-            return query_server_status(host, port, timeout=2.0)
-        except (OSError, RuntimeError, ValueError) as error:
+            return check_velocity_tcp_ready(host, port, timeout=1.5)
+        except OSError as error:
             last_error = str(error)
             time.sleep(1)
     raise RuntimeError(f"Velocity se nespustila v časovém limitu: {last_error}")
@@ -1231,9 +1237,9 @@ def velocity_proxy_status():
     ready = False
     if container_exists and state.status == "active":
         try:
-            query_server_status("127.0.0.1", config["listen"]["port"], timeout=1.5)
+            check_velocity_tcp_ready("127.0.0.1", config["listen"]["port"], timeout=1.5)
             ready = True
-        except (OSError, RuntimeError, ValueError) as error:
+        except OSError as error:
             state = WorkloadState(
                 "activating",
                 state.native_status,
@@ -1367,6 +1373,8 @@ def velocity_proxy_deploy():
                 config["image"],
                 environment={
                     "TYPE": "VELOCITY",
+                    "VELOCITY_VERSION": config["velocity_version"],
+                    "VELOCITY_BUILD_ID": config["velocity_build_id"],
                     "MEMORY": "512M",
                     "PUID": "0",
                     "PGID": "0",
@@ -1407,7 +1415,7 @@ def velocity_proxy_deploy():
             OPERATIONS.update(
                 VELOCITY_DEPLOY_OPERATION_ID,
                 phase="verifying",
-                message="Ověřuji Minecraft handshake přes Velocity",
+                message="Ověřuji TCP listener Velocity",
                 progress=95,
             )
             wait_for_velocity_ready("127.0.0.1", config["listen"]["port"])

@@ -211,6 +211,8 @@ class ServerRegistryTest(unittest.TestCase):
         chown.assert_called_once_with(layout, backend.PODMAN_USER)
         create_kwargs = fake_backend.create_container.call_args.kwargs
         self.assertEqual(create_kwargs["environment"]["TYPE"], "VELOCITY")
+        self.assertEqual(create_kwargs["environment"]["VELOCITY_VERSION"], "3.5.1")
+        self.assertEqual(create_kwargs["environment"]["VELOCITY_BUILD_ID"], "615")
         self.assertEqual(create_kwargs["environment"]["MODRINTH_PROJECTS"], "ambassador")
         self.assertEqual(create_kwargs["environment"]["SKIP_DOWNLOAD_DEFAULTS"], "true")
         self.assertEqual(create_kwargs["ports"][0]["host_port"], 25580)
@@ -224,14 +226,15 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(operation["progress"], 100)
         readiness.assert_called_once_with("127.0.0.1", 25580)
 
-    def test_velocity_running_container_is_not_ready_until_handshake_works(self):
+    def test_velocity_running_container_is_not_ready_until_tcp_listener_works(self):
         fake_backend = Mock()
         fake_backend.status.return_value = WorkloadState("active", "running", "Běží")
         fake_backend.container_exists.return_value = True
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
             patch.object(
-                backend, "query_server_status", side_effect=ConnectionResetError("reset"),
+                backend, "check_velocity_tcp_ready",
+                side_effect=ConnectionRefusedError("refused"),
             ),
         ):
             response = self.client.get("/proxy/status", **self.local_options())

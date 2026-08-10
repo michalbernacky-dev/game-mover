@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        19%{?dist}
+Release:        20%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -130,6 +130,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-20
+- Pin Velocity 3.5.1 build 615 to the Java 21 proxy image
+- Verify the proxy TCP listener independently from Forge status-ping behavior
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-19
 - Remove a failed disposable Velocity container while preserving persistent data
 - Allow a failed deployment to be retried cleanly from the Servers tab

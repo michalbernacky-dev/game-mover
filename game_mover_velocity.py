@@ -19,6 +19,7 @@ VELOCITY_IMAGE_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?"
     r"(?:@sha256:[0-9a-f]{64})?$"
 )
+VELOCITY_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-SNAPSHOT)?$")
 
 
 class VelocityConfigError(ValueError):
@@ -29,6 +30,8 @@ def default_velocity_config() -> dict:
     """Return a safe staging configuration that does not replace production yet."""
     return {
         "image": "docker.io/itzg/mc-proxy:java21",
+        "velocity_version": "3.5.1",
+        "velocity_build_id": "615",
         "container_name": "velocity",
         "network": "game-platform",
         "listen": {"host": "0.0.0.0", "port": 25580},
@@ -90,6 +93,16 @@ def normalize_velocity_config(raw: dict) -> dict:
     container_name = str(raw.get("container_name", defaults["container_name"])).strip()
     if not VELOCITY_IMAGE_RE.fullmatch(image):
         raise VelocityConfigError("Neplatná reference image Velocity")
+    velocity_version = str(
+        raw.get("velocity_version", defaults["velocity_version"])
+    ).strip()
+    if not VELOCITY_VERSION_RE.fullmatch(velocity_version):
+        raise VelocityConfigError("Neplatná verze Velocity")
+    velocity_build_id = str(
+        raw.get("velocity_build_id", defaults["velocity_build_id"])
+    ).strip()
+    if not velocity_build_id.isdigit() or int(velocity_build_id) < 1:
+        raise VelocityConfigError("Neplatný build Velocity")
     if not VELOCITY_SERVER_ID_RE.fullmatch(container_name):
         raise VelocityConfigError("Neplatné jméno containeru Velocity")
     network = str(raw.get("network", defaults["network"])).strip().lower()
@@ -170,6 +183,8 @@ def normalize_velocity_config(raw: dict) -> dict:
         raise VelocityConfigError("Velocity read timeout musí být 5 až 600 sekund")
     return {
         "image": image,
+        "velocity_version": velocity_version,
+        "velocity_build_id": velocity_build_id,
         "container_name": container_name,
         "network": network,
         "listen": {

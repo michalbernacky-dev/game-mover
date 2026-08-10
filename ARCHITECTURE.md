@@ -18,7 +18,9 @@ The platform has two complementary workload models:
 - All platform-created Minecraft servers ultimately run as isolated rootless
   Podman containers owned by the dedicated `gameplatform` account. The current
   systemd Forge server is a migration source, not a restriction on generic
-  systemd support.
+  systemd support. Existing Minecraft servers may also be adopted from systemd
+  and remain supported for status, lifecycle, backups, management, and Velocity
+  routing; self-service creation does not create new systemd units.
 
 ## Minecraft self-service
 
@@ -41,6 +43,16 @@ Velocity is the final Minecraft ingress on TCP 25565. Minecraft backends reside
 on a private Podman network and are addressed by stable container/network names,
 not by LAN-published backend ports. During migration, Velocity is staged on TCP
 25580 and may temporarily route to the existing host Forge service on 25565.
+
+Velocity resolves backend targets through the workload adapter rather than
+assuming one runtime:
+
+- a managed Podman Minecraft backend joins `game-platform` and is routed by its
+  private network alias and container port, without publishing that port to LAN;
+- an adopted systemd Minecraft backend is routed through the host gateway and
+  its validated `server.properties` port;
+- runtime-specific discovery stays behind the adapter, while RCON, properties,
+  players, logs, backup and UI management use common workload capabilities.
 
 ## User interface
 
@@ -94,4 +106,3 @@ appear in logs or responses.
 4. Add the per-server Management tab: logs, RCON, properties, players and lists.
 5. Extract and extend operation policies into the Security tab.
 6. Continue with modpacks, worlds, quotas and broader Linux gaming features.
-

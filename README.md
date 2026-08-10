@@ -168,8 +168,11 @@ Long-running deployment operations publish safe phase and percentage updates;
 the Servers card polls and displays them without exposing command output or
 secrets. The same operation model is shared by future Minecraft installation,
 restore and migration workflows.
-The proxy is only reported ready after a real Minecraft status handshake; a
-running container alone is not considered healthy.
+Velocity is pinned to stable version `3.5.1` build `615` on Java 21. The proxy
+is only reported ready after its TCP listener accepts connections; a running
+container alone is not considered healthy. Backend route health is evaluated
+separately because a modded Forge backend may not answer a status ping even
+though its authenticated RCON and player connections work.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -434,8 +437,11 @@ do LAN.
 Dlouhé operace zveřejňují bezpečný popis fáze a procenta; karta v záložce Servery
 je průběžně zobrazuje bez zpřístupnění výstupu příkazů nebo tajných údajů. Stejný
 model použijí budoucí instalace, obnovy a migrace Minecraft serverů.
-Proxy se označí jako připravená až po skutečném Minecraft status handshaku;
-samotný stav běžícího containeru se nepovažuje za dostatečný health check.
+Velocity je připnutá na stabilní verzi `3.5.1`, build `615`, na Java 21. Proxy se
+označí jako připravená až ve chvíli, kdy její TCP listener přijímá spojení;
+samotný stav běžícího containeru není dostatečný health check. Zdraví backendové
+trasy se vyhodnocuje samostatně, protože modovaný Forge nemusí odpovídat na
+status ping, přestože funguje RCON i připojení hráčů.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
