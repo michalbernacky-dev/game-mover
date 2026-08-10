@@ -67,6 +67,13 @@ BACKUP_ROOT = os.path.realpath(
 )
 WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
+VELOCITY_DEPLOY_STATE_LOCK = threading.Lock()
+VELOCITY_DEPLOY_STATE = {
+    "running": False,
+    "phase": "idle",
+    "message": "",
+    "progress": 0,
+}
 SERVER_ACTIONS = ("start", "stop", "restart", "backup")
 SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
 MINECRAFT_STATUS_TIMEOUT = 8.0
@@ -83,6 +90,21 @@ CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 def workload_lock(workload_id):
     with WORKLOAD_LOCKS_GUARD:
         return WORKLOAD_LOCKS.setdefault(workload_id, threading.Lock())
+
+
+def set_velocity_deploy_state(*, running, phase, message, progress):
+    with VELOCITY_DEPLOY_STATE_LOCK:
+        VELOCITY_DEPLOY_STATE.update({
+            "running": bool(running),
+            "phase": str(phase),
+            "message": str(message),
+            "progress": max(0, min(100, int(progress))),
+        })
+
+
+def velocity_deploy_state():
+    with VELOCITY_DEPLOY_STATE_LOCK:
+        return dict(VELOCITY_DEPLOY_STATE)
 
 
 def default_game_servers():
@@ -1227,6 +1249,7 @@ def velocity_proxy_status():
             "configured": os.path.isfile(VELOCITY_CONFIG_PATH),
             "prepared": os.path.isdir(VELOCITY_DATA_DIRECTORY),
             "deployed": container_exists,
+            "deployment": velocity_deploy_state(),
         },
     })
 
@@ -1248,6 +1271,15 @@ def velocity_proxy_config():
 def velocity_proxy_deploy():
     if not require_local_pam_session(request):
         return jsonify({"message": "Unauthorized"}), 403
+    with VELOCITY_DEPLOY_STATE_LOCK:
+        if VELOCITY_DEPLOY_STATE["running"]:
+            return jsonify({"message": "Nasazování Velocity už probíhá"}), 409
+        VELOCITY_DEPLOY_STATE.update({
+            "running": True,
+            "phase": "preparing",
+            "message": "Připravuji konfiguraci Velocity",
+            "progress": 5,
+        })
     config = load_velocity_config()
     workload = {
         "backend": "podman",
@@ -1261,11 +1293,29 @@ def velocity_proxy_deploy():
         )
         with workload_lock("velocity-proxy"):
             if proxy_backend.container_exists(workload):
+                set_velocity_deploy_state(
+                    running=False,
+                    phase="already-deployed",
+                    message="Velocity už je nasazena",
+                    progress=100,
+                )
                 return jsonify({
                     "message": "Velocity container už existuje; změny vyžadují řízenou aktualizaci",
                 }), 409
+            set_velocity_deploy_state(
+                running=True,
+                phase="layout",
+                message="Vytvářím konfiguraci a forwarding secret",
+                progress=10,
+            )
             layout = write_velocity_layout(config, VELOCITY_DATA_DIRECTORY)
             chown_velocity_layout(layout, PODMAN_USER)
+            set_velocity_deploy_state(
+                running=True,
+                phase="network",
+                message="Připravuji privátní Podman síť",
+                progress=20,
+            )
             if not proxy_backend.network_exists(config["network"]):
                 network_result = proxy_backend.create_network(
                     config["network"],
@@ -1276,6 +1326,12 @@ def velocity_proxy_deploy():
                         network_result.error or network_result.output
                         or "Vytvoření privátní Podman sítě selhalo"
                     )
+            set_velocity_deploy_state(
+                running=True,
+                phase="pulling",
+                message="Stahuji image Velocity a plugin Ambassador",
+                progress=35,
+            )
             pull_result = proxy_backend.pull_image(config["image"])
             if pull_result.returncode != 0:
                 raise RuntimeError(
@@ -1289,6 +1345,12 @@ def velocity_proxy_deploy():
                 plugin["minecraft_version"] for plugin in config["plugins"]
             }
             minecraft_version = next(iter(minecraft_versions), "1.20.1")
+            set_velocity_deploy_state(
+                running=True,
+                phase="creating",
+                message="Vytvářím Velocity container",
+                progress=75,
+            )
             create_result = proxy_backend.create_container(
                 workload,
                 config["image"],
@@ -1318,13 +1380,31 @@ def velocity_proxy_deploy():
                 raise RuntimeError(
                     create_result.error or create_result.output or "Vytvoření Velocity selhalo"
                 )
+            set_velocity_deploy_state(
+                running=True,
+                phase="starting",
+                message="Spouštím Velocity a ověřuji lifecycle",
+                progress=90,
+            )
             start_result = proxy_backend.start(workload)
             if start_result.returncode != 0:
                 raise RuntimeError(
                     start_result.error or start_result.output or "Spuštění Velocity selhalo"
                 )
     except (KeyError, OSError, RuntimeError, ValueError) as error:
+        set_velocity_deploy_state(
+            running=False,
+            phase="failed",
+            message=f"Nasazení selhalo: {error}",
+            progress=100,
+        )
         return jsonify({"message": str(error)}), 500
+    set_velocity_deploy_state(
+        running=False,
+        phase="complete",
+        message="Velocity byla úspěšně nasazena",
+        progress=100,
+    )
     return jsonify({
         "message": "Velocity byla nasazena na testovací port",
         "listen": config["listen"],
