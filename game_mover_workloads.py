@@ -318,6 +318,13 @@ class PodmanBackend:
     def restart(self, workload: dict) -> BackendResult:
         return self._command(["restart", "--time", "120", self.reference(workload)], 180)
 
+    def remove_container(self, workload: dict, *, force=False) -> BackendResult:
+        arguments = ["rm"]
+        if force:
+            arguments.append("--force")
+        arguments.append(self.reference(workload))
+        return self._command(arguments, 180)
+
 
 def backend_for(
     workload: dict,

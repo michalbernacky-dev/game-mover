@@ -164,6 +164,12 @@ support and network isolation are enabled during migration.
 Velocity is attached to the managed rootless bridge network `game-platform`;
 future Minecraft backends will join the same network without publishing their
 game ports to the LAN.
+Long-running deployment operations publish safe phase and percentage updates;
+the Servers card polls and displays them without exposing command output or
+secrets. The same operation model is shared by future Minecraft installation,
+restore and migration workflows.
+The proxy is only reported ready after a real Minecraft status handshake; a
+running container alone is not considered healthy.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -425,6 +431,11 @@ podporu ve Forge backendu a síťovou izolaci.
 Velocity je připojená do spravované rootless bridge sítě `game-platform`;
 budoucí Minecraft backendy vstoupí do stejné sítě bez publikování herních portů
 do LAN.
+Dlouhé operace zveřejňují bezpečný popis fáze a procenta; karta v záložce Servery
+je průběžně zobrazuje bez zpřístupnění výstupu příkazů nebo tajných údajů. Stejný
+model použijí budoucí instalace, obnovy a migrace Minecraft serverů.
+Proxy se označí jako připravená až po skutečném Minecraft status handshaku;
+samotný stav běžícího containeru se nepovažuje za dostatečný health check.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

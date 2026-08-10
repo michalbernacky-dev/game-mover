@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        16%{?dist}
+Release:        19%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -47,6 +47,7 @@ install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
 install -Dpm0644 game_mover_velocity.py %{buildroot}/opt/game_mover/game_mover_velocity.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
+install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
@@ -118,6 +119,7 @@ fi
 /opt/game_mover/game_mover_minecraft.py
 /opt/game_mover/game_mover_velocity.py
 /opt/game_mover/game_mover_backups.py
+/opt/game_mover/game_mover_jobs.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py
@@ -128,6 +130,18 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-19
+- Remove a failed disposable Velocity container while preserving persistent data
+- Allow a failed deployment to be retried cleanly from the Servers tab
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-18
+- Skip remote default-config download when Game Platform supplies velocity.toml
+- Require a successful Minecraft handshake before reporting Velocity ready
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-17
+- Show live deployment phases and a progress bar on the Velocity server card
+- Add a reusable operation progress model for Minecraft installs and migrations
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-16
 - Create and attach Velocity to the managed private game-platform network
 - Add PAM-protected start, stop, and restart controls for deployed Velocity

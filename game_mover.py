@@ -435,6 +435,8 @@ class GameMover(QWidget):
         self.resize(960, 720)
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
+        self.operation_refresh_timer = QTimer(self)
+        self.operation_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.refresh_server_statuses()
         self.refresh_game_lists()
         self.server_refresh_timer = QTimer(self)
@@ -1159,6 +1161,24 @@ class GameMover(QWidget):
             service_label = QLabel(server.get("runtime_label", server.get("service", "")))
             service_label.setStyleSheet("color: #aab7c0;")
             card_layout.addWidget(service_label)
+            operation = server.get("operation") if isinstance(server.get("operation"), dict) else {}
+            local_operation_running = (
+                server.get("kind") == "proxy"
+                and self.velocity_deploy_thread is not None
+                and self.velocity_deploy_thread.isRunning()
+            )
+            if operation.get("running") or local_operation_running:
+                operation_label = QLabel(
+                    operation.get("message") or "Zahajuji dlouhou operaci…", card,
+                )
+                operation_label.setStyleSheet("color: #74c0fc; font-weight: bold;")
+                card_layout.addWidget(operation_label)
+                operation_progress = QProgressBar(card)
+                operation_progress.setRange(0, 100)
+                operation_progress.setValue(int(operation.get("progress", 1)))
+                operation_progress.setFormat("%p %")
+                operation_progress.setTextVisible(True)
+                card_layout.addWidget(operation_progress)
             actions = QHBoxLayout()
             has_mods = server.get("has_mods", server.get("kind") == "minecraft")
             if server.get("kind") == "minecraft" and has_mods:
@@ -1287,7 +1307,25 @@ class GameMover(QWidget):
                 "connection": {"direct_port": listen.get("port")}
                     if listen.get("port") is not None else {},
                 "deployed": proxy.get("deployed", False),
+                "operation": proxy.get("operation"),
             })
+            operation = proxy.get("operation")
+            if (
+                isinstance(operation, dict)
+                and operation.get("running")
+                and hasattr(self, "operation_refresh_timer")
+                and not self.operation_refresh_timer.isActive()
+            ):
+                self.operation_refresh_timer.start(1_000)
+            elif (
+                hasattr(self, "operation_refresh_timer")
+                and self.operation_refresh_timer.isActive()
+                and not (
+                    self.velocity_deploy_thread is not None
+                    and self.velocity_deploy_thread.isRunning()
+                )
+            ):
+                self.operation_refresh_timer.stop()
         self.render_server_cards(servers)
         updated_at = data.get("updated_at", "")
         if updated_at:
@@ -1316,8 +1354,11 @@ class GameMover(QWidget):
         self.velocity_deploy_thread = VelocityDeployThread(headers)
         self.velocity_deploy_thread.completed.connect(self.velocity_deploy_completed)
         self.velocity_deploy_thread.start()
+        self.operation_refresh_timer.start(1_000)
+        QTimer.singleShot(150, self.refresh_server_statuses)
 
     def velocity_deploy_completed(self, payload):
+        self.operation_refresh_timer.stop()
         if payload.get("error"):
             QMessageBox.critical(self, "Velocity", f"Nasazení selhalo: {payload['error']}")
         else:

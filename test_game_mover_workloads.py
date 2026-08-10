@@ -98,14 +98,16 @@ class WorkloadBackendTest(unittest.TestCase):
         backend.start(workload)
         backend.stop(workload)
         backend.restart(workload)
+        backend.remove_container(workload, force=True)
 
         arguments = [call[0][4:] for call in runner.calls]
         self.assertEqual(arguments, [
             ["start", "mc-test"],
             ["stop", "--time", "120", "mc-test"],
             ["restart", "--time", "120", "mc-test"],
+            ["rm", "--force", "mc-test"],
         ])
-        self.assertEqual([call[1] for call in runner.calls], [60, 150, 180])
+        self.assertEqual([call[1] for call in runner.calls], [60, 150, 180, 180])
 
     def test_podman_discovers_published_minecraft_port(self):
         runner = RecordingRunner([BackendResult(0, "0.0.0.0:25570")])

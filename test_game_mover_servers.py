@@ -15,6 +15,8 @@ class ServerRegistryTest(unittest.TestCase):
         self.config_path = str(Path(self.temp_dir.name) / "servers.json")
         self.original_config_path = backend.GAME_SERVERS_CONFIG_PATH
         self.original_velocity_config_path = backend.VELOCITY_CONFIG_PATH
+        self.original_operations = backend.OPERATIONS
+        backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
         backend.VELOCITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "velocity.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
@@ -48,6 +50,7 @@ class ServerRegistryTest(unittest.TestCase):
     def tearDown(self):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
         backend.VELOCITY_CONFIG_PATH = self.original_velocity_config_path
+        backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
             backend.MINECRAFT_STATUS_CACHE.clear()
@@ -195,6 +198,10 @@ class ServerRegistryTest(unittest.TestCase):
             patch.object(backend, "backend_for", return_value=fake_backend),
             patch.object(backend, "write_velocity_layout", return_value=layout),
             patch.object(backend, "chown_velocity_layout") as chown,
+            patch.object(
+                backend, "wait_for_velocity_ready",
+                return_value={"online": 0, "max": 20},
+            ) as readiness,
         ):
             response = self.client.post(
                 "/proxy/deploy", **self.local_options(self.pam_headers),
@@ -205,12 +212,32 @@ class ServerRegistryTest(unittest.TestCase):
         create_kwargs = fake_backend.create_container.call_args.kwargs
         self.assertEqual(create_kwargs["environment"]["TYPE"], "VELOCITY")
         self.assertEqual(create_kwargs["environment"]["MODRINTH_PROJECTS"], "ambassador")
+        self.assertEqual(create_kwargs["environment"]["SKIP_DOWNLOAD_DEFAULTS"], "true")
         self.assertEqual(create_kwargs["ports"][0]["host_port"], 25580)
         self.assertEqual(create_kwargs["restart_policy"], "unless-stopped")
         self.assertEqual(create_kwargs["networks"], ["game-platform"])
         fake_backend.create_network.assert_called_once_with(
             "game-platform", labels={"io.game-platform.managed": "true"},
         )
+        operation = backend.OPERATIONS.snapshot(backend.VELOCITY_DEPLOY_OPERATION_ID)
+        self.assertEqual(operation["phase"], "complete")
+        self.assertEqual(operation["progress"], 100)
+        readiness.assert_called_once_with("127.0.0.1", 25580)
+
+    def test_velocity_running_container_is_not_ready_until_handshake_works(self):
+        fake_backend = Mock()
+        fake_backend.status.return_value = WorkloadState("active", "running", "Běží")
+        fake_backend.container_exists.return_value = True
+        with (
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(
+                backend, "query_server_status", side_effect=ConnectionResetError("reset"),
+            ),
+        ):
+            response = self.client.get("/proxy/status", **self.local_options())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["proxy"]["status"], "activating")
+        self.assertFalse(response.json["proxy"]["ready"])
 
     def test_velocity_lifecycle_is_pam_protected(self):
         fake_backend = Mock()
@@ -231,6 +258,40 @@ class ServerRegistryTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 403)
         fake_backend.restart.assert_called_once()
+
+    def test_failed_velocity_readiness_removes_only_disposable_container(self):
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = False
+        fake_backend.network_exists.return_value = True
+        fake_backend.pull_image.return_value = BackendResult(0)
+        fake_backend.create_container.return_value = BackendResult(0)
+        fake_backend.start.return_value = BackendResult(0)
+        layout = {
+            "data_directory": "/managed/velocity",
+            "config_path": "/managed/velocity/velocity.toml",
+            "secret_path": "/managed/velocity/forwarding.secret",
+        }
+        with (
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "write_velocity_layout", return_value=layout),
+            patch.object(backend, "chown_velocity_layout"),
+            patch.object(
+                backend, "wait_for_velocity_ready",
+                side_effect=RuntimeError("handshake selhal"),
+            ),
+        ):
+            response = self.client.post(
+                "/proxy/deploy", **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 500)
+        fake_backend.remove_container.assert_called_once_with(
+            {"backend": "podman", "runtime": {"container_name": "velocity"}},
+            force=True,
+        )
+        self.assertEqual(
+            backend.OPERATIONS.snapshot(backend.VELOCITY_DEPLOY_OPERATION_ID)["phase"],
+            "failed",
+        )
 
     def test_velocity_lifecycle_requires_deployed_container(self):
         fake_backend = Mock()
