@@ -64,6 +64,7 @@ MINECRAFT_STATUS_CACHE = {}
 MINECRAFT_STATUS_INFLIGHT = set()
 MINECRAFT_STATUS_LOCK = threading.Lock()
 MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 
 def workload_lock(workload_id):
@@ -425,42 +426,60 @@ def _minecraft_probe_hosts(hosts, preferred_host=None):
             pass
         candidates.append(host)
 
-    if preferred_host in hosts:
-        add(preferred_host)
     for host in hosts:
         add(host)
-    return candidates
+
+    def priority(host):
+        if host == preferred_host:
+            return -1
+        try:
+            address = ipaddress.ip_address(host.split("%", 1)[0])
+        except ValueError:
+            return 4
+        if address.version == 4 and address in CGNAT_IPV4_NETWORK:
+            return 0
+        if address.version == 4 and not address.is_loopback:
+            return 1
+        if address.version == 6 and not address.is_loopback:
+            return 2
+        return 3
+
+    return sorted(candidates, key=priority)
 
 
 def _refresh_minecraft_player_status(cache_key, hosts, port):
     counts = None
     errors = []
+    selected_host = None
     with MINECRAFT_STATUS_LOCK:
         preferred_host = MINECRAFT_STATUS_CACHE.get(cache_key, {}).get("preferred_host")
-    candidates = _minecraft_probe_hosts(hosts, preferred_host)
-    selected_host = None
-    for host in candidates:
-        timeout = (
-            MINECRAFT_STATUS_TIMEOUT
-            if host == preferred_host
-            else MINECRAFT_STATUS_DISCOVERY_TIMEOUT
-        )
-        try:
-            counts = query_server_status(host, port, timeout=timeout)
-            selected_host = host
-            break
-        except (OSError, TypeError, ValueError, json.JSONDecodeError) as caught_error:
-            errors.append(f"{host}: {type(caught_error).__name__}: {caught_error}")
-    error = None if counts is not None else "; ".join(errors) or "Žádná adresa k dotazu"
-    with MINECRAFT_STATUS_LOCK:
-        entry = MINECRAFT_STATUS_CACHE.setdefault(cache_key, {})
-        entry["last_attempt"] = time.monotonic()
-        entry["error"] = error
-        if counts is not None:
-            entry["counts"] = dict(counts)
-            entry["last_success"] = entry["last_attempt"]
-            entry["preferred_host"] = selected_host
-        MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
+    try:
+        candidates = _minecraft_probe_hosts(hosts, preferred_host)
+        for host in candidates:
+            timeout = (
+                MINECRAFT_STATUS_TIMEOUT
+                if host == preferred_host
+                else MINECRAFT_STATUS_DISCOVERY_TIMEOUT
+            )
+            try:
+                counts = query_server_status(host, port, timeout=timeout)
+                selected_host = host
+                break
+            except Exception as caught_error:
+                errors.append(f"{host}: {type(caught_error).__name__}: {caught_error}")
+    except Exception as caught_error:
+        errors.append(f"Interní chyba discovery: {type(caught_error).__name__}: {caught_error}")
+    finally:
+        error = None if counts is not None else "; ".join(errors) or "Žádná adresa k dotazu"
+        with MINECRAFT_STATUS_LOCK:
+            entry = MINECRAFT_STATUS_CACHE.setdefault(cache_key, {})
+            entry["last_attempt"] = time.monotonic()
+            entry["error"] = error
+            if counts is not None:
+                entry["counts"] = dict(counts)
+                entry["last_success"] = entry["last_attempt"]
+                entry["preferred_host"] = selected_host
+            MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
 
 
 def cached_minecraft_player_status(server_id, hosts, port):

@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        10%{?dist}
+Release:        11%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-11
+- Prefer local CGNAT overlay IPv4 when discovering a Minecraft status route
+- Always release an asynchronous status probe after unexpected failures
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-10
 - Make unchecked and checked connection-edit controls visible in the dark theme
 

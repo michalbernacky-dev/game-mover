@@ -151,7 +151,7 @@ class ServerRegistryTest(unittest.TestCase):
         cache_key = ("forge", 25565)
         with patch.object(
             backend, "query_server_status",
-            side_effect=[TimeoutError("timed out"), {"online": 2, "max": 20}],
+            return_value={"online": 2, "max": 20},
         ) as query:
             backend._refresh_minecraft_player_status(
                 cache_key, ["192.0.2.66", "100.64.0.10"], 25565,
@@ -164,7 +164,6 @@ class ServerRegistryTest(unittest.TestCase):
             ({"online": 2, "max": 20}, False, None),
         )
         self.assertEqual(query.call_args_list, [
-            call("192.0.2.66", 25565, timeout=3.0),
             call("100.64.0.10", 25565, timeout=3.0),
         ])
         self.assertEqual(
@@ -174,8 +173,27 @@ class ServerRegistryTest(unittest.TestCase):
 
     def test_minecraft_probe_skips_unscoped_link_local_ipv6(self):
         self.assertEqual(backend._minecraft_probe_hosts([
-            "192.0.2.66", "fe80::1234", "fd7a:115c:a1e0::1", "127.0.0.1",
-        ]), ["192.0.2.66", "fd7a:115c:a1e0::1", "127.0.0.1"])
+            "192.0.2.66", "fe80::1234", "fd7a:115c:a1e0::1",
+            "100.64.0.10", "127.0.0.1",
+        ]), [
+            "100.64.0.10", "192.0.2.66", "fd7a:115c:a1e0::1", "127.0.0.1",
+        ])
+
+    def test_minecraft_worker_always_releases_inflight_state(self):
+        cache_key = ("forge", 25565)
+        with backend.MINECRAFT_STATUS_LOCK:
+            backend.MINECRAFT_STATUS_INFLIGHT.add(cache_key)
+        with patch.object(
+            backend, "_minecraft_probe_hosts", side_effect=RuntimeError("broken discovery"),
+        ):
+            backend._refresh_minecraft_player_status(
+                cache_key, ["100.64.0.10"], 25565,
+            )
+        self.assertNotIn(cache_key, backend.MINECRAFT_STATUS_INFLIGHT)
+        self.assertIn(
+            "Interní chyba discovery: RuntimeError: broken discovery",
+            backend.MINECRAFT_STATUS_CACHE[cache_key]["error"],
+        )
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):
         self.save_servers()
