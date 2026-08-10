@@ -54,6 +54,17 @@ class MinecraftStatusTest(unittest.TestCase):
         expected_ping = b"\x09\x01" + struct.pack(">q", 0)
         self.assertTrue(fake_socket.sent.endswith(expected_ping))
 
+    def test_valid_status_survives_missing_forge_pong(self):
+        payload = json.dumps({"players": {"online": 2, "max": 12}}).encode("utf-8")
+        body = b"\x00" + minecraft._encode_varint(len(payload)) + payload
+        fake_socket = FakeSocket(minecraft._encode_varint(len(body)) + body)
+
+        with patch.object(minecraft.socket, "create_connection", return_value=fake_socket):
+            result = minecraft.query_server_status("192.0.2.66", 25565)
+
+        self.assertEqual(result, {"online": 2, "max": 12})
+        self.assertTrue(fake_socket.sent.endswith(b"\x09\x01" + struct.pack(">q", 0)))
+
     def test_known_players_uses_configured_world_and_uuid_files(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             data = Path(temporary_directory)
