@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Consistent, atomic backups of Podman workload persistent data."""
+"""Consistent, atomic backups of registered workload persistent data."""
 
 from __future__ import annotations
 
@@ -47,9 +47,10 @@ def create_workload_backup(
     backup_root: str,
     owner_user: str,
 ) -> dict:
-    """Stop an active Podman workload, archive all of /data, then restore state."""
-    if workload.get("backend") != "podman":
-        raise BackupError("Zálohy jsou zatím podporované pouze pro Podman servery")
+    """Stop an active workload, archive its data directory, then restore state."""
+    backend_name = str(workload.get("backend", "systemd")).strip().lower()
+    if backend_name not in ("systemd", "podman"):
+        raise BackupError("Backend serveru nepodporuje úplné zálohy")
 
     workload_id = str(workload.get("id", "")).strip()
     if not BACKUP_ID_RE.fullmatch(workload_id):
@@ -117,7 +118,7 @@ def create_workload_backup(
                 "id": workload_id,
                 "name": workload.get("name", workload_id),
                 "kind": workload.get("kind", "generic"),
-                "backend": "podman",
+                "backend": backend_name,
                 "runtime": runtime_metadata,
                 "data_directory": str(data_directory),
             },

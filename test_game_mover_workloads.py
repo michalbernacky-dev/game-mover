@@ -43,6 +43,13 @@ class WorkloadBackendTest(unittest.TestCase):
             ],
         )
 
+    def test_systemd_backup_metadata_contains_only_registered_unit(self):
+        backend = SystemdBackend(RecordingRunner())
+
+        metadata = backend.runtime_metadata({"service": "forge-srv.service"})
+
+        self.assertEqual(metadata, {"unit": "forge-srv.service"})
+
     def test_podman_status_is_normalized_and_uses_private_socket(self):
         runner = RecordingRunner([BackendResult(0, "running")])
         backend = PodmanBackend(

@@ -93,9 +93,23 @@ class WorkloadBackupTest(unittest.TestCase):
         self.assertEqual((backend.stops, backend.starts), (1, 1))
         self.assertFalse(list((self.root / "backups").rglob("*.partial")))
 
-    def test_systemd_workload_is_rejected(self):
+    def test_systemd_workload_is_backed_up_with_unit_metadata(self):
         self.workload["backend"] = "systemd"
-        with self.assertRaisesRegex(BackupError, "pouze pro Podman"):
+        self.workload["service"] = "forge-srv.service"
+        backend = FakePodmanBackend("inactive")
+        backend.runtime_metadata = lambda _workload: {"unit": "forge-srv.service"}
+
+        result = self.create(backend)
+
+        manifest = json.loads(Path(result["manifest"]).read_text(encoding="utf-8"))
+        self.assertEqual(manifest["workload"]["backend"], "systemd")
+        self.assertEqual(
+            manifest["workload"]["runtime"], {"unit": "forge-srv.service"},
+        )
+
+    def test_unknown_backend_is_rejected(self):
+        self.workload["backend"] = "unknown"
+        with self.assertRaisesRegex(BackupError, "nepodporuje úplné zálohy"):
             self.create(FakePodmanBackend())
 
 

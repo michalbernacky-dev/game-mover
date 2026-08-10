@@ -105,6 +105,10 @@ class SystemdBackend:
         self._action("reset-failed", workload)
         return self._action("restart", workload, 60)
 
+    def runtime_metadata(self, workload: dict) -> dict:
+        """Return the non-secret systemd identity needed to trace the backup."""
+        return {"unit": self.reference(workload)}
+
 
 class PodmanBackend:
     name = "podman"

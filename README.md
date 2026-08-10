@@ -79,10 +79,16 @@ wheel/PAM authentication. All control is always rejected over LAN/Tailscale.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
 
+Registered systemd and Podman workloads with a data directory support verified
+full-data backups. A running workload is cleanly stopped before archiving and
+returned to its previous running state afterward. The manifest records the
+source backend and systemd unit or non-secret Podman runtime metadata, making a
+systemd Forge backup suitable as the input for a later container migration.
+
 ### Rootless Podman workloads
 
-The Podman backend adopts existing containers and exposes status/start/stop/restart
-plus local full-data backups. Podman runs as the dedicated `gameplatform` account;
+The Podman backend adopts existing containers and exposes status/start/stop/restart.
+Podman runs as the dedicated `gameplatform` account;
 the root Flask service reaches its private Unix socket. The socket is never
 exposed to clients, and remote API access remains read-only.
 
@@ -321,10 +327,16 @@ registru samotného zůstává za wheel/PAM ověřením. Veškeré ovládání j
 odmítnuto z LAN/Tailscale. Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
 
+Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
+úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se
+vrátí do původního stavu. Manifest zaznamená zdrojový backend a systemd jednotku
+nebo nesekretní Podman metadata, takže záloha systemd Forge může přímo posloužit
+jako vstup pro pozdější migraci do containeru.
+
 ### Rootless Podman workloady
 
-Podman backend přebírá existující containery a zpřístupňuje status/start/stop/restart
-a místní úplné zálohy dat. Podman běží pod dedikovaným účtem `gameplatform`;
+Podman backend přebírá existující containery a zpřístupňuje status/start/stop/restart.
+Podman běží pod dedikovaným účtem `gameplatform`;
 root Flask služba používá jeho privátní Unix socket. Socket není dostupný
 klientům a vzdálené API zůstává read-only.
 

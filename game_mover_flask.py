@@ -574,7 +574,9 @@ def game_server_status(server):
     direct_port = None
     port_source = None
     data = server.get("data") if isinstance(server.get("data"), dict) else {}
-    result["backup_supported"] = backend_name == "podman" and bool(data.get("directory"))
+    result["backup_supported"] = (
+        backend_name in ("systemd", "podman") and bool(data.get("directory"))
+    )
     if server.get("kind") == "minecraft" and backend_name == "systemd":
         direct_port = configured_server_port(data.get("directory"))
         if direct_port is not None:
@@ -1314,8 +1316,9 @@ def servers_backup():
     server = find_game_server((request.json or {}).get("id", ""))
     if not server:
         return jsonify({"message": "Server not found"}), 404
-    if server.get("backend") != "podman":
-        return jsonify({"message": "Zálohy jsou zatím podporované pouze pro Podman servery"}), 400
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    if server.get("backend", "systemd") not in ("systemd", "podman") or not data.get("directory"):
+        return jsonify({"message": "Server nemá nakonfigurovaný datový adresář pro zálohu"}), 400
     if not require_local_server_action(request, server, "backup"):
         return jsonify({"message": "Unauthorized"}), 403
     try:

@@ -97,6 +97,9 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertTrue(statuses["forge"]["has_mods"])
         self.assertTrue(statuses["pixelmon"]["has_mods"])
         self.assertFalse(statuses["satisfactory"]["has_mods"])
+        self.assertTrue(statuses["forge"]["backup_supported"])
+        self.assertTrue(statuses["pixelmon"]["backup_supported"])
+        self.assertFalse(statuses["satisfactory"]["backup_supported"])
         self.assertEqual(statuses["forge"]["connection"], {
             "direct_port": 25565, "source": "server.properties",
         })
@@ -362,14 +365,21 @@ class ServerRegistryTest(unittest.TestCase):
             self.assertEqual(response.status_code, 403)
         fake_backend.restart.assert_called_once()
 
-    def test_podman_backup_requires_local_pam_and_rejects_systemd(self):
+    def test_systemd_and_podman_backups_require_local_pam(self):
         self.servers[0]["backend"] = "systemd"
         self.save_servers()
-        response = self.client.post(
-            "/servers/backup", json={"id": "forge"},
-            **self.local_options(self.pam_headers),
-        )
-        self.assertEqual(response.status_code, 400)
+        with (
+            patch.object(backend, "backend_for", return_value=Mock()),
+            patch.object(
+                backend, "create_workload_backup", return_value={"id": "forge-backup"},
+            ) as create_systemd,
+        ):
+            response = self.client.post(
+                "/servers/backup", json={"id": "forge"},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200)
+        create_systemd.assert_called_once()
 
         podman_server = {
             "id": "mc-test", "name": "Minecraft Test", "backend": "podman",

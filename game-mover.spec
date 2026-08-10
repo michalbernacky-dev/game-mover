@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        12%{?dist}
+Release:        13%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-13
+- Add verified full-data backups for registered systemd servers such as Forge
+- Record the source systemd unit in migration-ready backup manifests
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-12
 - Prefer authenticated local RCON player counts when Forge status ping stalls
 - Retain the standard status protocol as a fallback for servers without RCON
