@@ -668,7 +668,6 @@ class GameMover(QWidget):
             self.server_profile_name, self.server_profile_address, self.server_profile_port,
             self.server_profile_token, self.server_profile_save_button, self.server_profile_test_button,
         ]
-        self.set_server_registry_enabled(False)
         self.reload_server_profile_combo()
         self.update_server_mode_ui()
         tab.setLayout(layout)
@@ -764,10 +763,9 @@ class GameMover(QWidget):
             "Sledované služby tohoto počítače" if server_mode
             else "Správa služeb je dostupná jen v režimu Server."
         )
-        authenticated = bool(self.timekpr_token)
         for widget in self.server_registry_widgets:
-            widget.setEnabled(not server_mode and authenticated)
-        enabled = server_mode and authenticated
+            widget.setEnabled(not server_mode)
+        enabled = server_mode and bool(self.timekpr_token)
         for widget in (
             self.local_services_table, self.local_services_refresh, self.local_services_add,
             self.local_services_remove, self.local_services_save,
@@ -914,10 +912,6 @@ class GameMover(QWidget):
             self.refresh_server_statuses()
         except Exception as error:
             QMessageBox.critical(self, "Služby", f"Uložení služeb selhalo: {error}")
-
-    def set_server_registry_enabled(self, enabled):
-        for widget in getattr(self, "server_registry_widgets", []):
-            widget.setEnabled(enabled)
 
     def reload_server_profile_combo(self):
         self.server_profile_combo.blockSignals(True)
@@ -1656,7 +1650,7 @@ class GameMover(QWidget):
                 msg = data.get("message") if isinstance(data, dict) else resp.text
                 QMessageBox.critical(self, "Timekpr", msg or "Přihlášení selhalo")
                 self.set_timekpr_controls_enabled(False)
-                self.set_server_registry_enabled(False)
+                self.update_server_mode_ui()
                 return
             # nový login → smaž cache plánů
             self.original_hours_today = {}
@@ -1669,7 +1663,6 @@ class GameMover(QWidget):
                 mode_label = "settimeleft" if self.timekpra_mode == "settimeleft" else self.timekpra_add_flag
                 self.timekpr_status_label.setText(f"Odemčeno ({username}, mode: {mode_label})")
                 self.set_timekpr_controls_enabled(True)
-                self.set_server_registry_enabled(True)
                 self.update_server_mode_ui()
                 self.refresh_server_statuses()
                 self.fetch_day_plan()
@@ -1677,12 +1670,20 @@ class GameMover(QWidget):
                 detail = data.get("error") or "server nevrátil podporovaný mód"
                 self.timekpr_status_label.setText("Timekpr neumí přidat čas")
                 self.set_timekpr_controls_enabled(False)
-                self.set_server_registry_enabled(bool(self.timekpr_token))
+                self.update_server_mode_ui()
                 QMessageBox.critical(self, "Timekpr", f"Přihlášení proběhlo, ale Timekpr není použitelný: {detail}")
+        except requests.ConnectionError:
+            QMessageBox.critical(
+                self, "Timekpr",
+                "Místní Game Mover backend na 127.0.0.1:5000 neběží.\n"
+                "Spusť jej příkazem: sudo systemctl enable --now game_mover.service",
+            )
+            self.set_timekpr_controls_enabled(False)
+            self.update_server_mode_ui()
         except Exception as e:
             QMessageBox.critical(self, "Timekpr", str(e))
             self.set_timekpr_controls_enabled(False)
-            self.set_server_registry_enabled(False)
+            self.update_server_mode_ui()
 
     def load_timekpr_status(self):
         """Načte schopnosti timekpra z Flasku běžícího jako root, požaduje tajný klíč."""

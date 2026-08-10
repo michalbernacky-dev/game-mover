@@ -52,10 +52,11 @@ The other Game Mover tabs continue to use the local backend. Do not expose this
 Flask service directly to the public internet; use Tailscale or an equivalent
 trusted encrypted network and restrict the firewall accordingly.
 
-### Server registry in the GUI
+### Connection profiles in the GUI
 
-The **Servers** tab includes a local registry of server profiles. Unlock it using
-the existing wheel/PAM login in the **Timekpr** tab, then add a profile with its address, port, and read token. Tailscale and LAN use
+The **Connection** tab includes local client profiles with an address, port, and
+read token. They do not require PAM because they only select a remote read-only
+endpoint and are stored in the current user's configuration. Tailscale and LAN use
 the same HTTP port; Game Mover defaults it to `5000`. The selected profile is
 used only for the two remote read-only endpoints. Tokens entered in the registry
 are stored in `~/.config/game-mover/config.json` with file mode `0600`; do not
@@ -292,10 +293,11 @@ Ostatní záložky Game Moveru dál používají místní backend. Flask službu
 nevystavuj přímo do internetu; použij Tailscale nebo obdobnou důvěryhodnou
 šifrovanou síť a podle toho omez firewall.
 
-### Registr serverů v GUI
+### Profily připojení v GUI
 
-Záložka **Servery** obsahuje lokální registr profilů. Odemkni jej existujícím
-wheel/PAM přihlášením v záložce **Timekpr**, poté přidej profil s adresou, portem a read tokenem. Tailscale i LAN používají
+Záložka **Připojení** obsahuje místní klientské profily s adresou, portem a read
+tokenem. PAM nevyžadují, protože pouze vybírají vzdálený read-only endpoint a
+ukládají se do konfigurace aktuálního uživatele. Tailscale i LAN používají
 stejný HTTP port; Game Mover předvyplní `5000`. Vybraný profil používají jen dvě
 vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
 `~/.config/game-mover/config.json` s právy `0600`; nikdy sem nezadávej lokální

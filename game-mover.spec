@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-4
+- Allow local read-only connection profiles to be edited without server PAM
+- Keep the local backend enabled across reboots for PAM and Timekpr operations
+- Complete Minecraft status polling with Ping/Pong for Forge compatibility
+
 * Sun Aug 09 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-3
 - Probe each Minecraft workload only through its primary routable host
 

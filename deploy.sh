@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 rpm_path="$("${SCRIPT_DIR}/build_rpm.sh")"
 sudo rpm -Uvh --replacepkgs --replacefiles "${rpm_path}"
+sudo systemctl enable game_mover.service
 sudo systemctl restart game_mover.service
 
-echo "Deploy hotový: nainstalován ${rpm_path} a game_mover.service restartována."
+echo "Deploy hotový: nainstalován ${rpm_path} a game_mover.service povolena a restartována."

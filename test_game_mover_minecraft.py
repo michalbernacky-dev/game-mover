@@ -1,4 +1,5 @@
 import json
+import struct
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,12 +40,19 @@ class MinecraftStatusTest(unittest.TestCase):
     def test_status_ping_reads_online_and_max_players(self):
         payload = json.dumps({"players": {"online": 3, "max": 20}}).encode("utf-8")
         body = b"\x00" + minecraft._encode_varint(len(payload)) + payload
-        fake_socket = FakeSocket(minecraft._encode_varint(len(body)) + body)
+        ping_value = struct.pack(">q", 0)
+        pong_body = b"\x01" + ping_value
+        response = (
+            minecraft._encode_varint(len(body)) + body
+            + minecraft._encode_varint(len(pong_body)) + pong_body
+        )
+        fake_socket = FakeSocket(response)
         with patch.object(minecraft.socket, "create_connection", return_value=fake_socket):
             result = minecraft.query_server_status("127.0.0.1", 25570)
         self.assertEqual(result, {"online": 3, "max": 20})
         self.assertIn(minecraft._encode_varint(763), fake_socket.sent)
-        self.assertTrue(fake_socket.sent.endswith(b"\x01\x00"))
+        expected_ping = b"\x09\x01" + struct.pack(">q", 0)
+        self.assertTrue(fake_socket.sent.endswith(expected_ping))
 
     def test_known_players_uses_configured_world_and_uuid_files(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
