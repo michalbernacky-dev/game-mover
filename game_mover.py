@@ -306,6 +306,27 @@ class ServerBackupThread(QThread):
         except Exception as error:
             self.completed.emit({"error": str(error)})
 
+
+class ServerStatusThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{self.base_url}/servers/status",
+                headers=self.headers,
+                timeout=12,
+            )
+            response.raise_for_status()
+            self.loaded.emit(response.json())
+        except Exception as error:
+            self.loaded.emit({"request_error": str(error)})
+
 # ------------------------------------------------------------
 # GUI
 # ------------------------------------------------------------
@@ -327,6 +348,7 @@ class GameMover(QWidget):
         # uchovává "původní" plán pro dnešní den per-uživatel tak, jak se načetl z timekpra
         self.original_hours_today = {}
         self.minecraft_mod_inventory = None
+        self.server_status_thread = None
         self.server_mods_thread = None
         self.compare_mods_thread = None
         self.server_backup_thread = None
@@ -1056,7 +1078,13 @@ class GameMover(QWidget):
             if online is not None and maximum is not None:
                 card_layout.addWidget(QLabel(f"Hráči: {online} / {maximum} online"))
             elif server.get("kind") == "minecraft":
-                card_layout.addWidget(QLabel("Hráči: nezjištěno"))
+                player_label = QLabel(
+                    "Hráči: zjišťuji…" if players.get("query_pending")
+                    else "Hráči: nezjištěno"
+                )
+                if players.get("query_error"):
+                    player_label.setToolTip(players["query_error"])
+                card_layout.addWidget(player_label)
             known = players.get("known")
             if known is not None:
                 card_layout.addWidget(QLabel(f"Již viděno hráčů: {known}"))
@@ -1139,19 +1167,23 @@ class GameMover(QWidget):
         self.server_cards_layout.addStretch()
 
     def refresh_server_statuses(self):
+        if self.server_status_thread is not None and self.server_status_thread.isRunning():
+            return
         base_url, headers = self.server_request_target()
-        try:
-            response = requests.get(f"{base_url}/servers/status", headers=headers, timeout=12)
-            response.raise_for_status()
-            data = response.json()
-            self.render_server_cards(data.get("servers", []))
-            updated_at = data.get("updated_at", "")
-            if updated_at:
-                updated_at = updated_at.replace("T", " ").split("+")[0]
-            self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
-        except Exception as error:
-            self.render_server_cards([])
+        self.server_status_thread = ServerStatusThread(base_url, headers)
+        self.server_status_thread.loaded.connect(self.server_status_loaded)
+        self.server_status_thread.start()
+
+    def server_status_loaded(self, data):
+        error = data.get("request_error")
+        if error:
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
+            return
+        self.render_server_cards(data.get("servers", []))
+        updated_at = data.get("updated_at", "")
+        if updated_at:
+            updated_at = updated_at.replace("T", " ").split("+")[0]
+        self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
 
     def local_server_action_headers(self, policy):
         if policy == "pam":

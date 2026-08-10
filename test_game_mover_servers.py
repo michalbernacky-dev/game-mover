@@ -25,6 +25,9 @@ class ServerRegistryTest(unittest.TestCase):
         self.pixelmon_mods = self.pixelmon_data / "mods"
         self.forge_mods.mkdir(parents=True)
         self.pixelmon_mods.mkdir(parents=True)
+        with backend.MINECRAFT_STATUS_LOCK:
+            backend.MINECRAFT_STATUS_CACHE.clear()
+            backend.MINECRAFT_STATUS_INFLIGHT.clear()
         self.servers = [
             {
                 "id": "forge", "name": "Forge", "service": "forge-srv.service",
@@ -43,6 +46,9 @@ class ServerRegistryTest(unittest.TestCase):
     def tearDown(self):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
+        with backend.MINECRAFT_STATUS_LOCK:
+            backend.MINECRAFT_STATUS_CACHE.clear()
+            backend.MINECRAFT_STATUS_INFLIGHT.clear()
         self.temp_dir.cleanup()
 
     def local_options(self, headers=None):
@@ -117,13 +123,42 @@ class ServerRegistryTest(unittest.TestCase):
                 return_value=["192.0.2.66", "127.0.0.1", "::1"],
             ),
             patch.object(
-                backend, "query_server_status", return_value={"online": 1, "max": 20},
+                backend, "cached_minecraft_player_status",
+                return_value=({"online": 1, "max": 20}, False, None),
             ) as status_query,
         ):
             status = backend.game_server_status(server)
         self.assertEqual(status["connection"], {"direct_port": 25570, "source": "podman"})
         self.assertEqual(status["players"], {"online": 1, "max": 20, "known": 1})
-        status_query.assert_called_once_with("192.0.2.66", 25570)
+        status_query.assert_called_once_with("mc-test", "192.0.2.66", 25570)
+
+    def test_minecraft_status_refresh_is_non_blocking_and_deduplicated(self):
+        fake_executor = Mock()
+        with patch.object(backend, "MINECRAFT_STATUS_EXECUTOR", fake_executor):
+            first = backend.cached_minecraft_player_status(
+                "forge", "192.0.2.66", 25565,
+            )
+            second = backend.cached_minecraft_player_status(
+                "forge", "192.0.2.66", 25565,
+            )
+
+        self.assertEqual(first, (None, True, None))
+        self.assertEqual(second, (None, True, None))
+        fake_executor.submit.assert_called_once()
+
+        cache_key = ("forge", "192.0.2.66", 25565)
+        with patch.object(
+            backend, "query_server_status", return_value={"online": 2, "max": 20},
+        ) as query:
+            backend._refresh_minecraft_player_status(
+                cache_key, "192.0.2.66", 25565,
+            )
+
+        self.assertEqual(
+            backend.cached_minecraft_player_status("forge", "192.0.2.66", 25565),
+            ({"online": 2, "max": 20}, False, None),
+        )
+        query.assert_called_once_with("192.0.2.66", 25565, timeout=8.0)
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):
         self.save_servers()

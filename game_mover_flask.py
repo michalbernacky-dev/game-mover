@@ -55,6 +55,13 @@ WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
 SERVER_ACTIONS = ("start", "stop", "restart", "backup")
 SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
+MINECRAFT_STATUS_TIMEOUT = 8.0
+MINECRAFT_STATUS_REFRESH_SECONDS = 30.0
+MINECRAFT_STATUS_RETRY_SECONDS = 15.0
+MINECRAFT_STATUS_CACHE = {}
+MINECRAFT_STATUS_INFLIGHT = set()
+MINECRAFT_STATUS_LOCK = threading.Lock()
+MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 def workload_lock(workload_id):
@@ -401,6 +408,59 @@ def systemctl_stop(service_name: str):
     return systemctl_action("stop", service_name)
 
 
+def _refresh_minecraft_player_status(cache_key, host, port):
+    counts = None
+    error = None
+    try:
+        counts = query_server_status(
+            host, port, timeout=MINECRAFT_STATUS_TIMEOUT,
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as caught_error:
+        error = f"{type(caught_error).__name__}: {caught_error}"
+    with MINECRAFT_STATUS_LOCK:
+        entry = MINECRAFT_STATUS_CACHE.setdefault(cache_key, {})
+        entry["last_attempt"] = time.monotonic()
+        entry["error"] = error
+        if counts is not None:
+            entry["counts"] = dict(counts)
+            entry["last_success"] = entry["last_attempt"]
+        MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
+
+
+def cached_minecraft_player_status(server_id, host, port):
+    """Return cached counts and schedule at most one non-blocking refresh."""
+    cache_key = (str(server_id), str(host), int(port))
+    now = time.monotonic()
+    should_refresh = False
+    with MINECRAFT_STATUS_LOCK:
+        entry = MINECRAFT_STATUS_CACHE.get(cache_key, {})
+        counts = entry.get("counts")
+        error = entry.get("error")
+        last_attempt = entry.get("last_attempt", 0.0)
+        refresh_after = (
+            MINECRAFT_STATUS_RETRY_SECONDS
+            if error or counts is None
+            else MINECRAFT_STATUS_REFRESH_SECONDS
+        )
+        pending = cache_key in MINECRAFT_STATUS_INFLIGHT
+        if not pending and now - last_attempt >= refresh_after:
+            MINECRAFT_STATUS_INFLIGHT.add(cache_key)
+            pending = True
+            should_refresh = True
+        snapshot = dict(counts) if isinstance(counts, dict) else None
+    if should_refresh:
+        try:
+            MINECRAFT_STATUS_EXECUTOR.submit(
+                _refresh_minecraft_player_status, cache_key, host, int(port),
+            )
+        except RuntimeError as caught_error:
+            with MINECRAFT_STATUS_LOCK:
+                MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
+            pending = False
+            error = f"{type(caught_error).__name__}: {caught_error}"
+    return snapshot, pending, error
+
+
 def game_server_status(server):
     backend_name = server.get("backend", "systemd")
     runtime = server.get("runtime", {})
@@ -469,10 +529,15 @@ def game_server_status(server):
         if state.status == "active" and direct_port is not None:
             probe_hosts = local_server_addresses()
             if probe_hosts:
-                try:
-                    players.update(query_server_status(probe_hosts[0], direct_port))
-                except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                    pass
+                counts, pending, probe_error = cached_minecraft_player_status(
+                    server.get("id", ""), probe_hosts[0], direct_port,
+                )
+                if counts is not None:
+                    players.update(counts)
+                if pending:
+                    players["query_pending"] = True
+                if probe_error:
+                    players["query_error"] = probe_error
         result["players"] = players
     return result
 
