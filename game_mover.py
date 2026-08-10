@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
     QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QFormLayout, QScrollArea
+    QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
@@ -600,7 +600,16 @@ class GameMover(QWidget):
         title = QLabel("Připojení k hernímu serveru")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
-        layout.addWidget(QLabel("Profily se odemknou po ověření ve Timekpr. Port 5000 je výchozí pro Game Mover."))
+        connection_help = QLabel(
+            "Profily lze vybírat a testovat bez ověření. Jejich úpravy chrání místní "
+            "pojistka níže. Port 5000 je výchozí pro Game Mover."
+        )
+        connection_help.setWordWrap(True)
+        layout.addWidget(connection_help)
+        self.connection_edit_checkbox = QCheckBox("Povolit úpravy připojení", self)
+        self.connection_edit_checkbox.setChecked(False)
+        self.connection_edit_checkbox.toggled.connect(self.update_server_mode_ui)
+        layout.addWidget(self.connection_edit_checkbox)
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Režim aplikace:"))
         self.app_mode_combo = QComboBox(self)
@@ -685,10 +694,10 @@ class GameMover(QWidget):
         layout.addLayout(services_actions)
         layout.addStretch()
 
-        self.server_registry_widgets = [
-            self.server_profile_combo, self.server_profile_new_button, self.server_profile_delete_button,
+        self.server_profile_edit_widgets = [
+            self.server_profile_new_button, self.server_profile_delete_button,
             self.server_profile_name, self.server_profile_address, self.server_profile_port,
-            self.server_profile_token, self.server_profile_save_button, self.server_profile_test_button,
+            self.server_profile_token, self.server_profile_save_button,
         ]
         self.reload_server_profile_combo()
         self.update_server_mode_ui()
@@ -780,13 +789,21 @@ class GameMover(QWidget):
 
     def update_server_mode_ui(self):
         server_mode = self.app_mode == "server"
+        connection_editing = self.connection_edit_checkbox.isChecked()
         self.endpoint_label.setText("Zdroj: místní server" if server_mode else f"Zdroj: {self.server_api_url()}")
         self.local_services_label.setText(
             "Sledované služby tohoto počítače" if server_mode
             else "Správa služeb je dostupná jen v režimu Server."
         )
-        for widget in self.server_registry_widgets:
-            widget.setEnabled(not server_mode)
+        self.app_mode_combo.setEnabled(connection_editing)
+        self.server_profile_combo.setEnabled(not server_mode)
+        self.server_profile_test_button.setEnabled(not server_mode)
+        for widget in self.server_profile_edit_widgets:
+            widget.setEnabled(not server_mode and connection_editing)
+        for field in (
+            self.server_profile_name, self.server_profile_address, self.server_profile_token,
+        ):
+            field.setReadOnly(server_mode or not connection_editing)
         enabled = server_mode and bool(self.timekpr_token)
         for widget in (
             self.local_services_table, self.local_services_refresh, self.local_services_add,
@@ -973,12 +990,16 @@ class GameMover(QWidget):
             self.refresh_server_statuses()
 
     def new_server_profile(self):
+        if not self.connection_edit_checkbox.isChecked() or self.app_mode == "server":
+            return
         profile_id = f"server-{int(time.time() * 1000)}"
         self.server_profiles.append({"id": profile_id, "name": "Nový server", "mode": "tailscale", "address": "", "read_token": ""})
         self.active_server_profile_id = profile_id
         self.reload_server_profile_combo()
 
     def delete_server_profile(self):
+        if not self.connection_edit_checkbox.isChecked() or self.app_mode == "server":
+            return
         if len(self.server_profiles) == 1:
             QMessageBox.warning(self, "Servery", "Musí zůstat alespoň jeden profil.")
             return
@@ -995,6 +1016,8 @@ class GameMover(QWidget):
         save_client_config(self.client_config)
 
     def save_server_profile(self):
+        if not self.connection_edit_checkbox.isChecked() or self.app_mode == "server":
+            return
         profile = self.active_server_profile()
         host = self.server_profile_address.text().strip()
         if not host:

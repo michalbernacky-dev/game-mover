@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-9
+- Guard local connection-profile edits with an explicit checkbox
+- Replace the obsolete Timekpr profile-unlock description
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-8
 - Discover and remember the working local address for Minecraft status queries
 
