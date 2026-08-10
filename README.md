@@ -136,8 +136,11 @@ For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
 resolved port is used for a standard read-only Minecraft status ping and is
 combined with the remote client's configured host to display the game address.
+For local systemd servers with RCON enabled, player counts prefer the
+authenticated read-only `list` command; the RCON password never leaves the
+backend. The standard status protocol remains the fallback, so RCON is optional.
 The total number of known players is counted from UUIDs in persistent world data
-and `usercache.json`. No RCON access is required.
+and `usercache.json`.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -374,8 +377,11 @@ záměrně nejsou povolené.
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní
 read-only Minecraft status ping a vzdálený klient jej spojí s hostitelem ze svého
-profilu. Celkový počet známých hráčů se počítá ze UUID v persistentních datech
-světa a v `usercache.json`. RCON k tomu není potřeba.
+profilu. U lokálních systemd serverů se zapnutým RCON se počet hráčů přednostně
+načítá autentizovaným read-only příkazem `list`; RCON heslo backend nikdy
+neposílá do API. Standardní status protokol zůstává fallbackem, takže RCON je
+volitelný. Celkový počet známých hráčů se počítá ze UUID v persistentních datech
+světa a v `usercache.json`.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

@@ -22,9 +22,11 @@ from concurrent.futures import ThreadPoolExecutor
 from game_mover_backups import BackupError, create_workload_backup
 from game_mover_mods import scan_mod_directory
 from game_mover_minecraft import (
+    configured_rcon,
     configured_server_port,
     count_known_players,
     local_server_addresses,
+    query_server_rcon,
     query_server_status,
 )
 from game_mover_version import __version__
@@ -447,15 +449,26 @@ def _minecraft_probe_hosts(hosts, preferred_host=None):
     return sorted(candidates, key=priority)
 
 
-def _refresh_minecraft_player_status(cache_key, hosts, port):
+def _refresh_minecraft_player_status(cache_key, hosts, port, rcon=None):
     counts = None
     errors = []
     selected_host = None
     with MINECRAFT_STATUS_LOCK:
         preferred_host = MINECRAFT_STATUS_CACHE.get(cache_key, {}).get("preferred_host")
     try:
+        if isinstance(rcon, dict):
+            try:
+                counts = query_server_rcon(
+                    "127.0.0.1", rcon["port"], rcon["password"],
+                    timeout=MINECRAFT_STATUS_DISCOVERY_TIMEOUT,
+                )
+                selected_host = "rcon://127.0.0.1"
+            except Exception as caught_error:
+                errors.append(
+                    f"RCON: {type(caught_error).__name__}: {caught_error}"
+                )
         candidates = _minecraft_probe_hosts(hosts, preferred_host)
-        for host in candidates:
+        for host in candidates if counts is None else ():
             timeout = (
                 MINECRAFT_STATUS_TIMEOUT
                 if host == preferred_host
@@ -482,7 +495,7 @@ def _refresh_minecraft_player_status(cache_key, hosts, port):
             MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
 
 
-def cached_minecraft_player_status(server_id, hosts, port):
+def cached_minecraft_player_status(server_id, hosts, port, rcon=None):
     """Return cached counts and schedule at most one non-blocking refresh."""
     hosts = tuple(str(host) for host in hosts)
     cache_key = (str(server_id), int(port))
@@ -507,7 +520,7 @@ def cached_minecraft_player_status(server_id, hosts, port):
     if should_refresh:
         try:
             MINECRAFT_STATUS_EXECUTOR.submit(
-                _refresh_minecraft_player_status, cache_key, hosts, int(port),
+                _refresh_minecraft_player_status, cache_key, hosts, int(port), rcon,
             )
         except RuntimeError as caught_error:
             with MINECRAFT_STATUS_LOCK:
@@ -585,8 +598,13 @@ def game_server_status(server):
         if state.status == "active" and direct_port is not None:
             probe_hosts = local_server_addresses()
             if probe_hosts:
+                rcon = (
+                    configured_rcon(data.get("directory"))
+                    if backend_name == "systemd"
+                    else None
+                )
                 counts, pending, probe_error = cached_minecraft_player_status(
-                    server.get("id", ""), probe_hosts, direct_port,
+                    server.get("id", ""), probe_hosts, direct_port, rcon=rcon,
                 )
                 if counts is not None:
                     players.update(counts)

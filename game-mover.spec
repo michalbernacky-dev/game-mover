@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-12
+- Prefer authenticated local RCON player counts when Forge status ping stalls
+- Retain the standard status protocol as a fallback for servers without RCON
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-11
 - Prefer local CGNAT overlay IPv4 when discovering a Minecraft status route
 - Always release an asynchronous status probe after unexpected failures

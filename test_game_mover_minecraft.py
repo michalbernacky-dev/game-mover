@@ -59,6 +59,27 @@ class MinecraftStatusTest(unittest.TestCase):
 
         self.assertEqual(result, {"online": 2, "max": 12})
 
+    def test_rcon_list_reads_online_and_max_players(self):
+        request_id = 0x474D
+        response = (
+            minecraft._rcon_packet(request_id, 2, "")
+            + minecraft._rcon_packet(
+                request_id, 0,
+                "There are 2 of a max of 20 players online: Bernye, Alex",
+            )
+        )
+        fake_socket = FakeSocket(response)
+        with patch.object(
+            minecraft.socket, "create_connection", return_value=fake_socket,
+        ) as create_connection:
+            result = minecraft.query_server_rcon(
+                "127.0.0.1", 25575, "secret", timeout=3.0,
+            )
+        self.assertEqual(result, {"online": 2, "max": 20})
+        self.assertIn(b"secret", fake_socket.sent)
+        self.assertIn(b"list", fake_socket.sent)
+        create_connection.assert_called_once_with(("127.0.0.1", 25575), timeout=3.0)
+
     def test_known_players_uses_configured_world_and_uuid_files(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             data = Path(temporary_directory)
@@ -110,6 +131,23 @@ class MinecraftStatusTest(unittest.TestCase):
             self.assertEqual(minecraft.configured_server_port(str(data)), 25565)
             properties.write_text("server-port=70000\n", encoding="utf-8")
             self.assertIsNone(minecraft.configured_server_port(str(data)))
+
+    def test_configured_rcon_requires_enabled_valid_secret(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            data = Path(temporary_directory)
+            properties = data / "server.properties"
+            properties.write_text(
+                "enable-rcon=true\nrcon.port=25575\nrcon.password=secret\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                minecraft.configured_rcon(str(data)),
+                {"port": 25575, "password": "secret"},
+            )
+            properties.write_text(
+                "enable-rcon=false\nrcon.password=secret\n", encoding="utf-8",
+            )
+            self.assertIsNone(minecraft.configured_rcon(str(data)))
 
 
 if __name__ == "__main__":

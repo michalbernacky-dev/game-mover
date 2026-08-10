@@ -9,6 +9,7 @@ import struct
 
 
 MAX_STATUS_PACKET = 1024 * 1024
+MAX_RCON_PACKET = 64 * 1024
 UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
     r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -110,6 +111,47 @@ def query_server_status(host, port, timeout=8.0, protocol_version=763):
     }
 
 
+def _rcon_packet(request_id, packet_type, payload):
+    encoded_payload = payload.encode("utf-8")
+    body = struct.pack("<ii", request_id, packet_type) + encoded_payload + b"\x00\x00"
+    return struct.pack("<i", len(body)) + body
+
+
+def _read_rcon_packet(stream):
+    packet_length = struct.unpack("<i", _read_exact(stream, 4))[0]
+    if not 10 <= packet_length <= MAX_RCON_PACKET:
+        raise ValueError("Invalid Minecraft RCON packet length")
+    packet = _read_exact(stream, packet_length)
+    request_id, packet_type = struct.unpack("<ii", packet[:8])
+    if packet[-2:] != b"\x00\x00":
+        raise ValueError("Invalid Minecraft RCON packet terminator")
+    return request_id, packet_type, packet[8:-2].decode("utf-8")
+
+
+def query_server_rcon(host, port, password, timeout=3.0):
+    """Return player counts through the authenticated, read-only RCON list command."""
+    request_id = 0x474D
+    with socket.create_connection((host, int(port)), timeout=timeout) as stream:
+        stream.settimeout(timeout)
+        stream.sendall(_rcon_packet(request_id, 3, password))
+        auth_id, _auth_type, _auth_payload = _read_rcon_packet(stream)
+        if auth_id != request_id:
+            raise PermissionError("Minecraft RCON authentication failed")
+        stream.sendall(_rcon_packet(request_id, 2, "list"))
+        response_id, _response_type, response = _read_rcon_packet(stream)
+        if response_id != request_id:
+            raise ValueError("Unexpected Minecraft RCON response")
+
+    match = re.search(
+        r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online",
+        response,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError("Minecraft RCON list response does not contain player counts")
+    return {"online": int(match.group(1)), "max": int(match.group(2))}
+
+
 def _level_name(data_directory):
     properties_path = os.path.join(data_directory, "server.properties")
     try:
@@ -138,6 +180,30 @@ def configured_server_port(data_directory):
     except (OSError, UnicodeError, ValueError):
         pass
     return None
+
+
+def configured_rcon(data_directory):
+    """Return enabled local RCON settings, without exposing them through the API."""
+    if not data_directory:
+        return None
+    properties_path = os.path.join(data_directory, "server.properties")
+    values = {}
+    try:
+        with open(properties_path, "r", encoding="utf-8") as properties:
+            for line in properties:
+                key, separator, value = line.partition("=")
+                key = key.strip()
+                if separator and key in ("enable-rcon", "rcon.password", "rcon.port"):
+                    values[key] = value.strip()
+        if values.get("enable-rcon", "false").lower() != "true":
+            return None
+        password = values.get("rcon.password", "")
+        port = int(values.get("rcon.port", "25575"))
+        if not password or not 1 <= port <= 65535:
+            return None
+        return {"port": port, "password": password}
+    except (OSError, UnicodeError, ValueError):
+        return None
 
 
 def count_known_players(data_directory):
