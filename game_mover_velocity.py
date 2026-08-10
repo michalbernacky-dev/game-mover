@@ -13,6 +13,7 @@ import pwd
 
 
 VELOCITY_SERVER_ID_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+VELOCITY_NETWORK_RE = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
 VELOCITY_HOST_RE = re.compile(r"^[A-Za-z0-9_.:-]+$")
 VELOCITY_IMAGE_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?"
@@ -29,6 +30,7 @@ def default_velocity_config() -> dict:
     return {
         "image": "docker.io/itzg/mc-proxy:java21",
         "container_name": "velocity",
+        "network": "game-platform",
         "listen": {"host": "0.0.0.0", "port": 25580},
         "online_mode": True,
         "forwarding_mode": "none",
@@ -90,6 +92,9 @@ def normalize_velocity_config(raw: dict) -> dict:
         raise VelocityConfigError("Neplatná reference image Velocity")
     if not VELOCITY_SERVER_ID_RE.fullmatch(container_name):
         raise VelocityConfigError("Neplatné jméno containeru Velocity")
+    network = str(raw.get("network", defaults["network"])).strip().lower()
+    if not VELOCITY_NETWORK_RE.fullmatch(network):
+        raise VelocityConfigError("Neplatné jméno Podman sítě Velocity")
 
     listen = raw.get("listen") if isinstance(raw.get("listen"), dict) else {}
     forwarding_mode = str(
@@ -166,6 +171,7 @@ def normalize_velocity_config(raw: dict) -> dict:
     return {
         "image": image,
         "container_name": container_name,
+        "network": network,
         "listen": {
             "host": _host(
                 listen.get("host", defaults["listen"]["host"]),

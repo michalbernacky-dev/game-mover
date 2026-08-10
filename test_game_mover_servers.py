@@ -178,6 +178,8 @@ class ServerRegistryTest(unittest.TestCase):
     def test_velocity_deploy_is_pam_protected_and_uses_staging_port(self):
         fake_backend = Mock()
         fake_backend.container_exists.return_value = False
+        fake_backend.network_exists.return_value = False
+        fake_backend.create_network.return_value = BackendResult(0, "game-platform")
         fake_backend.pull_image.return_value = BackendResult(0, "sha256:image")
         fake_backend.create_container.return_value = BackendResult(0, "velocity")
         fake_backend.start.return_value = BackendResult(0)
@@ -204,6 +206,41 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(create_kwargs["environment"]["TYPE"], "VELOCITY")
         self.assertEqual(create_kwargs["environment"]["MODRINTH_PROJECTS"], "ambassador")
         self.assertEqual(create_kwargs["ports"][0]["host_port"], 25580)
+        self.assertEqual(create_kwargs["restart_policy"], "unless-stopped")
+        self.assertEqual(create_kwargs["networks"], ["game-platform"])
+        fake_backend.create_network.assert_called_once_with(
+            "game-platform", labels={"io.game-platform.managed": "true"},
+        )
+
+    def test_velocity_lifecycle_is_pam_protected(self):
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = True
+        fake_backend.restart.return_value = BackendResult(0)
+        with patch.object(backend, "backend_for", return_value=fake_backend):
+            response = self.client.post(
+                "/proxy/restart", **self.local_options(self.admin_headers),
+            )
+            self.assertEqual(response.status_code, 403)
+            response = self.client.post(
+                "/proxy/restart", **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 200)
+            response = self.client.post(
+                "/proxy/restart", headers=self.pam_headers,
+                environ_base={"REMOTE_ADDR": "192.0.2.10"},
+            )
+            self.assertEqual(response.status_code, 403)
+        fake_backend.restart.assert_called_once()
+
+    def test_velocity_lifecycle_requires_deployed_container(self):
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = False
+        with patch.object(backend, "backend_for", return_value=fake_backend):
+            response = self.client.post(
+                "/proxy/start", **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 404)
+        fake_backend.start.assert_not_called()
 
     def test_systemd_minecraft_prefers_configured_rcon(self):
         (self.forge_data / "server.properties").write_text(

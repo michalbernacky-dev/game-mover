@@ -172,13 +172,49 @@ class WorkloadBackendTest(unittest.TestCase):
             mounts=[{"source": "/var/lib/game-platform/proxies/velocity", "target": "/server"}],
             ports=[{"host": "0.0.0.0", "host_port": 25580, "container_port": 25580}],
             labels={"io.game-platform.kind": "minecraft-proxy"},
+            restart_policy="unless-stopped",
+            networks=["game-platform"],
         )
 
         arguments = runner.calls[0][0][4:]
-        self.assertEqual(arguments[0:3], ["create", "--name", "velocity"])
+        self.assertEqual(arguments[0:5], [
+            "create", "--name", "velocity", "--restart", "unless-stopped",
+        ])
         self.assertIn("TYPE=VELOCITY", arguments)
+        self.assertIn("game-platform", arguments)
         self.assertIn("0.0.0.0:25580:25580/tcp", arguments)
         self.assertEqual(arguments[-1], "docker.io/itzg/mc-proxy:java21")
+
+    def test_podman_rejects_unknown_restart_policy(self):
+        runner = RecordingRunner()
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+        workload = {
+            "backend": "podman", "runtime": {"container_name": "velocity"},
+        }
+
+        with self.assertRaisesRegex(ValueError, "restart policy"):
+            backend.create_container(
+                workload, "docker.io/itzg/mc-proxy:java21",
+                restart_policy="$(malicious)",
+            )
+        self.assertEqual(runner.calls, [])
+
+    def test_podman_creates_validated_private_network(self):
+        runner = RecordingRunner()
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+
+        backend.create_network(
+            "game-platform", labels={"io.game-platform.managed": "true"},
+        )
+
+        self.assertEqual(runner.calls[0][0][4:], [
+            "network", "create", "--driver", "bridge", "--label",
+            "io.game-platform.managed=true", "game-platform",
+        ])
 
 if __name__ == "__main__":
     unittest.main()

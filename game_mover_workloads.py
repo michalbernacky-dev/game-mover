@@ -13,6 +13,7 @@ from typing import Callable
 
 
 CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+NETWORK_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
 OCI_IMAGE_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?"
@@ -20,6 +21,7 @@ OCI_IMAGE_RE = re.compile(
 )
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
+RESTART_POLICIES = {"no", "on-failure", "always", "unless-stopped"}
 
 
 @dataclass
@@ -228,6 +230,24 @@ class PodmanBackend:
             raise ValueError("Neplatná reference container image")
         return self._command(["pull", "--quiet", image], 600)
 
+    def network_exists(self, network: str) -> bool:
+        network = str(network).strip()
+        if not NETWORK_NAME_RE.fullmatch(network):
+            raise ValueError("Neplatné jméno Podman sítě")
+        return self._command(["network", "exists", network], 15).returncode == 0
+
+    def create_network(self, network: str, *, labels: dict | None = None) -> BackendResult:
+        network = str(network).strip()
+        if not NETWORK_NAME_RE.fullmatch(network):
+            raise ValueError("Neplatné jméno Podman sítě")
+        arguments = ["network", "create", "--driver", "bridge"]
+        for key, value in sorted((labels or {}).items()):
+            if not LABEL_NAME_RE.fullmatch(str(key)) or "\x00" in str(value):
+                raise ValueError("Neplatný label Podman sítě")
+            arguments.extend(["--label", f"{key}={value}"])
+        arguments.append(network)
+        return self._command(arguments, 60)
+
     def create_container(
         self,
         workload: dict,
@@ -237,13 +257,25 @@ class PodmanBackend:
         mounts: list[dict] | None = None,
         ports: list[dict] | None = None,
         labels: dict | None = None,
+        restart_policy: str = "no",
+        networks: list[str] | None = None,
     ) -> BackendResult:
         """Create one validated adopted container without accepting raw CLI arguments."""
         container = self.reference(workload)
         image = str(image).strip()
         if not OCI_IMAGE_RE.fullmatch(image):
             raise ValueError("Neplatná reference container image")
-        arguments = ["create", "--name", container]
+        restart_policy = str(restart_policy).strip().lower()
+        if restart_policy not in RESTART_POLICIES:
+            raise ValueError("Neplatná restart policy containeru")
+        arguments = [
+            "create", "--name", container, "--restart", restart_policy,
+        ]
+        for network in networks or []:
+            network = str(network).strip()
+            if not NETWORK_NAME_RE.fullmatch(network):
+                raise ValueError("Neplatné jméno Podman sítě")
+            arguments.extend(["--network", network])
         for key, value in sorted((environment or {}).items()):
             if not ENV_NAME_RE.fullmatch(str(key)) or "\x00" in str(value):
                 raise ValueError("Neplatná proměnná prostředí containeru")

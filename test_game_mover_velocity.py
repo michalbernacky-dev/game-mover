@@ -17,6 +17,7 @@ class VelocityConfigTest(unittest.TestCase):
 
         self.assertEqual(config["listen"], {"host": "0.0.0.0", "port": 25580})
         self.assertEqual(config["forwarding_mode"], "none")
+        self.assertEqual(config["network"], "game-platform")
         self.assertEqual(config["backends"], [{
             "id": "forge", "host": "host.containers.internal", "port": 25565,
         }])

@@ -1223,6 +1223,7 @@ def velocity_proxy_status():
             "error": state.error,
             "listen": config["listen"],
             "forwarding_mode": config["forwarding_mode"],
+            "network": config["network"],
             "configured": os.path.isfile(VELOCITY_CONFIG_PATH),
             "prepared": os.path.isdir(VELOCITY_DATA_DIRECTORY),
             "deployed": container_exists,
@@ -1265,6 +1266,16 @@ def velocity_proxy_deploy():
                 }), 409
             layout = write_velocity_layout(config, VELOCITY_DATA_DIRECTORY)
             chown_velocity_layout(layout, PODMAN_USER)
+            if not proxy_backend.network_exists(config["network"]):
+                network_result = proxy_backend.create_network(
+                    config["network"],
+                    labels={"io.game-platform.managed": "true"},
+                )
+                if network_result.returncode != 0:
+                    raise RuntimeError(
+                        network_result.error or network_result.output
+                        or "Vytvoření privátní Podman sítě selhalo"
+                    )
             pull_result = proxy_backend.pull_image(config["image"])
             if pull_result.returncode != 0:
                 raise RuntimeError(
@@ -1300,6 +1311,8 @@ def velocity_proxy_deploy():
                     "io.game-platform.workload-id": "velocity-proxy",
                     "io.game-platform.kind": "minecraft-proxy",
                 },
+                restart_policy="unless-stopped",
+                networks=[config["network"]],
             )
             if create_result.returncode != 0:
                 raise RuntimeError(
@@ -1317,6 +1330,42 @@ def velocity_proxy_deploy():
         "listen": config["listen"],
         "container": config["container_name"],
     })
+
+
+@app.route("/proxy/start", methods=["POST"])
+@app.route("/proxy/stop", methods=["POST"])
+@app.route("/proxy/restart", methods=["POST"])
+def velocity_proxy_control():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    action = request.path.rsplit("/", 1)[-1]
+    config = load_velocity_config()
+    workload = {
+        "backend": "podman",
+        "runtime": {"container_name": config["container_name"]},
+    }
+    try:
+        proxy_backend = backend_for(
+            workload,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock("velocity-proxy"):
+            if not proxy_backend.container_exists(workload):
+                return jsonify({"message": "Velocity ještě není nasazena"}), 404
+            result = getattr(proxy_backend, action)(workload)
+    except (AttributeError, KeyError, OSError, ValueError) as error:
+        return jsonify({"message": str(error)}), 500
+    if result.returncode != 0:
+        return jsonify({
+            "message": result.error or result.output or "Ovládání Velocity selhalo",
+        }), 500
+    messages = {
+        "start": "Velocity byla spuštěna",
+        "stop": "Velocity byla vypnuta",
+        "restart": "Velocity byla restartována",
+    }
+    return jsonify({"message": messages[action]})
 
 
 def validate_game_server_entry(server, seen_ids):

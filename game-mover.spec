@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        14%{?dist}
+Release:        16%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -17,7 +17,10 @@ Requires:       python3-pam
 Requires:       curl
 Requires:       jq
 Requires:       rsync
+Requires:       podman
+Requires(pre):  shadow-utils
 Requires(post): shadow-utils
+Requires(post): util-linux
 Requires(preun): systemd
 Requires(postun): systemd
 
@@ -56,6 +59,8 @@ install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mo
 
 %pre
 getent group gemers >/dev/null || groupadd -r gemers
+getent passwd gameplatform >/dev/null || \
+    useradd -r -m -d /var/lib/game-platform -s /usr/sbin/nologin gameplatform
 
 %post
 %systemd_post game_mover.service
@@ -83,6 +88,16 @@ mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
 chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
 
+install -d -m 0750 -o gameplatform -g gameplatform \
+    /var/lib/game-platform \
+    /var/lib/game-platform/servers \
+    /var/lib/game-platform/backups \
+    /var/lib/game-platform/proxies || :
+loginctl enable-linger gameplatform >/dev/null 2>&1 || :
+gameplatform_uid="$(id -u gameplatform)"
+runuser -u gameplatform -- env XDG_RUNTIME_DIR="/run/user/${gameplatform_uid}" \
+    systemctl --user enable --now podman.socket podman-restart.service >/dev/null 2>&1 || :
+
 %preun
 %systemd_preun game_mover.service
 
@@ -95,7 +110,7 @@ if [ "$1" -eq 0 ]; then
 fi
 
 %files
-%doc README.md
+%doc README.md ARCHITECTURE.md
 %dir /opt/game_mover
 /opt/game_mover/game_mover_flask.py
 /opt/game_mover/game_mover.py
@@ -113,6 +128,15 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-16
+- Create and attach Velocity to the managed private game-platform network
+- Add PAM-protected start, stop, and restart controls for deployed Velocity
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-15
+- Persist managed Velocity across host restarts with a validated Podman policy
+- Bootstrap the dedicated rootless Podman account, socket, and restart service
+- Record the agreed Game Platform architecture and management/security UX
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-14
 - Add PAM-protected Velocity staging configuration and rootless Podman deployment
 - Add validated proxy routes, persistent forwarding secret, and Ambassador setup

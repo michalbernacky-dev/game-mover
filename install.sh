@@ -16,6 +16,8 @@ LOCAL_ADMIN_DIR="/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH="${LOCAL_ADMIN_DIR}/api.token"
 READ_TOKEN_PATH="${LOCAL_ADMIN_DIR}/read.token"
 GROUP_NAME="gemers"
+PODMAN_USER="gameplatform"
+PODMAN_HOME="/var/lib/game-platform"
 RESTART_SERVICE=1
 AUTOSTART=0
 
@@ -99,6 +101,17 @@ echo "[3/8] Vytvářím skupinu a adresáře pro sdílené hry"
 if ! getent group "${GROUP_NAME}" >/dev/null; then
   groupadd --system "${GROUP_NAME}"
 fi
+if ! getent passwd "${PODMAN_USER}" >/dev/null; then
+  useradd --system --create-home --home-dir "${PODMAN_HOME}" \
+    --shell /usr/sbin/nologin "${PODMAN_USER}"
+fi
+install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" \
+  "${PODMAN_HOME}" "${PODMAN_HOME}/servers" "${PODMAN_HOME}/backups" \
+  "${PODMAN_HOME}/proxies"
+loginctl enable-linger "${PODMAN_USER}"
+podman_uid="$(id -u "${PODMAN_USER}")"
+runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
+  systemctl --user enable --now podman.socket podman-restart.service
 ensure_local_admin_token
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp "${GROUP_NAME}" /var/Games /var/Games_links /var/Games/steam-cache

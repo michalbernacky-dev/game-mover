@@ -1170,13 +1170,27 @@ class GameMover(QWidget):
                 actions.addWidget(mods_button)
             if self.app_mode == "server" and server.get("kind") == "proxy":
                 actions.addStretch()
-                deploy_button = QPushButton("Nasadit Velocity", card)
-                deploy_button.setFixedWidth(150)
-                deploy_button.setEnabled(
-                    not server.get("deployed", False) and bool(self.local_pam_headers())
-                )
-                deploy_button.clicked.connect(self.deploy_velocity_proxy)
-                actions.addWidget(deploy_button)
+                if not server.get("deployed", False):
+                    deploy_button = QPushButton("Nasadit Velocity", card)
+                    deploy_button.setFixedWidth(150)
+                    deploy_button.setEnabled(bool(self.local_pam_headers()))
+                    deploy_button.clicked.connect(self.deploy_velocity_proxy)
+                    actions.addWidget(deploy_button)
+                else:
+                    proxy_authorized = bool(self.local_pam_headers())
+                    for action, label, enabled_states in (
+                        ("start", "Spustit", ("inactive", "failed")),
+                        ("restart", "Restartovat", ("active", "activating")),
+                        ("stop", "Vypnout", ("active", "activating")),
+                    ):
+                        button = QPushButton(label, card)
+                        button.setFixedWidth(120)
+                        button.setEnabled(proxy_authorized and status in enabled_states)
+                        button.clicked.connect(
+                            lambda _checked=False, selected_action=action:
+                            self.control_velocity_proxy(selected_action)
+                        )
+                        actions.addWidget(button)
             if self.app_mode == "server" and server.get("kind") != "proxy":
                 permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
                 auth_summary = " · ".join(
@@ -1267,7 +1281,8 @@ class GameMover(QWidget):
                 "status": proxy.get("status", "unknown"),
                 "message": proxy.get("message", "Neznámý stav"),
                 "runtime_label": (
-                    f"Podman · {proxy.get('forwarding_mode', 'none')} forwarding"
+                    f"Podman · {proxy.get('network', 'game-platform')} · "
+                    f"{proxy.get('forwarding_mode', 'none')} forwarding"
                 ),
                 "connection": {"direct_port": listen.get("port")}
                     if listen.get("port") is not None else {},
@@ -1312,6 +1327,40 @@ class GameMover(QWidget):
                 f"{payload.get('message', 'Velocity byla nasazena.')}\n"
                 f"Testovací port: {listen.get('port', '—')}",
             )
+        self.refresh_server_statuses()
+
+    def control_velocity_proxy(self, action):
+        if self.app_mode != "server":
+            return
+        headers = self.local_pam_headers()
+        if not headers:
+            QMessageBox.warning(
+                self, "Velocity", "Ovládání Velocity vyžaduje přihlášení v Timekpr.",
+            )
+            return
+        labels = {
+            "start": ("Spustit Velocity", "spustit"),
+            "stop": ("Vypnout Velocity", "vypnout"),
+            "restart": ("Restartovat Velocity", "restartovat"),
+        }
+        title, verb = labels[action]
+        if action in ("stop", "restart"):
+            answer = QMessageBox.question(
+                self, title, f"Opravdu {verb} Velocity proxy?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/proxy/{action}", headers=headers, timeout=210,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            QMessageBox.information(self, "Velocity", data.get("message", "Operace dokončena."))
+        except Exception as error:
+            QMessageBox.critical(self, "Velocity", f"Operace selhala: {error}")
         self.refresh_server_statuses()
 
     def local_server_action_headers(self, policy):

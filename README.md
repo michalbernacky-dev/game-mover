@@ -3,6 +3,9 @@
 # game-mover
 Local-first game data manager for trusted local users on a single Linux machine.
 
+The agreed long-term product and host architecture is recorded in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
 
 ## Security model
@@ -158,6 +161,9 @@ generated `velocity.toml`. The forwarding secret is created once under
 Deployment is local-only and PAM protected. The Ambassador plugin provides Forge
 1.20.1 compatibility. Modern forwarding remains disabled until the Forge backend
 support and network isolation are enabled during migration.
+Velocity is attached to the managed rootless bridge network `game-platform`;
+future Minecraft backends will join the same network without publishing their
+game ports to the LAN.
 
 ## Deployment on Fedora (systemd + GNOME autostart)
 
@@ -416,6 +422,9 @@ ověřená ID backendů, adresy a porty. Forwarding secret vznikne pouze jednou 
 dostupné jen místně a vyžaduje PAM. Kompatibilitu Forge 1.20.1 zajišťuje plugin
 Ambassador. Modern forwarding zůstane vypnutý, dokud při migraci nezapneme jeho
 podporu ve Forge backendu a síťovou izolaci.
+Velocity je připojená do spravované rootless bridge sítě `game-platform`;
+budoucí Minecraft backendy vstoupí do stejné sítě bez publikování herních portů
+do LAN.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 
