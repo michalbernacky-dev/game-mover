@@ -13,7 +13,8 @@ from PyQt5.QtWidgets import (
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
     QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox
+    QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
+    QDialog, QDialogButtonBox
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
@@ -307,7 +308,7 @@ class ServerBackupThread(QThread):
             self.completed.emit({"error": str(error)})
 
 
-class VelocityDeployThread(QThread):
+class GateDeployThread(QThread):
     completed = pyqtSignal(dict)
 
     def __init__(self, headers):
@@ -318,6 +319,54 @@ class VelocityDeployThread(QThread):
         try:
             response = requests.post(
                 f"{FLASK_URL}/proxy/deploy", headers=self.headers, timeout=900,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit(data)
+        except Exception as error:
+            self.completed.emit({"error": str(error)})
+
+
+class GateRoutesSaveThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, routes, headers):
+        super().__init__()
+        self.routes = routes
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.put(
+                f"{FLASK_URL}/proxy/routes",
+                json={"routes": self.routes},
+                headers=self.headers,
+                timeout=240,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit(data)
+        except Exception as error:
+            self.completed.emit({"error": str(error)})
+
+
+class MinecraftInstallThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, payload, headers):
+        super().__init__()
+        self.payload = payload
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/servers/minecraft/install",
+                json=self.payload,
+                headers=self.headers,
+                timeout=3600,
             )
             data = response.json()
             if response.status_code != 200:
@@ -383,7 +432,10 @@ class GameMover(QWidget):
         self.server_mods_thread = None
         self.compare_mods_thread = None
         self.server_backup_thread = None
-        self.velocity_deploy_thread = None
+        self.gate_deploy_thread = None
+        self.gate_routes_thread = None
+        self.minecraft_install_thread = None
+        self.last_server_statuses = []
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
@@ -818,9 +870,14 @@ class GameMover(QWidget):
 
         self.servers_updated_label = QLabel("Poslední aktualizace: —")
         layout.addWidget(self.servers_updated_label)
+        server_actions = QHBoxLayout()
+        self.minecraft_install_button = QPushButton("Nový Minecraft server…", self)
+        self.minecraft_install_button.clicked.connect(self.open_minecraft_installer)
+        server_actions.addWidget(self.minecraft_install_button)
         refresh_button = QPushButton("Obnovit stav", self)
         refresh_button.clicked.connect(self.refresh_server_statuses)
-        layout.addWidget(refresh_button)
+        server_actions.addWidget(refresh_button)
+        layout.addLayout(server_actions)
         layout.addStretch()
         scroll_area.setWidget(content)
         tab_layout.addWidget(scroll_area)
@@ -857,6 +914,7 @@ class GameMover(QWidget):
             self.local_services_remove, self.local_services_save,
         ):
             widget.setEnabled(enabled)
+        self.minecraft_install_button.setEnabled(enabled)
         if server_mode and self.timekpr_token:
             self.load_local_services()
 
@@ -1164,8 +1222,8 @@ class GameMover(QWidget):
             operation = server.get("operation") if isinstance(server.get("operation"), dict) else {}
             local_operation_running = (
                 server.get("kind") == "proxy"
-                and self.velocity_deploy_thread is not None
-                and self.velocity_deploy_thread.isRunning()
+                and self.gate_deploy_thread is not None
+                and self.gate_deploy_thread.isRunning()
             )
             if operation.get("running") or local_operation_running:
                 operation_label = QLabel(
@@ -1190,11 +1248,16 @@ class GameMover(QWidget):
                 actions.addWidget(mods_button)
             if self.app_mode == "server" and server.get("kind") == "proxy":
                 actions.addStretch()
+                routes_button = QPushButton("Směrování…", card)
+                routes_button.setFixedWidth(130)
+                routes_button.setEnabled(bool(self.local_pam_headers()))
+                routes_button.clicked.connect(self.open_gate_routes)
+                actions.addWidget(routes_button)
                 if not server.get("deployed", False):
-                    deploy_button = QPushButton("Nasadit Velocity", card)
+                    deploy_button = QPushButton("Nasadit Gate Lite", card)
                     deploy_button.setFixedWidth(150)
                     deploy_button.setEnabled(bool(self.local_pam_headers()))
-                    deploy_button.clicked.connect(self.deploy_velocity_proxy)
+                    deploy_button.clicked.connect(self.deploy_gate_proxy)
                     actions.addWidget(deploy_button)
                 else:
                     proxy_authorized = bool(self.local_pam_headers())
@@ -1208,7 +1271,7 @@ class GameMover(QWidget):
                         button.setEnabled(proxy_authorized and status in enabled_states)
                         button.clicked.connect(
                             lambda _checked=False, selected_action=action:
-                            self.control_velocity_proxy(selected_action)
+                            self.control_gate_proxy(selected_action)
                         )
                         actions.addWidget(button)
             if self.app_mode == "server" and server.get("kind") != "proxy":
@@ -1291,103 +1354,452 @@ class GameMover(QWidget):
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
             return
         servers = list(data.get("servers", []))
+        self.last_server_statuses = list(servers)
         proxy = data.get("proxy")
         if isinstance(proxy, dict):
             listen = proxy.get("listen") if isinstance(proxy.get("listen"), dict) else {}
             servers.insert(0, {
-                "id": "velocity-proxy",
-                "name": "Velocity Proxy",
+                "id": "gate-router",
+                "name": "Gate Lite",
                 "kind": "proxy",
                 "status": proxy.get("status", "unknown"),
                 "message": proxy.get("message", "Neznámý stav"),
                 "runtime_label": (
                     f"Podman · {proxy.get('network', 'game-platform')} · "
-                    f"{proxy.get('forwarding_mode', 'none')} forwarding"
+                    f"{proxy.get('routing_mode', 'hostname')} routing · "
+                    f"{proxy.get('routes_count', 0)} tras"
                 ),
                 "connection": {"direct_port": listen.get("port")}
                     if listen.get("port") is not None else {},
                 "deployed": proxy.get("deployed", False),
                 "operation": proxy.get("operation"),
             })
-            operation = proxy.get("operation")
-            if (
-                isinstance(operation, dict)
-                and operation.get("running")
-                and hasattr(self, "operation_refresh_timer")
-                and not self.operation_refresh_timer.isActive()
-            ):
-                self.operation_refresh_timer.start(1_000)
-            elif (
-                hasattr(self, "operation_refresh_timer")
-                and self.operation_refresh_timer.isActive()
-                and not (
-                    self.velocity_deploy_thread is not None
-                    and self.velocity_deploy_thread.isRunning()
-                )
-            ):
-                self.operation_refresh_timer.stop()
+        has_running_operation = any(
+            isinstance(server.get("operation"), dict)
+            and server["operation"].get("running")
+            for server in servers
+        )
+        local_worker_running = any(
+            worker is not None and worker.isRunning()
+            for worker in (self.gate_deploy_thread, self.minecraft_install_thread)
+        )
+        if (
+            (has_running_operation or local_worker_running)
+            and hasattr(self, "operation_refresh_timer")
+            and not self.operation_refresh_timer.isActive()
+        ):
+            self.operation_refresh_timer.start(1_000)
+        elif (
+            hasattr(self, "operation_refresh_timer")
+            and self.operation_refresh_timer.isActive()
+            and not has_running_operation
+            and not local_worker_running
+        ):
+            self.operation_refresh_timer.stop()
         self.render_server_cards(servers)
         updated_at = data.get("updated_at", "")
         if updated_at:
             updated_at = updated_at.replace("T", " ").split("+")[0]
         self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
 
-    def deploy_velocity_proxy(self):
-        if self.velocity_deploy_thread and self.velocity_deploy_thread.isRunning():
+    def open_minecraft_installer(self):
+        if self.app_mode != "server":
+            return
+        if self.minecraft_install_thread and self.minecraft_install_thread.isRunning():
+            QMessageBox.information(self, "Minecraft instalace", "Jiná instalace právě probíhá.")
             return
         headers = self.local_pam_headers()
         if not headers:
             QMessageBox.warning(
-                self, "Velocity", "Nasazení Velocity vyžaduje přihlášení v Timekpr.",
+                self, "Minecraft instalace", "Instalace vyžaduje přihlášení v Timekpr.",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Nový Minecraft server")
+        dialog.setMinimumWidth(540)
+        outer = QVBoxLayout(dialog)
+        description = QLabel(
+            "Game Mover vytvoří persistentní data a spravovaný rootless Podman container. "
+            "Volitelně může data obnovit z ověřené zálohy jiného Minecraft serveru.",
+            dialog,
+        )
+        description.setWordWrap(True)
+        outer.addWidget(description)
+        form = QFormLayout()
+        server_id = QLineEdit("novy-minecraft", dialog)
+        name = QLineEdit("Nový Minecraft", dialog)
+        loader = QComboBox(dialog)
+        loader.addItems(["VANILLA", "FORGE", "FABRIC", "NEOFORGE"])
+        version = QLineEdit("1.20.1", dialog)
+        loader_version = QLineEdit("", dialog)
+        loader_version.setPlaceholderText("např. 47.4.4 (prázdné = doporučená)")
+        memory = QSpinBox(dialog)
+        memory.setRange(1024, 24576)
+        memory.setSingleStep(1024)
+        memory.setValue(8192)
+        memory.setSuffix(" MiB")
+        java_runtime = QComboBox(dialog)
+        java_runtime.addItems(["Java 17", "Java 21"])
+        port = QSpinBox(dialog)
+        port.setRange(1024, 65535)
+        port.setValue(25571)
+        hostname = QLineEdit("", dialog)
+        hostname.setPlaceholderText("volitelně, např. forge.mc.example")
+        form.addRow("ID serveru:", server_id)
+        form.addRow("Název:", name)
+        form.addRow("Typ serveru:", loader)
+        form.addRow("Minecraft verze:", version)
+        form.addRow("Verze loaderu:", loader_version)
+        form.addRow("Paměť:", memory)
+        form.addRow("Java runtime:", java_runtime)
+        form.addRow("Přímý LAN port:", port)
+        form.addRow("Gate hostname:", hostname)
+
+        restore_checkbox = QCheckBox("Použít data z existující zálohy", dialog)
+        source = QComboBox(dialog)
+        for server in self.last_server_statuses:
+            if server.get("kind") == "minecraft" and server.get("id"):
+                source.addItem(server.get("name", server["id"]), server["id"])
+        backup = QComboBox(dialog)
+        backup.addItem("Nejprve vyber zdroj", None)
+        form.addRow(restore_checkbox)
+        form.addRow("Zdrojový server:", source)
+        form.addRow("Záloha:", backup)
+        eula_checkbox = QCheckBox("Souhlasím s Minecraft EULA (aka.ms/MinecraftEULA)", dialog)
+        form.addRow(eula_checkbox)
+        outer.addLayout(form)
+
+        def update_loader_fields():
+            is_vanilla = loader.currentText() == "VANILLA"
+            loader_version.setEnabled(not is_vanilla)
+            if is_vanilla:
+                loader_version.clear()
+
+        def load_backups():
+            backup.clear()
+            if not restore_checkbox.isChecked() or source.currentData() is None:
+                backup.addItem("Obnova není zvolená", None)
+                return
+            backup.addItem("Načítám zálohy…", None)
+            QApplication.processEvents()
+            try:
+                response = requests.get(
+                    f"{FLASK_URL}/servers/backups",
+                    params={"source_id": source.currentData()},
+                    headers=headers,
+                    timeout=15,
+                )
+                data = response.json()
+                if response.status_code != 200:
+                    raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+                backup.clear()
+                for item in data.get("backups", []):
+                    size_gib = int(item.get("size_bytes") or 0) / (1024 ** 3)
+                    backup.addItem(
+                        f"{item.get('created_at', item.get('id'))} · {size_gib:.2f} GiB",
+                        item.get("id"),
+                    )
+                if backup.count() == 0:
+                    backup.addItem("Pro tento server není žádná záloha", None)
+            except Exception as error:
+                backup.clear()
+                backup.addItem(f"Načtení selhalo: {error}", None)
+
+        def update_restore_fields():
+            enabled = restore_checkbox.isChecked()
+            source.setEnabled(enabled)
+            backup.setEnabled(enabled)
+            load_backups()
+
+        loader.currentIndexChanged.connect(update_loader_fields)
+        restore_checkbox.toggled.connect(update_restore_fields)
+        source.currentIndexChanged.connect(load_backups)
+        update_loader_fields()
+        update_restore_fields()
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.button(QDialogButtonBox.Ok).setText("Nainstalovat")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        outer.addWidget(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        if restore_checkbox.isChecked() and backup.currentData() is None:
+            QMessageBox.warning(self, "Minecraft instalace", "Vyber platnou zálohu k obnovení.")
+            return
+        if not eula_checkbox.isChecked():
+            QMessageBox.warning(self, "Minecraft instalace", "Před instalací potvrď Minecraft EULA.")
+            return
+        java_tag = "java17" if java_runtime.currentText() == "Java 17" else "java21"
+        payload = {
+            "id": server_id.text().strip(),
+            "name": name.text().strip(),
+            "loader": loader.currentText(),
+            "version": version.text().strip(),
+            "loader_version": loader_version.text().strip(),
+            "memory_mb": memory.value(),
+            "port": port.value(),
+            "hostname": hostname.text().strip(),
+            "image": f"docker.io/itzg/minecraft-server:{java_tag}",
+            "accept_eula": True,
+        }
+        if restore_checkbox.isChecked():
+            payload["backup"] = {
+                "source_id": source.currentData(), "id": backup.currentData(),
+            }
+        restore_text = (
+            f"\nData budou obnovena ze zálohy serveru {source.currentText()}."
+            if restore_checkbox.isChecked() else "\nServer dostane nový prázdný datový adresář."
+        )
+        answer = QMessageBox.question(
+            self,
+            "Potvrdit instalaci",
+            f"Vytvořit Podman server {payload['name']} na portu {payload['port']}?"
+            f"{restore_text}\n\nZdrojový server ani jeho data se nezmění.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.minecraft_install_thread = MinecraftInstallThread(payload, headers)
+        self.minecraft_install_thread.completed.connect(self.minecraft_install_completed)
+        self.minecraft_install_thread.start()
+        self.operation_refresh_timer.start(1_000)
+        QTimer.singleShot(150, self.refresh_server_statuses)
+
+    def minecraft_install_completed(self, payload):
+        self.operation_refresh_timer.stop()
+        if payload.get("error"):
+            QMessageBox.critical(
+                self, "Minecraft instalace", f"Instalace selhala: {payload['error']}",
+            )
+        else:
+            warning = payload.get("route_warning")
+            route_text = (
+                f"\n\nServer funguje, ale Gate trasa se nepodařila: {warning}"
+                if warning else ""
+            )
+            QMessageBox.information(
+                self, "Minecraft instalace",
+                f"{payload.get('message', 'Minecraft server byl nainstalován.')}"
+                f"{route_text}",
+            )
+        self.refresh_server_statuses()
+
+    def deploy_gate_proxy(self):
+        if self.gate_deploy_thread and self.gate_deploy_thread.isRunning():
+            return
+        headers = self.local_pam_headers()
+        if not headers:
+            QMessageBox.warning(
+                self, "Gate Lite", "Nasazení Gate Lite vyžaduje přihlášení v Timekpr.",
             )
             return
         answer = QMessageBox.question(
             self,
-            "Nasadit Velocity",
-            "Stáhnout a spustit Velocity na testovacím portu 25580?\n\n"
+            "Nasadit Gate Lite",
+            "Stáhnout a spustit Gate Lite na testovacím portu 25581?\n\n"
             "Produkční Forge na portu 25565 zůstane beze změny.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if answer != QMessageBox.Yes:
             return
-        self.velocity_deploy_thread = VelocityDeployThread(headers)
-        self.velocity_deploy_thread.completed.connect(self.velocity_deploy_completed)
-        self.velocity_deploy_thread.start()
+        self.gate_deploy_thread = GateDeployThread(headers)
+        self.gate_deploy_thread.completed.connect(self.gate_deploy_completed)
+        self.gate_deploy_thread.start()
         self.operation_refresh_timer.start(1_000)
         QTimer.singleShot(150, self.refresh_server_statuses)
 
-    def velocity_deploy_completed(self, payload):
+    def open_gate_routes(self):
+        if self.app_mode != "server":
+            return
+        if self.gate_routes_thread and self.gate_routes_thread.isRunning():
+            QMessageBox.information(self, "Směrování Gate", "Uložení tras právě probíhá.")
+            return
+        headers = self.local_pam_headers()
+        if not headers:
+            QMessageBox.warning(
+                self, "Směrování Gate", "Úprava tras vyžaduje přihlášení v Timekpr.",
+            )
+            return
+        try:
+            response = requests.get(
+                f"{FLASK_URL}/proxy/routes", headers=headers, timeout=15,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+        except Exception as error:
+            QMessageBox.critical(self, "Směrování Gate", f"Trasy nelze načíst: {error}")
+            return
+
+        targets = payload.get("targets", [])
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Směrování Gate Lite")
+        dialog.setMinimumSize(680, 380)
+        layout = QVBoxLayout(dialog)
+        help_label = QLabel(
+            "Hostname určuje adresu zadanou hráčem. Cíl se vybírá z registrovaných "
+            "Minecraft serverů; Game Mover sám použije správný host port nebo "
+            "privátní jméno spravovaného Podman containeru. Výchozí * trasa musí být právě jedna.",
+            dialog,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        table = QTableWidget(dialog)
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Hostname", "Cílový server", "Odvozený backend"])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        layout.addWidget(table)
+
+        target_by_id = {target.get("id"): target for target in targets}
+
+        def add_route(host="", target_id=None, backend=None):
+            row = table.rowCount()
+            table.insertRow(row)
+            table.setItem(row, 0, QTableWidgetItem(host))
+            combo = QComboBox(table)
+            for target in targets:
+                combo.addItem(
+                    f"{target.get('name')} ({target.get('backend')})", target.get("id"),
+                )
+            selected = combo.findData(target_id)
+            if selected >= 0:
+                combo.setCurrentIndex(selected)
+            elif target_id is None:
+                combo.insertItem(0, "Vyber cílový server", None)
+                combo.setCurrentIndex(0)
+            table.setCellWidget(row, 1, combo)
+            endpoint = target_by_id.get(target_id, {}).get("endpoint", backend or {})
+            endpoint_text = (
+                f"{endpoint.get('host')}:{endpoint.get('port')}" if endpoint else "nelze odvodit"
+            )
+            endpoint_item = QTableWidgetItem(endpoint_text)
+            endpoint_item.setFlags(endpoint_item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, 2, endpoint_item)
+
+            def update_endpoint():
+                selected_target = target_by_id.get(combo.currentData(), {})
+                selected_endpoint = selected_target.get("endpoint", {})
+                for current_row in range(table.rowCount()):
+                    if table.cellWidget(current_row, 1) is combo:
+                        table.item(current_row, 2).setText(
+                            f"{selected_endpoint.get('host')}:{selected_endpoint.get('port')}"
+                            if selected_endpoint else "nelze odvodit"
+                        )
+                        break
+
+            combo.currentIndexChanged.connect(update_endpoint)
+
+        for route in payload.get("routes", []):
+            add_route(route.get("host", ""), route.get("target_id"), route.get("backend"))
+
+        row_actions = QHBoxLayout()
+        add_button = QPushButton("Přidat trasu", dialog)
+        add_button.clicked.connect(lambda: add_route())
+        row_actions.addWidget(add_button)
+        remove_button = QPushButton("Smazat vybranou", dialog)
+
+        def remove_selected():
+            rows = sorted({index.row() for index in table.selectedIndexes()}, reverse=True)
+            for row in rows:
+                table.removeRow(row)
+
+        remove_button.clicked.connect(remove_selected)
+        row_actions.addWidget(remove_button)
+        default_button = QPushButton("Nastavit jako výchozí (*)", dialog)
+
+        def set_default():
+            row = table.currentRow()
+            if row < 0:
+                return
+            for index in range(table.rowCount()):
+                item = table.item(index, 0)
+                if item and item.text().strip() == "*":
+                    item.setText("")
+            table.item(row, 0).setText("*")
+
+        default_button.clicked.connect(set_default)
+        row_actions.addWidget(default_button)
+        layout.addLayout(row_actions)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog)
+        buttons.button(QDialogButtonBox.Save).setText("Uložit směrování")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        routes = []
+        for row in range(table.rowCount()):
+            host_item = table.item(row, 0)
+            target_combo = table.cellWidget(row, 1)
+            routes.append({
+                "host": host_item.text().strip() if host_item else "",
+                "target_id": target_combo.currentData() if target_combo else None,
+            })
+        routes.sort(key=lambda route: route["host"] == "*")
+        if not routes or sum(route["host"] == "*" for route in routes) != 1:
+            QMessageBox.warning(
+                self, "Směrování Gate", "Nastav právě jednu výchozí * trasu.",
+            )
+            return
+        if any(not route["host"] or not route["target_id"] for route in routes):
+            QMessageBox.warning(
+                self, "Směrování Gate", "Každá trasa musí mít hostname a cílový server.",
+            )
+            return
+        self.gate_routes_thread = GateRoutesSaveThread(routes, headers)
+        self.gate_routes_thread.completed.connect(self.gate_routes_saved)
+        self.gate_routes_thread.start()
+
+    def gate_routes_saved(self, payload):
+        if payload.get("error"):
+            QMessageBox.critical(
+                self, "Směrování Gate", f"Uložení tras selhalo: {payload['error']}",
+            )
+        else:
+            QMessageBox.information(
+                self, "Směrování Gate",
+                payload.get("message", "Směrování Gate Lite bylo uloženo."),
+            )
+        self.refresh_server_statuses()
+
+    def gate_deploy_completed(self, payload):
         self.operation_refresh_timer.stop()
         if payload.get("error"):
-            QMessageBox.critical(self, "Velocity", f"Nasazení selhalo: {payload['error']}")
+            QMessageBox.critical(self, "Gate Lite", f"Nasazení selhalo: {payload['error']}")
         else:
             listen = payload.get("listen", {})
             QMessageBox.information(
-                self, "Velocity",
-                f"{payload.get('message', 'Velocity byla nasazena.')}\n"
+                self, "Gate Lite",
+                f"{payload.get('message', 'Gate Lite byl nasazen.')}\n"
                 f"Testovací port: {listen.get('port', '—')}",
             )
         self.refresh_server_statuses()
 
-    def control_velocity_proxy(self, action):
+    def control_gate_proxy(self, action):
         if self.app_mode != "server":
             return
         headers = self.local_pam_headers()
         if not headers:
             QMessageBox.warning(
-                self, "Velocity", "Ovládání Velocity vyžaduje přihlášení v Timekpr.",
+                self, "Gate Lite", "Ovládání Gate Lite vyžaduje přihlášení v Timekpr.",
             )
             return
         labels = {
-            "start": ("Spustit Velocity", "spustit"),
-            "stop": ("Vypnout Velocity", "vypnout"),
-            "restart": ("Restartovat Velocity", "restartovat"),
+            "start": ("Spustit Gate Lite", "spustit"),
+            "stop": ("Vypnout Gate Lite", "vypnout"),
+            "restart": ("Restartovat Gate Lite", "restartovat"),
         }
         title, verb = labels[action]
         if action in ("stop", "restart"):
             answer = QMessageBox.question(
-                self, title, f"Opravdu {verb} Velocity proxy?",
+                self, title, f"Opravdu {verb} Gate Lite?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
             if answer != QMessageBox.Yes:
@@ -1399,9 +1811,9 @@ class GameMover(QWidget):
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
-            QMessageBox.information(self, "Velocity", data.get("message", "Operace dokončena."))
+            QMessageBox.information(self, "Gate Lite", data.get("message", "Operace dokončena."))
         except Exception as error:
-            QMessageBox.critical(self, "Velocity", f"Operace selhala: {error}")
+            QMessageBox.critical(self, "Gate Lite", f"Operace selhala: {error}")
         self.refresh_server_statuses()
 
     def local_server_action_headers(self, policy):

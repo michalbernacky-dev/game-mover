@@ -14,11 +14,11 @@ class ServerRegistryTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.config_path = str(Path(self.temp_dir.name) / "servers.json")
         self.original_config_path = backend.GAME_SERVERS_CONFIG_PATH
-        self.original_velocity_config_path = backend.VELOCITY_CONFIG_PATH
+        self.original_gate_config_path = backend.GATE_CONFIG_PATH
         self.original_operations = backend.OPERATIONS
         backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
-        backend.VELOCITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "velocity.json")
+        backend.GATE_CONFIG_PATH = str(Path(self.temp_dir.name) / "gate.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -49,7 +49,7 @@ class ServerRegistryTest(unittest.TestCase):
 
     def tearDown(self):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
-        backend.VELOCITY_CONFIG_PATH = self.original_velocity_config_path
+        backend.GATE_CONFIG_PATH = self.original_gate_config_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
@@ -143,8 +143,8 @@ class ServerRegistryTest(unittest.TestCase):
             "mc-test", ["192.0.2.66", "127.0.0.1", "::1"], 25570, rcon=None,
         )
 
-    def test_velocity_config_requires_pam_and_status_is_read_only(self):
-        config = backend.default_velocity_config()
+    def test_gate_config_requires_pam_and_status_is_read_only(self):
+        config = backend.default_gate_config()
         self.assertEqual(self.client.get(
             "/proxy/config", **self.local_options(),
         ).status_code, 403)
@@ -153,7 +153,7 @@ class ServerRegistryTest(unittest.TestCase):
             **self.local_options(self.pam_headers),
         )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.json["proxy"]["listen"]["port"], 25580)
+        self.assertEqual(response.json["proxy"]["listen"]["port"], 25581)
 
         fake_backend = Mock()
         fake_backend.status.return_value = WorkloadState("inactive", "exited", "Neběží")
@@ -174,32 +174,115 @@ class ServerRegistryTest(unittest.TestCase):
                 "/proxy/status", environ_base={"REMOTE_ADDR": "192.0.2.10"},
             )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["proxy"]["type"], "velocity")
+        self.assertEqual(response.json["proxy"]["type"], "gate-lite")
         self.assertFalse(response.json["proxy"]["deployed"])
         self.assertNotIn("backends", response.json["proxy"])
 
-    def test_velocity_deploy_is_pam_protected_and_uses_staging_port(self):
+    def test_gate_routes_use_registered_server_ids_and_restart_deployed_gate(self):
+        targets = [
+            {
+                "id": "forge", "name": "Forge", "backend": "systemd",
+                "endpoint": {"host": "host.containers.internal", "port": 25565},
+            },
+            {
+                "id": "forge-podman", "name": "Forge Podman", "backend": "podman",
+                "endpoint": {"host": "forge-podman", "port": 25565},
+            },
+        ]
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = True
+        fake_backend.restart.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "minecraft_route_targets", return_value=targets),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "write_gate_layout", return_value={
+                "data_directory": "/managed/gate", "config_path": "/managed/gate/config.yml",
+            }),
+            patch.object(backend, "chown_gate_layout"),
+        ):
+            response = self.client.put(
+                "/proxy/routes", json={"routes": [
+                    {"host": "forge.mc.example", "target_id": "forge-podman"},
+                    {"host": "*", "target_id": "forge"},
+                ]},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(response.json["restarted"])
+        self.assertEqual(response.json["routes"][0]["target_id"], "forge-podman")
+        self.assertEqual(response.json["routes"][1]["target_id"], "forge")
+        saved = backend.load_gate_config()
+        self.assertEqual(saved["routes"], [
+            {"host": "forge.mc.example", "backend": {"host": "forge-podman", "port": 25565}},
+            {"host": "*", "backend": {"host": "host.containers.internal", "port": 25565}},
+        ])
+        fake_backend.restart.assert_called_once()
+
+    def test_gate_routes_reject_unknown_target_and_missing_default(self):
+        targets = [{
+            "id": "forge", "name": "Forge", "backend": "systemd",
+            "endpoint": {"host": "host.containers.internal", "port": 25565},
+        }]
+        with patch.object(backend, "minecraft_route_targets", return_value=targets):
+            response = self.client.put(
+                "/proxy/routes", json={"routes": [{"host": "*", "target_id": "missing"}]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 400)
+            response = self.client.put(
+                "/proxy/routes", json={"routes": [{"host": "forge.mc.example", "target_id": "forge"}]},
+                **self.local_options(self.pam_headers),
+            )
+            self.assertEqual(response.status_code, 400)
+
+    def test_gate_route_targets_use_host_port_for_adopted_podman(self):
+        targets = backend.minecraft_route_targets([{
+            "id": "mc-test", "name": "Minecraft Test", "kind": "minecraft",
+            "backend": "podman", "management_mode": "adopted",
+            "runtime": {"container_name": "mc-test"},
+            "connection": {"direct_port": 25570},
+        }, {
+            "id": "forge-podman", "name": "Forge Podman", "kind": "minecraft",
+            "backend": "podman", "management_mode": "managed",
+            "runtime": {"container_name": "forge-podman"},
+            "connection": {"direct_port": 25571},
+        }])
+        by_id = {target["id"]: target for target in targets}
+        self.assertEqual(by_id["mc-test"]["endpoint"], {
+            "host": "host.containers.internal", "port": 25570,
+        })
+        self.assertEqual(by_id["forge-podman"]["endpoint"], {
+            "host": "forge-podman", "port": 25565,
+        })
+        old_config = backend.default_gate_config()
+        old_config["routes"] = [{
+            "host": "test.mc.example", "backend": {"host": "mc-test", "port": 25565},
+        }]
+        self.assertEqual(
+            backend.abstract_gate_routes(old_config, targets)[0]["target_id"], "mc-test",
+        )
+
+    def test_gate_deploy_is_pam_protected_and_uses_staging_port(self):
         fake_backend = Mock()
         fake_backend.container_exists.return_value = False
         fake_backend.network_exists.return_value = False
         fake_backend.create_network.return_value = BackendResult(0, "game-platform")
         fake_backend.pull_image.return_value = BackendResult(0, "sha256:image")
-        fake_backend.create_container.return_value = BackendResult(0, "velocity")
+        fake_backend.create_container.return_value = BackendResult(0, "gate")
         fake_backend.start.return_value = BackendResult(0)
         layout = {
-            "data_directory": "/managed/velocity",
-            "config_path": "/managed/velocity/velocity.toml",
-            "secret_path": "/managed/velocity/forwarding.secret",
+            "data_directory": "/managed/gate",
+            "config_path": "/managed/gate/config.yml",
         }
         self.assertEqual(self.client.post(
             "/proxy/deploy", **self.local_options(self.admin_headers),
         ).status_code, 403)
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
-            patch.object(backend, "write_velocity_layout", return_value=layout),
-            patch.object(backend, "chown_velocity_layout") as chown,
+            patch.object(backend, "write_gate_layout", return_value=layout),
+            patch.object(backend, "chown_gate_layout") as chown,
             patch.object(
-                backend, "wait_for_velocity_ready",
+                backend, "wait_for_gate_ready",
                 return_value={"online": 0, "max": 20},
             ) as readiness,
         ):
@@ -207,33 +290,33 @@ class ServerRegistryTest(unittest.TestCase):
                 "/proxy/deploy", **self.local_options(self.pam_headers),
             )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertEqual(response.json["listen"]["port"], 25580)
+        self.assertEqual(response.json["listen"]["port"], 25581)
         chown.assert_called_once_with(layout, backend.PODMAN_USER)
         create_kwargs = fake_backend.create_container.call_args.kwargs
-        self.assertEqual(create_kwargs["environment"]["TYPE"], "VELOCITY")
-        self.assertEqual(create_kwargs["environment"]["VELOCITY_VERSION"], "3.5.1")
-        self.assertEqual(create_kwargs["environment"]["VELOCITY_BUILD_ID"], "615")
-        self.assertEqual(create_kwargs["environment"]["MODRINTH_PROJECTS"], "ambassador")
-        self.assertEqual(create_kwargs["environment"]["SKIP_DOWNLOAD_DEFAULTS"], "true")
-        self.assertEqual(create_kwargs["ports"][0]["host_port"], 25580)
+        self.assertNotIn("environment", create_kwargs)
+        self.assertEqual(create_kwargs["mounts"], [{
+            "source": "/managed/gate/config.yml", "target": "/config.yml",
+        }])
+        self.assertEqual(create_kwargs["ports"][0]["host_port"], 25581)
+        self.assertEqual(create_kwargs["ports"][0]["container_port"], 25565)
         self.assertEqual(create_kwargs["restart_policy"], "unless-stopped")
         self.assertEqual(create_kwargs["networks"], ["game-platform"])
         fake_backend.create_network.assert_called_once_with(
             "game-platform", labels={"io.game-platform.managed": "true"},
         )
-        operation = backend.OPERATIONS.snapshot(backend.VELOCITY_DEPLOY_OPERATION_ID)
+        operation = backend.OPERATIONS.snapshot(backend.GATE_DEPLOY_OPERATION_ID)
         self.assertEqual(operation["phase"], "complete")
         self.assertEqual(operation["progress"], 100)
-        readiness.assert_called_once_with("127.0.0.1", 25580)
+        readiness.assert_called_once_with("127.0.0.1", 25581)
 
-    def test_velocity_running_container_is_not_ready_until_tcp_listener_works(self):
+    def test_gate_running_container_is_not_ready_until_tcp_listener_works(self):
         fake_backend = Mock()
         fake_backend.status.return_value = WorkloadState("active", "running", "Běží")
         fake_backend.container_exists.return_value = True
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
             patch.object(
-                backend, "check_velocity_tcp_ready",
+                backend, "check_gate_tcp_ready",
                 side_effect=ConnectionRefusedError("refused"),
             ),
         ):
@@ -242,7 +325,7 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.json["proxy"]["status"], "activating")
         self.assertFalse(response.json["proxy"]["ready"])
 
-    def test_velocity_lifecycle_is_pam_protected(self):
+    def test_gate_lifecycle_is_pam_protected(self):
         fake_backend = Mock()
         fake_backend.container_exists.return_value = True
         fake_backend.restart.return_value = BackendResult(0)
@@ -262,7 +345,7 @@ class ServerRegistryTest(unittest.TestCase):
             self.assertEqual(response.status_code, 403)
         fake_backend.restart.assert_called_once()
 
-    def test_failed_velocity_readiness_removes_only_disposable_container(self):
+    def test_failed_gate_readiness_removes_only_disposable_container(self):
         fake_backend = Mock()
         fake_backend.container_exists.return_value = False
         fake_backend.network_exists.return_value = True
@@ -270,16 +353,15 @@ class ServerRegistryTest(unittest.TestCase):
         fake_backend.create_container.return_value = BackendResult(0)
         fake_backend.start.return_value = BackendResult(0)
         layout = {
-            "data_directory": "/managed/velocity",
-            "config_path": "/managed/velocity/velocity.toml",
-            "secret_path": "/managed/velocity/forwarding.secret",
+            "data_directory": "/managed/gate",
+            "config_path": "/managed/gate/config.yml",
         }
         with (
             patch.object(backend, "backend_for", return_value=fake_backend),
-            patch.object(backend, "write_velocity_layout", return_value=layout),
-            patch.object(backend, "chown_velocity_layout"),
+            patch.object(backend, "write_gate_layout", return_value=layout),
+            patch.object(backend, "chown_gate_layout"),
             patch.object(
-                backend, "wait_for_velocity_ready",
+                backend, "wait_for_gate_ready",
                 side_effect=RuntimeError("handshake selhal"),
             ),
         ):
@@ -288,15 +370,15 @@ class ServerRegistryTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 500)
         fake_backend.remove_container.assert_called_once_with(
-            {"backend": "podman", "runtime": {"container_name": "velocity"}},
+            {"backend": "podman", "runtime": {"container_name": "gate"}},
             force=True,
         )
         self.assertEqual(
-            backend.OPERATIONS.snapshot(backend.VELOCITY_DEPLOY_OPERATION_ID)["phase"],
+            backend.OPERATIONS.snapshot(backend.GATE_DEPLOY_OPERATION_ID)["phase"],
             "failed",
         )
 
-    def test_velocity_lifecycle_requires_deployed_container(self):
+    def test_gate_lifecycle_requires_deployed_container(self):
         fake_backend = Mock()
         fake_backend.container_exists.return_value = False
         with patch.object(backend, "backend_for", return_value=fake_backend):
@@ -618,6 +700,85 @@ class ServerRegistryTest(unittest.TestCase):
                 "/servers/backup", json={"id": "mc-test"},
                 **self.local_options(self.admin_headers),
             ).status_code, 200)
+
+    def test_minecraft_install_restores_creates_registers_and_routes(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        backup_root = Path(self.temp_dir.name) / "backups"
+        fake_backend = Mock()
+        fake_backend.container_exists.side_effect = [False, True]
+        fake_backend.network_exists.return_value = True
+        fake_backend.pull_image.return_value = BackendResult(0, "sha256:image")
+        fake_backend.create_container.return_value = BackendResult(0, "forge-podman")
+        fake_backend.start.return_value = BackendResult(0)
+        fake_backend.restart.return_value = BackendResult(0)
+        restored_data = data_root / "forge-podman" / "data"
+        restored_data.mkdir(parents=True)
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [{
+            "host": "*", "backend": {"host": "host.containers.internal", "port": 25565},
+        }]
+        request = {
+            "id": "forge-podman", "name": "Forge Podman", "loader": "FORGE",
+            "version": "1.20.1", "loader_version": "47.4.4", "memory_mb": 8192,
+            "port": 25571, "hostname": "forge.mc.example",
+            "accept_eula": True,
+            "backup": {"source_id": "forge", "id": "backup-1"},
+        }
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "BACKUP_ROOT", str(backup_root)),
+            patch.object(backend, "load_game_servers", return_value=[]),
+            patch.object(backend, "save_game_servers") as save_servers,
+            patch.object(backend, "check_host_port_available"),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "restore_backup", return_value={
+                "data_directory": str(restored_data), "sha256": "abc",
+            }) as restore,
+            patch.object(backend, "wait_for_minecraft_install_ready", return_value={
+                "online": 0, "max": 20,
+            }),
+            patch.object(backend, "load_gate_config", return_value=gate_config),
+            patch.object(backend, "save_gate_config") as save_gate,
+            patch.object(backend, "write_gate_layout", return_value={
+                "data_directory": "/managed/gate", "config_path": "/managed/gate/config.yml",
+            }),
+            patch.object(backend, "chown_gate_layout"),
+        ):
+            response = self.client.post(
+                "/servers/minecraft/install", json=request,
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["server"]["management_mode"], "managed")
+        self.assertEqual(response.json["server"]["connection"]["direct_port"], 25571)
+        restore.assert_called_once()
+        create_kwargs = fake_backend.create_container.call_args.kwargs
+        self.assertEqual(create_kwargs["environment"]["TYPE"], "FORGE")
+        self.assertEqual(create_kwargs["environment"]["FORGE_VERSION"], "47.4.4")
+        self.assertEqual(create_kwargs["mounts"][0]["source"], str(restored_data))
+        self.assertEqual(create_kwargs["ports"][0]["host_port"], 25571)
+        saved_server = save_servers.call_args.args[0][0]
+        self.assertEqual(saved_server["runtime"]["container_name"], "forge-podman")
+        routed = save_gate.call_args.args[0]["routes"]
+        self.assertEqual(routed[0], {
+            "host": "forge.mc.example", "backend": {"host": "forge-podman", "port": 25565},
+        })
+        self.assertEqual(routed[-1]["host"], "*")
+
+    def test_minecraft_install_requires_local_pam(self):
+        payload = {
+            "id": "new-server", "name": "New Server", "loader": "VANILLA",
+            "version": "1.21.1", "port": 25572,
+            "accept_eula": True,
+        }
+        self.assertEqual(self.client.post(
+            "/servers/minecraft/install", json=payload,
+            **self.local_options(self.admin_headers),
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            "/servers/minecraft/install", json=payload,
+            headers=self.pam_headers, environ_base={"REMOTE_ADDR": "192.0.2.10"},
+        ).status_code, 403)
 
 if __name__ == "__main__":
     unittest.main()

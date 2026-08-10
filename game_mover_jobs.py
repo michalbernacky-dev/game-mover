@@ -65,3 +65,9 @@ class OperationRegistry:
             operation = self._operations.get(operation_id)
             return dict(operation) if operation else None
 
+    def snapshots(self, *, kind=None):
+        with self._lock:
+            operations = [dict(operation) for operation in self._operations.values()]
+        if kind is not None:
+            operations = [operation for operation in operations if operation.get("kind") == kind]
+        return operations

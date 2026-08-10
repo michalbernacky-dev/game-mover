@@ -32,12 +32,21 @@ from game_mover_minecraft import (
     query_server_status,
 )
 from game_mover_version import __version__
-from game_mover_velocity import (
-    VelocityConfigError,
-    chown_velocity_layout,
-    default_velocity_config,
-    normalize_velocity_config,
-    write_velocity_layout,
+from game_mover_gate import (
+    GateConfigError,
+    chown_gate_layout,
+    default_gate_config,
+    normalize_gate_config,
+    upsert_gate_route,
+    write_gate_layout,
+)
+from game_mover_installs import (
+    InstallError,
+    container_environment,
+    fresh_data_directory,
+    list_backups,
+    normalize_install_request,
+    restore_backup,
 )
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
@@ -55,9 +64,9 @@ READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.
 READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
 GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
-VELOCITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "velocity.json")
-VELOCITY_DATA_DIRECTORY = os.path.realpath(
-    os.getenv("GAME_PLATFORM_VELOCITY_DATA", "/var/lib/game-platform/proxies/velocity")
+GATE_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "gate.json")
+GATE_DATA_DIRECTORY = os.path.realpath(
+    os.getenv("GAME_PLATFORM_GATE_DATA", "/var/lib/game-platform/proxies/gate")
 )
 PODMAN_USER = os.getenv("GAME_PLATFORM_PODMAN_USER", "gameplatform")
 PODMAN_SOCKET_PATH = os.getenv("GAME_PLATFORM_PODMAN_SOCKET", "").strip() or None
@@ -70,7 +79,7 @@ BACKUP_ROOT = os.path.realpath(
 WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
 OPERATIONS = OperationRegistry()
-VELOCITY_DEPLOY_OPERATION_ID = "velocity-deploy"
+GATE_DEPLOY_OPERATION_ID = "gate-deploy"
 SERVER_ACTIONS = ("start", "stop", "restart", "backup")
 SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
 MINECRAFT_STATUS_TIMEOUT = 8.0
@@ -163,35 +172,59 @@ def save_game_servers(servers):
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
 
 
-def load_velocity_config():
+def load_gate_config():
     try:
-        with open(VELOCITY_CONFIG_PATH, "r", encoding="utf-8") as config_file:
-            return normalize_velocity_config(json.load(config_file))
-    except (OSError, UnicodeError, json.JSONDecodeError, VelocityConfigError):
-        return normalize_velocity_config(default_velocity_config())
+        with open(GATE_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+            return normalize_gate_config(json.load(config_file))
+    except (OSError, UnicodeError, json.JSONDecodeError, GateConfigError):
+        return normalize_gate_config(default_gate_config())
 
 
-def check_velocity_tcp_ready(host, port, timeout=1.5):
+def check_gate_tcp_ready(host, port, timeout=1.5):
     with socket.create_connection((host, int(port)), timeout=timeout):
         return True
 
 
-def wait_for_velocity_ready(host, port, timeout=120):
+def wait_for_gate_ready(host, port, timeout=120):
     deadline = time.monotonic() + timeout
-    last_error = "Velocity ještě neposlouchá"
+    last_error = "Gate Lite ještě neposlouchá"
     while time.monotonic() < deadline:
         try:
-            return check_velocity_tcp_ready(host, port, timeout=1.5)
+            return check_gate_tcp_ready(host, port, timeout=1.5)
         except OSError as error:
             last_error = str(error)
             time.sleep(1)
-    raise RuntimeError(f"Velocity se nespustila v časovém limitu: {last_error}")
+    raise RuntimeError(f"Gate Lite se nespustil v časovém limitu: {last_error}")
 
 
-def save_velocity_config(config):
-    config = normalize_velocity_config(config)
+def check_host_port_available(port):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("0.0.0.0", int(port)))
+    except OSError as error:
+        raise InstallError(f"Port {port} už je obsazený; zvol jiný") from error
+    return True
+
+
+def wait_for_minecraft_install_ready(host, port, backend, workload, timeout=600):
+    deadline = time.monotonic() + timeout
+    last_error = "Minecraft server ještě neodpovídá"
+    while time.monotonic() < deadline:
+        state = backend.status(workload)
+        if state.status == "inactive":
+            raise RuntimeError(state.error or state.message or "Minecraft container se zastavil")
+        try:
+            return query_server_status(host, port, timeout=4)
+        except (OSError, UnicodeError, ValueError) as error:
+            last_error = str(error)
+            time.sleep(2)
+    raise RuntimeError(f"Minecraft server se nespustil v časovém limitu: {last_error}")
+
+
+def save_gate_config(config):
+    config = normalize_gate_config(config)
     os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
-    temporary_path = f"{VELOCITY_CONFIG_PATH}.tmp"
+    temporary_path = f"{GATE_CONFIG_PATH}.tmp"
     with open(temporary_path, "w", encoding="utf-8") as config_file:
         json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
         config_file.write("\n")
@@ -200,8 +233,75 @@ def save_velocity_config(config):
         os.chmod(temporary_path, 0o640)
     except (KeyError, OSError):
         os.chmod(temporary_path, 0o600)
-    os.replace(temporary_path, VELOCITY_CONFIG_PATH)
+    os.replace(temporary_path, GATE_CONFIG_PATH)
     return config
+
+
+def minecraft_route_targets(servers=None):
+    """Expose registered Minecraft workloads as abstract Gate route targets."""
+    targets = []
+    for server in servers if servers is not None else load_game_servers():
+        if server.get("kind") != "minecraft":
+            continue
+        backend_name = server.get("backend", "systemd")
+        if backend_name == "podman":
+            runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+            container_name = str(runtime.get("container_name", "")).strip()
+            connection = (
+                server.get("connection") if isinstance(server.get("connection"), dict) else {}
+            )
+            if server.get("management_mode") == "managed":
+                host = container_name
+                port = 25565
+            else:
+                host = "host.containers.internal"
+                port = connection.get("direct_port")
+        elif backend_name == "systemd":
+            data = server.get("data") if isinstance(server.get("data"), dict) else {}
+            connection = (
+                server.get("connection") if isinstance(server.get("connection"), dict) else {}
+            )
+            port = configured_server_port(data.get("directory"))
+            if port is None:
+                port = connection.get("direct_port")
+            host = "host.containers.internal"
+        else:
+            continue
+        if not host or not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            continue
+        target = {
+            "id": server.get("id"),
+            "name": server.get("name", server.get("id")),
+            "backend": backend_name,
+            "endpoint": {"host": host, "port": port},
+        }
+        if backend_name == "podman" and container_name:
+            target["container_name"] = container_name
+        targets.append(target)
+    return targets
+
+
+def abstract_gate_routes(config, targets):
+    endpoints = {
+        (target["endpoint"]["host"], target["endpoint"]["port"]): target["id"]
+        for target in targets
+    }
+    routes = []
+    for route in config["routes"]:
+        target_id = endpoints.get((route["backend"]["host"], route["backend"]["port"]))
+        if target_id is None:
+            target_id = next((
+                target["id"] for target in targets
+                if target.get("backend") == "podman"
+                and target.get("container_name") == route["backend"]["host"]
+                and route["backend"]["port"] == 25565
+            ), None)
+        routes.append({
+            "host": route["host"],
+            "target_id": target_id,
+            "backend": route["backend"],
+        })
+    return routes
 
 
 def find_game_server(server_id):
@@ -1209,6 +1309,21 @@ def servers_status():
             statuses = list(executor.map(game_server_status, servers))
     else:
         statuses = []
+    known_ids = {server.get("id") for server in statuses}
+    for operation in OPERATIONS.snapshots(kind="minecraft-install"):
+        if operation.get("running") and operation.get("target_id") not in known_ids:
+            statuses.append({
+                "id": operation.get("target_id"),
+                "name": operation.get("target_id"),
+                "backend": "podman",
+                "kind": "minecraft",
+                "status": "activating",
+                "native_status": operation.get("phase"),
+                "message": operation.get("message"),
+                "runtime_label": "Podman · instalace probíhá",
+                "operation": operation,
+                "backup_supported": False,
+            })
     return jsonify({
         "version": __version__,
         "servers": statuses,
@@ -1217,9 +1332,9 @@ def servers_status():
 
 
 @app.route("/proxy/status", methods=["GET"])
-def velocity_proxy_status():
+def gate_proxy_status():
     try:
-        config = load_velocity_config()
+        config = load_gate_config()
         workload = {
             "backend": "podman",
             "runtime": {"container_name": config["container_name"]},
@@ -1237,70 +1352,148 @@ def velocity_proxy_status():
     ready = False
     if container_exists and state.status == "active":
         try:
-            check_velocity_tcp_ready("127.0.0.1", config["listen"]["port"], timeout=1.5)
+            check_gate_tcp_ready("127.0.0.1", config["listen"]["port"], timeout=1.5)
             ready = True
         except OSError as error:
             state = WorkloadState(
                 "activating",
                 state.native_status,
-                "Container běží, Velocity ještě není připravena",
+                "Container běží, Gate Lite ještě není připravený",
                 str(error),
             )
     return jsonify({
         "version": __version__,
         "proxy": {
-            "type": "velocity",
+            "type": "gate-lite",
             "status": state.status,
             "native_status": state.native_status,
             "message": state.message,
             "error": state.error,
             "listen": config["listen"],
-            "forwarding_mode": config["forwarding_mode"],
+            "routing_mode": "hostname",
+            "routes_count": len(config["routes"]),
             "network": config["network"],
-            "configured": os.path.isfile(VELOCITY_CONFIG_PATH),
-            "prepared": os.path.isdir(VELOCITY_DATA_DIRECTORY),
+            "configured": os.path.isfile(GATE_CONFIG_PATH),
+            "prepared": os.path.isdir(GATE_DATA_DIRECTORY),
             "deployed": container_exists,
             "ready": ready,
-            "operation": OPERATIONS.snapshot(VELOCITY_DEPLOY_OPERATION_ID),
+            "operation": OPERATIONS.snapshot(GATE_DEPLOY_OPERATION_ID),
         },
     })
 
 
 @app.route("/proxy/config", methods=["GET", "PUT"])
-def velocity_proxy_config():
+def gate_proxy_config():
     if not require_local_pam_session(request):
         return jsonify({"message": "Unauthorized"}), 403
     if request.method == "GET":
-        return jsonify({"proxy": load_velocity_config()})
+        return jsonify({"proxy": load_gate_config()})
     try:
-        config = save_velocity_config((request.json or {}).get("proxy"))
+        config = save_gate_config((request.json or {}).get("proxy"))
     except (TypeError, ValueError, OSError) as error:
         return jsonify({"message": str(error)}), 400
     return jsonify({"proxy": config})
 
 
+@app.route("/proxy/routes", methods=["GET", "PUT"])
+def gate_proxy_routes():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    old_config = load_gate_config()
+    targets = minecraft_route_targets()
+    if request.method == "GET":
+        return jsonify({
+            "routes": abstract_gate_routes(old_config, targets),
+            "targets": targets,
+        })
+
+    raw_routes = (request.json or {}).get("routes")
+    if not isinstance(raw_routes, list) or not raw_routes:
+        return jsonify({"message": "Gate Lite potřebuje alespoň jednu trasu"}), 400
+    target_by_id = {target["id"]: target for target in targets}
+    concrete_routes = []
+    try:
+        for route in raw_routes:
+            if not isinstance(route, dict):
+                raise GateConfigError("Neplatná abstraktní Gate Lite trasa")
+            target_id = str(route.get("target_id", "")).strip()
+            if target_id not in target_by_id:
+                raise GateConfigError("Cílový Minecraft server není registrovaný")
+            concrete_routes.append({
+                "host": route.get("host"),
+                "backend": dict(target_by_id[target_id]["endpoint"]),
+            })
+        new_config = normalize_gate_config({**old_config, "routes": concrete_routes})
+        if sum(route["host"] == "*" for route in new_config["routes"]) != 1:
+            raise GateConfigError("Směrování musí obsahovat právě jednu výchozí * trasu")
+    except (GateConfigError, TypeError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+
+    workload = {
+        "backend": "podman",
+        "runtime": {"container_name": old_config["container_name"]},
+    }
+    gate_backend = None
+    deployed = False
+    try:
+        with workload_lock("gate-router"):
+            gate_backend = backend_for(
+                workload,
+                podman_user=PODMAN_USER,
+                podman_socket_path=PODMAN_SOCKET_PATH,
+            )
+            deployed = gate_backend.container_exists(workload)
+            layout = write_gate_layout(new_config, GATE_DATA_DIRECTORY)
+            chown_gate_layout(layout, PODMAN_USER)
+            save_gate_config(new_config)
+            if deployed:
+                restart_result = gate_backend.restart(workload)
+                if restart_result.returncode != 0:
+                    raise RuntimeError(
+                        restart_result.error or restart_result.output
+                        or "Gate Lite se nepodařilo načíst novou konfiguraci"
+                    )
+    except (KeyError, OSError, RuntimeError, ValueError) as error:
+        try:
+            rollback_layout = write_gate_layout(old_config, GATE_DATA_DIRECTORY)
+            chown_gate_layout(rollback_layout, PODMAN_USER)
+            save_gate_config(old_config)
+            if deployed and gate_backend is not None:
+                gate_backend.restart(workload)
+        except (KeyError, OSError, ValueError):
+            pass
+        return jsonify({"message": f"Uložení tras selhalo; původní konfigurace obnovena: {error}"}), 500
+    return jsonify({
+        "message": "Směrování Gate Lite bylo uloženo"
+            + (" a Gate restartován" if deployed else " pro příští nasazení"),
+        "routes": abstract_gate_routes(new_config, targets),
+        "targets": targets,
+        "restarted": deployed,
+    })
+
+
 @app.route("/proxy/deploy", methods=["POST"])
-def velocity_proxy_deploy():
+def gate_proxy_deploy():
     if not require_local_pam_session(request):
         return jsonify({"message": "Unauthorized"}), 403
     try:
         OPERATIONS.begin(
-            VELOCITY_DEPLOY_OPERATION_ID,
+            GATE_DEPLOY_OPERATION_ID,
             kind="proxy-deploy",
-            target_id="velocity-proxy",
-            message="Připravuji konfiguraci Velocity",
+            target_id="gate-router",
+            message="Připravuji konfiguraci Gate Lite",
         )
         OPERATIONS.update(
-            VELOCITY_DEPLOY_OPERATION_ID,
+            GATE_DEPLOY_OPERATION_ID,
             phase="preparing",
-            message="Připravuji konfiguraci Velocity",
+            message="Připravuji konfiguraci Gate Lite",
             progress=5,
         )
     except OperationAlreadyRunning:
-        return jsonify({"message": "Nasazování Velocity už probíhá"}), 409
+        return jsonify({"message": "Nasazování Gate Lite už probíhá"}), 409
     created_container = False
     try:
-        config = load_velocity_config()
+        config = load_gate_config()
         workload = {
             "backend": "podman",
             "runtime": {"container_name": config["container_name"]},
@@ -1310,25 +1503,25 @@ def velocity_proxy_deploy():
             podman_user=PODMAN_USER,
             podman_socket_path=PODMAN_SOCKET_PATH,
         )
-        with workload_lock("velocity-proxy"):
+        with workload_lock("gate-router"):
             if proxy_backend.container_exists(workload):
                 OPERATIONS.finish(
-                    VELOCITY_DEPLOY_OPERATION_ID,
-                    message="Velocity už je nasazena",
+                    GATE_DEPLOY_OPERATION_ID,
+                    message="Gate Lite už je nasazený",
                 )
                 return jsonify({
-                    "message": "Velocity container už existuje; změny vyžadují řízenou aktualizaci",
+                    "message": "Gate Lite container už existuje; změny vyžadují řízenou aktualizaci",
                 }), 409
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="layout",
-                message="Vytvářím konfiguraci a forwarding secret",
+                message="Vytvářím validované hostname trasy",
                 progress=10,
             )
-            layout = write_velocity_layout(config, VELOCITY_DATA_DIRECTORY)
-            chown_velocity_layout(layout, PODMAN_USER)
+            layout = write_gate_layout(config, GATE_DATA_DIRECTORY)
+            chown_gate_layout(layout, PODMAN_USER)
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="network",
                 message="Připravuji privátní Podman síť",
                 progress=20,
@@ -1344,95 +1537,75 @@ def velocity_proxy_deploy():
                         or "Vytvoření privátní Podman sítě selhalo"
                     )
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="pulling",
-                message="Stahuji image Velocity a plugin Ambassador",
+                message="Stahuji ověřený image Gate",
                 progress=35,
             )
             pull_result = proxy_backend.pull_image(config["image"])
             if pull_result.returncode != 0:
                 raise RuntimeError(
-                    pull_result.error or pull_result.output or "Stažení Velocity image selhalo"
+                    pull_result.error or pull_result.output or "Stažení Gate image selhalo"
                 )
-            projects = ",".join(
-                plugin["project"] for plugin in config["plugins"]
-                if plugin["provider"] == "modrinth"
-            )
-            minecraft_versions = {
-                plugin["minecraft_version"] for plugin in config["plugins"]
-            }
-            minecraft_version = next(iter(minecraft_versions), "1.20.1")
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="creating",
-                message="Vytvářím Velocity container",
+                message="Vytvářím Gate Lite container",
                 progress=75,
             )
             create_result = proxy_backend.create_container(
                 workload,
                 config["image"],
-                environment={
-                    "TYPE": "VELOCITY",
-                    "VELOCITY_VERSION": config["velocity_version"],
-                    "VELOCITY_BUILD_ID": config["velocity_build_id"],
-                    "MEMORY": "512M",
-                    "PUID": "0",
-                    "PGID": "0",
-                    "SKIP_CHOWN_DATA": "true",
-                    "MINECRAFT_VERSION": minecraft_version,
-                    "MODRINTH_PROJECTS": projects,
-                    "SKIP_DOWNLOAD_DEFAULTS": "true",
-                },
-                mounts=[{"source": VELOCITY_DATA_DIRECTORY, "target": "/server"}],
+                mounts=[{"source": layout["config_path"], "target": "/config.yml"}],
                 ports=[{
                     "host": config["listen"]["host"],
                     "host_port": config["listen"]["port"],
-                    "container_port": config["listen"]["port"],
+                    "container_port": 25565,
                 }],
                 labels={
-                    "io.game-platform.workload-id": "velocity-proxy",
-                    "io.game-platform.kind": "minecraft-proxy",
+                    "io.game-platform.workload-id": "gate-router",
+                    "io.game-platform.kind": "minecraft-router",
                 },
                 restart_policy="unless-stopped",
                 networks=[config["network"]],
             )
             if create_result.returncode != 0:
                 raise RuntimeError(
-                    create_result.error or create_result.output or "Vytvoření Velocity selhalo"
+                    create_result.error or create_result.output or "Vytvoření Gate Lite selhalo"
                 )
             created_container = True
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="starting",
-                message="Spouštím Velocity a ověřuji lifecycle",
+                message="Spouštím Gate Lite a ověřuji lifecycle",
                 progress=90,
             )
             start_result = proxy_backend.start(workload)
             if start_result.returncode != 0:
                 raise RuntimeError(
-                    start_result.error or start_result.output or "Spuštění Velocity selhalo"
+                    start_result.error or start_result.output or "Spuštění Gate Lite selhalo"
                 )
             OPERATIONS.update(
-                VELOCITY_DEPLOY_OPERATION_ID,
+                GATE_DEPLOY_OPERATION_ID,
                 phase="verifying",
-                message="Ověřuji TCP listener Velocity",
+                message="Ověřuji TCP listener Gate Lite",
                 progress=95,
             )
-            wait_for_velocity_ready("127.0.0.1", config["listen"]["port"])
+            wait_for_gate_ready("127.0.0.1", config["listen"]["port"])
     except (KeyError, OSError, RuntimeError, ValueError) as error:
         if created_container:
             proxy_backend.remove_container(workload, force=True)
         OPERATIONS.fail(
-            VELOCITY_DEPLOY_OPERATION_ID,
+            GATE_DEPLOY_OPERATION_ID,
             message=f"Nasazení selhalo: {error}",
         )
         return jsonify({"message": str(error)}), 500
     OPERATIONS.finish(
-        VELOCITY_DEPLOY_OPERATION_ID,
-        message="Velocity byla úspěšně nasazena",
+        GATE_DEPLOY_OPERATION_ID,
+        message="Gate Lite byl úspěšně nasazen",
     )
     return jsonify({
-        "message": "Velocity byla nasazena na testovací port",
+        "message": "Gate Lite byl nasazen na testovací port",
         "listen": config["listen"],
         "container": config["container_name"],
     })
@@ -1441,11 +1614,11 @@ def velocity_proxy_deploy():
 @app.route("/proxy/start", methods=["POST"])
 @app.route("/proxy/stop", methods=["POST"])
 @app.route("/proxy/restart", methods=["POST"])
-def velocity_proxy_control():
+def gate_proxy_control():
     if not require_local_pam_session(request):
         return jsonify({"message": "Unauthorized"}), 403
     action = request.path.rsplit("/", 1)[-1]
-    config = load_velocity_config()
+    config = load_gate_config()
     workload = {
         "backend": "podman",
         "runtime": {"container_name": config["container_name"]},
@@ -1456,20 +1629,20 @@ def velocity_proxy_control():
             podman_user=PODMAN_USER,
             podman_socket_path=PODMAN_SOCKET_PATH,
         )
-        with workload_lock("velocity-proxy"):
+        with workload_lock("gate-router"):
             if not proxy_backend.container_exists(workload):
-                return jsonify({"message": "Velocity ještě není nasazena"}), 404
+                return jsonify({"message": "Gate Lite ještě není nasazený"}), 404
             result = getattr(proxy_backend, action)(workload)
     except (AttributeError, KeyError, OSError, ValueError) as error:
         return jsonify({"message": str(error)}), 500
     if result.returncode != 0:
         return jsonify({
-            "message": result.error or result.output or "Ovládání Velocity selhalo",
+            "message": result.error or result.output or "Ovládání Gate Lite selhalo",
         }), 500
     messages = {
-        "start": "Velocity byla spuštěna",
-        "stop": "Velocity byla vypnuta",
-        "restart": "Velocity byla restartována",
+        "start": "Gate Lite byl spuštěn",
+        "stop": "Gate Lite byl vypnut",
+        "restart": "Gate Lite byl restartován",
     }
     return jsonify({"message": messages[action]})
 
@@ -1527,7 +1700,10 @@ def validate_game_server_entry(server, seen_ids):
         if not CONTAINER_NAME_RE.fullmatch(container):
             raise ValueError("Invalid Podman container name")
         item["runtime"] = {"container_name": container}
-        item["management_mode"] = "adopted"
+        management_mode = str(server.get("management_mode", "adopted")).strip().lower()
+        if management_mode not in ("adopted", "managed"):
+            raise ValueError("Invalid Podman management mode")
+        item["management_mode"] = management_mode
 
     if kind == "minecraft":
         mods_dir = str(server.get("mods_dir", "")).strip()
@@ -1583,6 +1759,222 @@ def servers_config():
         seen_ids.add(item["id"])
     save_game_servers(validated)
     return jsonify({"servers": validated})
+
+
+@app.route("/servers/backups", methods=["GET"])
+def servers_backups():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    source_id = request.args.get("source_id", "")
+    try:
+        backups = list_backups(BACKUP_ROOT, source_id)
+    except (InstallError, OSError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({"source_id": source_id, "backups": backups})
+
+
+@app.route("/servers/minecraft/install", methods=["POST"])
+def minecraft_install():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    try:
+        config = normalize_install_request(request.json or {})
+    except (InstallError, TypeError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+
+    operation_id = f"minecraft-install-{config['id']}"
+    try:
+        OPERATIONS.begin(
+            operation_id,
+            kind="minecraft-install",
+            target_id=config["id"],
+            message=f"Připravuji server {config['name']}",
+        )
+    except OperationAlreadyRunning:
+        return jsonify({"message": "Instalace tohoto serveru už probíhá"}), 409
+
+    workload = {
+        "id": config["id"],
+        "backend": "podman",
+        "runtime": {"container_name": config["id"]},
+    }
+    container_created = False
+    data_created = False
+    registered = False
+    proxy_backend = None
+    data_directory = os.path.join(PODMAN_DATA_ROOT, config["id"], "data")
+    try:
+        with workload_lock(config["id"]):
+            existing_servers = load_game_servers()
+            if any(server.get("id") == config["id"] for server in existing_servers):
+                raise InstallError("Server s tímto ID už je registrovaný")
+            check_host_port_available(config["port"])
+            proxy_backend = backend_for(
+                workload,
+                podman_user=PODMAN_USER,
+                podman_socket_path=PODMAN_SOCKET_PATH,
+            )
+            if proxy_backend.container_exists(workload):
+                raise InstallError("Podman container s tímto ID už existuje")
+
+            backup = config.get("backup")
+            if backup:
+                OPERATIONS.update(
+                    operation_id, phase="restoring",
+                    message="Ověřuji kontrolní součet a obnovuji zálohu", progress=15,
+                )
+                restore_result = restore_backup(
+                    backup_root=BACKUP_ROOT,
+                    source_id=backup["source_id"],
+                    backup_id=backup["id"],
+                    data_root=PODMAN_DATA_ROOT,
+                    target_id=config["id"],
+                    owner_user=PODMAN_USER,
+                )
+                data_directory = restore_result["data_directory"]
+            else:
+                OPERATIONS.update(
+                    operation_id, phase="data",
+                    message="Vytvářím persistentní datový adresář", progress=15,
+                )
+                data_directory = fresh_data_directory(
+                    data_root=PODMAN_DATA_ROOT,
+                    target_id=config["id"],
+                    owner_user=PODMAN_USER,
+                )
+            data_created = True
+
+            OPERATIONS.update(
+                operation_id, phase="pulling",
+                message="Stahuji Minecraft server image", progress=40,
+            )
+            pull_result = proxy_backend.pull_image(config["image"])
+            if pull_result.returncode != 0:
+                raise InstallError(
+                    pull_result.error or pull_result.output or "Stažení image selhalo"
+                )
+
+            OPERATIONS.update(
+                operation_id, phase="network",
+                message="Připravuji privátní Podman síť", progress=55,
+            )
+            gate_config = load_gate_config()
+            if not proxy_backend.network_exists(gate_config["network"]):
+                network_result = proxy_backend.create_network(
+                    gate_config["network"],
+                    labels={"io.game-platform.managed": "true"},
+                )
+                if network_result.returncode != 0:
+                    raise InstallError(
+                        network_result.error or network_result.output or "Vytvoření sítě selhalo"
+                    )
+
+            OPERATIONS.update(
+                operation_id, phase="creating",
+                message="Vytvářím Minecraft container", progress=70,
+            )
+            create_result = proxy_backend.create_container(
+                workload,
+                config["image"],
+                environment=container_environment(config),
+                mounts=[{"source": data_directory, "target": "/data"}],
+                ports=[{
+                    "host": "0.0.0.0",
+                    "host_port": config["port"],
+                    "container_port": 25565,
+                }],
+                labels={
+                    "io.game-platform.workload-id": config["id"],
+                    "io.game-platform.kind": "minecraft-server",
+                    "io.game-platform.loader": config["loader"].lower(),
+                    "io.game-platform.minecraft-version": config["version"],
+                },
+                restart_policy="unless-stopped",
+                networks=[gate_config["network"]],
+            )
+            if create_result.returncode != 0:
+                raise InstallError(
+                    create_result.error or create_result.output or "Vytvoření containeru selhalo"
+                )
+            container_created = True
+
+            OPERATIONS.update(
+                operation_id, phase="starting",
+                message="Spouštím Minecraft server", progress=82,
+            )
+            start_result = proxy_backend.start(workload)
+            if start_result.returncode != 0:
+                raise InstallError(
+                    start_result.error or start_result.output or "Spuštění serveru selhalo"
+                )
+            OPERATIONS.update(
+                operation_id, phase="verifying",
+                message="Čekám na dokončení startu Minecraft serveru", progress=92,
+            )
+            player_status = wait_for_minecraft_install_ready(
+                "127.0.0.1", config["port"], proxy_backend, workload,
+            )
+
+            server_entry = validate_game_server_entry({
+                "id": config["id"],
+                "name": config["name"],
+                "backend": "podman",
+                "kind": "minecraft",
+                "runtime": {"container_name": config["id"]},
+                "management_mode": "managed",
+                "mods_dir": os.path.join(data_directory, "mods"),
+                "data": {"directory": data_directory},
+                "connection": {"direct_port": config["port"]},
+                "permissions": {
+                    "start": "silent", "stop": "silent",
+                    "restart": "silent", "backup": "pam",
+                },
+            }, {server.get("id") for server in existing_servers})
+            save_game_servers([*existing_servers, server_entry])
+            registered = True
+
+            route_warning = None
+            if config["hostname"]:
+                OPERATIONS.update(
+                    operation_id, phase="routing",
+                    message="Přidávám hostname trasu do Gate Lite", progress=97,
+                )
+                try:
+                    gate_config = upsert_gate_route(
+                        gate_config, config["hostname"], config["id"], 25565,
+                    )
+                    save_gate_config(gate_config)
+                    layout = write_gate_layout(gate_config, GATE_DATA_DIRECTORY)
+                    chown_gate_layout(layout, PODMAN_USER)
+                    gate_workload = {
+                        "backend": "podman",
+                        "runtime": {"container_name": gate_config["container_name"]},
+                    }
+                    if proxy_backend.container_exists(gate_workload):
+                        route_result = proxy_backend.restart(gate_workload)
+                        if route_result.returncode != 0:
+                            raise InstallError(
+                                route_result.error or route_result.output
+                                or "Restart Gate Lite selhal"
+                            )
+                except (GateConfigError, InstallError, OSError, ValueError) as error:
+                    route_warning = str(error)
+    except (InstallError, KeyError, OSError, RuntimeError, ValueError) as error:
+        if container_created and proxy_backend is not None:
+            proxy_backend.remove_container(workload, force=True)
+        if data_created and not registered:
+            shutil.rmtree(os.path.join(PODMAN_DATA_ROOT, config["id"]), ignore_errors=True)
+        OPERATIONS.fail(operation_id, message=f"Instalace selhala: {error}")
+        return jsonify({"message": str(error)}), 500
+
+    OPERATIONS.finish(operation_id, message=f"Server {config['name']} je připravený")
+    return jsonify({
+        "message": f"Minecraft server {config['name']} byl nainstalován a ověřen",
+        "server": server_entry,
+        "players": player_status,
+        "hostname": config["hostname"] or None,
+        "route_warning": route_warning,
+    })
 
 
 def control_game_server(action):

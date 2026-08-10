@@ -26,14 +26,14 @@ class OperationRegistryTest(unittest.TestCase):
     def test_same_operation_cannot_run_twice(self):
         registry = OperationRegistry()
         registry.begin(
-            "velocity-deploy", kind="proxy-deploy",
-            target_id="velocity-proxy", message="Připravuji proxy",
+            "router-deploy", kind="proxy-deploy",
+            target_id="gate-router", message="Připravuji proxy",
         )
 
         with self.assertRaises(OperationAlreadyRunning):
             registry.begin(
-                "velocity-deploy", kind="proxy-deploy",
-                target_id="velocity-proxy", message="Připravuji proxy",
+                "router-deploy", kind="proxy-deploy",
+                target_id="gate-router", message="Připravuji proxy",
             )
 
     def test_progress_is_bounded_and_fail_is_visible(self):
@@ -48,6 +48,15 @@ class OperationRegistryTest(unittest.TestCase):
         self.assertEqual(registry.snapshot("restore-test")["progress"], 100)
         registry.fail("restore-test", message="Obnova selhala")
         self.assertEqual(registry.snapshot("restore-test")["phase"], "failed")
+
+    def test_snapshots_can_filter_operation_kind(self):
+        registry = OperationRegistry()
+        registry.begin("install-a", kind="minecraft-install", target_id="a", message="A")
+        registry.begin("proxy", kind="proxy-deploy", target_id="gate", message="Gate")
+        self.assertEqual(
+            [item["id"] for item in registry.snapshots(kind="minecraft-install")],
+            ["install-a"],
+        )
 
 
 if __name__ == "__main__":

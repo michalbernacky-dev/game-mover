@@ -159,19 +159,19 @@ class WorkloadBackendTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             backend.start(workload)
 
-    def test_podman_creates_validated_velocity_container(self):
+    def test_podman_creates_validated_managed_container(self):
         runner = RecordingRunner()
         backend = PodmanBackend(
             "gameplatform", runner, "/run/user/955/podman/podman.sock",
         )
         workload = {
-            "backend": "podman", "runtime": {"container_name": "velocity"},
+            "backend": "podman", "runtime": {"container_name": "managed-service"},
         }
 
         backend.create_container(
-            workload, "docker.io/itzg/mc-proxy:java21",
-            environment={"TYPE": "VELOCITY"},
-            mounts=[{"source": "/var/lib/game-platform/proxies/velocity", "target": "/server"}],
+            workload, "example.invalid/game/service:1",
+            environment={"MODE": "proxy"},
+            mounts=[{"source": "/var/lib/game-platform/proxies/managed-service", "target": "/server"}],
             ports=[{"host": "0.0.0.0", "host_port": 25580, "container_port": 25580}],
             labels={"io.game-platform.kind": "minecraft-proxy"},
             restart_policy="unless-stopped",
@@ -180,12 +180,12 @@ class WorkloadBackendTest(unittest.TestCase):
 
         arguments = runner.calls[0][0][4:]
         self.assertEqual(arguments[0:5], [
-            "create", "--name", "velocity", "--restart", "unless-stopped",
+            "create", "--name", "managed-service", "--restart", "unless-stopped",
         ])
-        self.assertIn("TYPE=VELOCITY", arguments)
+        self.assertIn("MODE=proxy", arguments)
         self.assertIn("game-platform", arguments)
         self.assertIn("0.0.0.0:25580:25580/tcp", arguments)
-        self.assertEqual(arguments[-1], "docker.io/itzg/mc-proxy:java21")
+        self.assertEqual(arguments[-1], "example.invalid/game/service:1")
 
     def test_podman_rejects_unknown_restart_policy(self):
         runner = RecordingRunner()
@@ -193,12 +193,12 @@ class WorkloadBackendTest(unittest.TestCase):
             "gameplatform", runner, "/run/user/955/podman/podman.sock",
         )
         workload = {
-            "backend": "podman", "runtime": {"container_name": "velocity"},
+            "backend": "podman", "runtime": {"container_name": "managed-service"},
         }
 
         with self.assertRaisesRegex(ValueError, "restart policy"):
             backend.create_container(
-                workload, "docker.io/itzg/mc-proxy:java21",
+                workload, "example.invalid/game/service:1",
                 restart_policy="$(malicious)",
             )
         self.assertEqual(runner.calls, [])

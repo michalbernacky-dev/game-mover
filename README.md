@@ -138,8 +138,12 @@ session, and `disabled` rejects the action. These policies never enable remote
 control. If a workload is running during backup, it is cleanly
 stopped, the complete data directory is archived and verified, and its previous
 running state is restored. Each gzip archive has a SHA-256 file and a JSON
-manifest with selected non-secret image/runtime metadata. Restore, container
-creation and deletion of containers/data are deliberately not enabled yet.
+manifest with selected non-secret image/runtime metadata. The local PAM-protected
+Minecraft installer can create a fresh managed rootless Podman server or restore
+one of these verified backups into a new isolated data directory. The source
+server and its data are never modified by restore. The UI validates the workload
+ID, Minecraft and loader versions, Java image, memory, unique direct port and an
+optional Gate hostname, and requires explicit acceptance of the Minecraft EULA.
 
 For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
@@ -151,25 +155,33 @@ backend. The standard status protocol remains the fallback, so RCON is optional.
 The total number of known players is counted from UUIDs in persistent world data
 and `usercache.json`.
 
-### Velocity proxy staging
+### Gate Lite routing staging
 
-Game Mover can stage Velocity as a rootless Podman workload. It initially listens
-on TCP `25580` and routes to the existing Forge server on `25565`, so production
-traffic is not replaced. Only validated backend IDs, hosts and ports enter the
-generated `velocity.toml`. The forwarding secret is created once under
-`/var/lib/game-platform/proxies/velocity` and is never returned by the API.
-Deployment is local-only and PAM protected. The Ambassador plugin provides Forge
-1.20.1 compatibility. Modern forwarding remains disabled until the Forge backend
-support and network isolation are enabled during migration.
-Velocity is attached to the managed rootless bridge network `game-platform`;
-future Minecraft backends will join the same network without publishing their
-game ports to the LAN.
+Game Mover can stage Gate Lite as a rootless Podman workload. It initially
+listens on TCP `25581` and transparently routes to the existing Forge server on
+`25565`, so production traffic is not replaced. Only validated hostname,
+backend host and port values enter the generated
+`/var/lib/game-platform/proxies/gate/config.yml`; arbitrary YAML is never
+accepted. Deployment is local-only and PAM protected. Gate Lite does not
+terminate the player session or reconstruct the mod-loader handshake, so the
+backend keeps its normal `online-mode=true` authentication and unmodified Forge
+handshake. Gate Lite is attached to the managed rootless bridge
+network `game-platform`; managed Minecraft containers are addressed by stable
+private aliases without publishing their game ports to the LAN. A unique direct
+port remains an optional compatibility fallback.
+The Servers tab has a separate routing editor: users enter a hostname and select
+a registered Minecraft server. They never enter container names, bridge
+addresses, systemd ports, or YAML. The backend derives `container:25565` for
+managed bridge-network Podman targets and uses the published host port for
+adopted Podman or systemd targets.
+Exactly one explicit `*` fallback is required and kept last. Saving routes
+restarts an already deployed Gate; a failed apply restores the previous config.
 Long-running deployment operations publish safe phase and percentage updates;
 the Servers card polls and displays them without exposing command output or
-secrets. The same operation model is shared by future Minecraft installation,
-restore and migration workflows.
-Velocity is pinned to stable version `3.5.1` build `615` on Java 21. The proxy
-is only reported ready after its TCP listener accepts connections; a running
+secrets. The same operation model is used by Minecraft installation and restore
+workflows.
+The tested Gate image is pinned by immutable SHA-256 digest. Gate Lite is only
+reported ready after its TCP listener accepts connections; a running
 container alone is not considered healthy. Backend route health is evaluated
 separately because a modded Forge backend may not answer a status ping even
 though its authenticated RCON and player connections work.
@@ -409,8 +421,12 @@ zakáže. Žádná z těchto politik nepovoluje vzdálené ovládání. Běžíc
 korektně zastaví, zazálohuje
 se celý datový adresář, archiv se ověří a následně se obnoví původní stav běhu.
 Ke gzip archivu vznikne SHA-256 soubor a JSON manifest s vybranými nesekretními
-údaji o image/runtime. Restore, vytváření a mazání containerů či dat zatím
-záměrně nejsou povolené.
+údaji o image/runtime. Lokální instalační dialog chráněný PAM umí vytvořit nový
+spravovaný rootless Podman server s prázdnými daty nebo do jeho izolovaného
+adresáře obnovit jednu z těchto ověřených záloh. Zdrojový server ani jeho data
+se obnovou nemění. Rozhraní ověřuje ID workloadu, verze Minecraftu a loaderu,
+Java image, paměť, unikátní přímý port a volitelný Gate hostname; před instalací
+také vyžaduje výslovný souhlas s Minecraft EULA.
 
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní
@@ -421,24 +437,31 @@ neposílá do API. Standardní status protokol zůstává fallbackem, takže RCO
 volitelný. Celkový počet známých hráčů se počítá ze UUID v persistentních datech
 světa a v `usercache.json`.
 
-### Příprava Velocity proxy
+### Příprava směrování Gate Lite
 
-Game Mover umí připravit Velocity jako rootless Podman workload. Zpočátku
-poslouchá na TCP `25580` a směruje na existující Forge na `25565`, takže
-nepřebírá produkční provoz. Do generovaného `velocity.toml` se dostanou jen
-ověřená ID backendů, adresy a porty. Forwarding secret vznikne pouze jednou v
-`/var/lib/game-platform/proxies/velocity` a API jej nikdy nevrací. Nasazení je
-dostupné jen místně a vyžaduje PAM. Kompatibilitu Forge 1.20.1 zajišťuje plugin
-Ambassador. Modern forwarding zůstane vypnutý, dokud při migraci nezapneme jeho
-podporu ve Forge backendu a síťovou izolaci.
-Velocity je připojená do spravované rootless bridge sítě `game-platform`;
-budoucí Minecraft backendy vstoupí do stejné sítě bez publikování herních portů
-do LAN.
+Game Mover umí připravit Gate Lite jako rootless Podman workload. Zpočátku
+poslouchá na TCP `25581` a transparentně směruje na existující Forge na `25565`,
+takže nepřebírá produkční provoz. Do generovaného
+`/var/lib/game-platform/proxies/gate/config.yml` se dostanou jen ověřené
+hostname, adresy a porty backendů; API nikdy nepřijímá volné YAML. Nasazení je
+dostupné jen místně a vyžaduje PAM. Gate Lite neukončuje hráčskou relaci ani
+nepřestavuje handshake mod loaderu, takže backend zachovává běžnou autentizaci
+`online-mode=true` i nezměněný Forge handshake. Gate Lite je připojený do
+spravované rootless bridge sítě `game-platform`; budoucí Minecraft backendy lze
+směrovat přes stabilní privátní aliasy bez publikování herních portů do LAN.
+Unikátní přímý port zůstává volitelným kompatibilním fallbackem.
+V záložce Servery je samostatný editor směrování: uživatel zadá hostname a vybere
+registrovaný Minecraft server. Nezadává názvy containerů, bridge adresy, systemd
+porty ani YAML. Backend pro spravovaný Podman na bridge síti odvodí
+`container:25565`; u adoptovaného Podmanu a systemd použije publikovaný port
+hostitele. Právě jedna výchozí `*` trasa je
+povinná a zůstává poslední. Uložení restartuje již nasazený Gate; pokud aplikace
+nové konfigurace selže, obnoví se předchozí stav.
 Dlouhé operace zveřejňují bezpečný popis fáze a procenta; karta v záložce Servery
 je průběžně zobrazuje bez zpřístupnění výstupu příkazů nebo tajných údajů. Stejný
-model použijí budoucí instalace, obnovy a migrace Minecraft serverů.
-Velocity je připnutá na stabilní verzi `3.5.1`, build `615`, na Java 21. Proxy se
-označí jako připravená až ve chvíli, kdy její TCP listener přijímá spojení;
+model používají také instalace a obnovy Minecraft serverů do Podmanu.
+Ověřený Gate image je připnutý neměnným SHA-256 digestem. Gate Lite se označí
+jako připravený až ve chvíli, kdy jeho TCP listener přijímá spojení;
 samotný stav běžícího containeru není dostatečný health check. Zdraví backendové
 trasy se vyhodnocuje samostatně, protože modovaný Forge nemusí odpovídat na
 status ping, přestože funguje RCON i připojení hráčů.

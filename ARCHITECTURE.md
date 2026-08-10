@@ -19,7 +19,7 @@ The platform has two complementary workload models:
   Podman containers owned by the dedicated `gameplatform` account. The current
   systemd Forge server is a migration source, not a restriction on generic
   systemd support. Existing Minecraft servers may also be adopted from systemd
-  and remain supported for status, lifecycle, backups, management, and Velocity
+  and remain supported for status, lifecycle, backups, management, and Gate Lite
   routing; self-service creation does not create new systemd units.
 
 ## Minecraft self-service
@@ -35,16 +35,21 @@ Each managed instance has:
 - an explicit image, Minecraft version, loader/modpack and resource limits;
 - lifecycle, health and player status;
 - verified backup, restore and migration metadata;
-- a route through the shared Velocity proxy; and
+- a hostname route through the shared Gate Lite ingress, with an optional
+  directly published port as a compatibility fallback; and
 - policy-controlled management operations without shell or direct Podman
   access for ordinary users.
 
-Velocity is the final Minecraft ingress on TCP 25565. Minecraft backends reside
-on a private Podman network and are addressed by stable container/network names,
-not by LAN-published backend ports. During migration, Velocity is staged on TCP
-25580 and may temporarily route to the existing host Forge service on 25565.
+Gate Lite is the final shared Minecraft ingress on TCP 25565. It reads the
+virtual hostname from the initial Minecraft handshake and then transparently
+passes the original connection, authentication, and mod-loader negotiation to
+the selected backend. Backends therefore keep `online-mode=true` and require no
+proxy-forwarding mod or shared secret. During migration Gate Lite is staged on
+TCP 25581 and routes to the existing host Forge service on 25565. The final
+Podman topology routes hostnames to stable private container aliases; an
+explicit unique LAN port remains available for servers that need a fallback.
 
-Velocity resolves backend targets through the workload adapter rather than
+Gate Lite resolves backend targets through the workload adapter rather than
 assuming one runtime:
 
 - a managed Podman Minecraft backend joins `game-platform` and is routed by its
@@ -69,7 +74,7 @@ The Minecraft management tab will progressively contain:
 - a validated `server.properties` editor;
 - online players, allowlist, operators and bans;
 - worlds, backups and restore;
-- loader, version, mods/modpacks and Velocity routing.
+- loader, version, mods/modpacks and Gate Lite routing.
 
 Form changes use **Save and close** and **Discard changes**. Closing with dirty
 state requires confirmation. Immediate commands such as RCON, ban, or restart
@@ -95,14 +100,15 @@ Typical defaults:
 
 Remote notebook/client access remains read-only unless a later explicit design
 decision grants narrowly scoped mutations. The Podman socket, RCON passwords,
-API tokens, and Velocity forwarding secret never leave the host API and must not
+and API tokens never leave the host API and must not
 appear in logs or responses.
 
 ## Implementation sequence
 
-1. Finish persistent Velocity lifecycle and its private Podman network.
-2. Add validated image discovery and general Minecraft workload installation.
-3. Back up, restore into Podman, verify, and cut over the current Forge server.
+1. Extend the existing persistent Gate Lite lifecycle with editable route management.
+2. Extend the validated Minecraft workload installer with image discovery.
+3. Use the UI to back up and restore the current Forge server into Podman, verify it,
+   and expose cut-over as a separate explicit user action.
 4. Add the per-server Management tab: logs, RCON, properties, players and lists.
 5. Extract and extend operation policies into the Security tab.
 6. Continue with modpacks, worlds, quotas and broader Linux gaming features.

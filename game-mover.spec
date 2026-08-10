@@ -1,6 +1,6 @@
 Name:           game-mover
-Version:        0.5.0
-Release:        20%{?dist}
+Version:        0.6.0
+Release:        2%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -45,8 +45,9 @@ install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flas
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
-install -Dpm0644 game_mover_velocity.py %{buildroot}/opt/game_mover/game_mover_velocity.py
+install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
+install -Dpm0644 game_mover_installs.py %{buildroot}/opt/game_mover/game_mover_installs.py
 install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
@@ -117,8 +118,9 @@ fi
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
 /opt/game_mover/game_mover_minecraft.py
-/opt/game_mover/game_mover_velocity.py
+/opt/game_mover/game_mover_gate.py
 /opt/game_mover/game_mover_backups.py
+/opt/game_mover/game_mover_installs.py
 /opt/game_mover/game_mover_jobs.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
@@ -130,6 +132,46 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.6.0-2
+- Route adopted pasta-network Podman workloads through their published host ports
+- Keep private container-name routing for Game Mover managed bridge workloads
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.6.0-1
+- Manage rootless Podman Minecraft servers from the GUI
+- Restore verified systemd or Podman backups into new isolated workloads
+- Route registered Minecraft servers through configurable Gate Lite ingress
+- Remove the abandoned Velocity and forwarding-plugin implementation
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-27
+- Remove the failed Velocity and forwarding-plugin implementation paths
+- Keep Gate Lite as the only supported Minecraft router
+- Clean obsolete proxy runtime artifacts during this development deployment
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-26
+- Configure Gate routes in the GUI using registered Minecraft server targets
+- Resolve systemd ports and private Podman container endpoints in the backend
+- Apply route changes with Gate restart and configuration rollback on failure
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-25
+- Add a PAM-protected Minecraft Podman installer with visible progress
+- Restore verified systemd or Podman backups into isolated managed servers
+- Register direct ports and optional Gate Lite hostname routes from the UI
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-24
+- Replace the experimental full Velocity ingress with transparent Gate Lite routing
+- Pin the tested Gate image and add validated hostname-to-backend route generation
+- Keep Forge online-mode and mod handshakes end-to-end without forwarding plugins
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-23
+- Pin Velocity 3.4.0 build 566 for Ambassador and Forge 1.20.1 compatibility
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-22
+- Keep Forge mod-info ping passthrough enabled for Ambassador login handshakes
+
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-21
+- Add atomic Forge backend configuration for Velocity modern forwarding
+- Preserve rollback copies and restrict PCF forwarding to approved proxy hosts
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-20
 - Pin Velocity 3.5.1 build 615 to the Java 21 proxy image
 - Verify the proxy TCP listener independently from Forge status-ping behavior
