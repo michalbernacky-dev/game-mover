@@ -369,6 +369,19 @@ class GameMover(QWidget):
                 color: #aab9c2;
                 border: 1px solid #3c4d57;
             }
+            QCheckBox { spacing: 8px; }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #91a8b5;
+                border-radius: 3px;
+                background-color: #182832;
+            }
+            QCheckBox::indicator:hover { border-color: #d8e4ea; }
+            QCheckBox::indicator:checked {
+                border-color: #69db7c;
+                background-color: #2f9e44;
+            }
         """)
 
     def initUI(self):
