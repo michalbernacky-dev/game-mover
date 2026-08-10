@@ -2,7 +2,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import game_mover_flask as backend
 from game_mover_version import __version__
@@ -130,35 +130,52 @@ class ServerRegistryTest(unittest.TestCase):
             status = backend.game_server_status(server)
         self.assertEqual(status["connection"], {"direct_port": 25570, "source": "podman"})
         self.assertEqual(status["players"], {"online": 1, "max": 20, "known": 1})
-        status_query.assert_called_once_with("mc-test", "192.0.2.66", 25570)
+        status_query.assert_called_once_with(
+            "mc-test", ["192.0.2.66", "127.0.0.1", "::1"], 25570,
+        )
 
     def test_minecraft_status_refresh_is_non_blocking_and_deduplicated(self):
         fake_executor = Mock()
         with patch.object(backend, "MINECRAFT_STATUS_EXECUTOR", fake_executor):
             first = backend.cached_minecraft_player_status(
-                "forge", "192.0.2.66", 25565,
+                "forge", ["192.0.2.66", "100.64.0.10"], 25565,
             )
             second = backend.cached_minecraft_player_status(
-                "forge", "192.0.2.66", 25565,
+                "forge", ["192.0.2.66", "100.64.0.10"], 25565,
             )
 
         self.assertEqual(first, (None, True, None))
         self.assertEqual(second, (None, True, None))
         fake_executor.submit.assert_called_once()
 
-        cache_key = ("forge", "192.0.2.66", 25565)
+        cache_key = ("forge", 25565)
         with patch.object(
-            backend, "query_server_status", return_value={"online": 2, "max": 20},
+            backend, "query_server_status",
+            side_effect=[TimeoutError("timed out"), {"online": 2, "max": 20}],
         ) as query:
             backend._refresh_minecraft_player_status(
-                cache_key, "192.0.2.66", 25565,
+                cache_key, ["192.0.2.66", "100.64.0.10"], 25565,
             )
 
         self.assertEqual(
-            backend.cached_minecraft_player_status("forge", "192.0.2.66", 25565),
+            backend.cached_minecraft_player_status(
+                "forge", ["192.0.2.66", "100.64.0.10"], 25565,
+            ),
             ({"online": 2, "max": 20}, False, None),
         )
-        query.assert_called_once_with("192.0.2.66", 25565, timeout=8.0)
+        self.assertEqual(query.call_args_list, [
+            call("192.0.2.66", 25565, timeout=3.0),
+            call("100.64.0.10", 25565, timeout=3.0),
+        ])
+        self.assertEqual(
+            backend.MINECRAFT_STATUS_CACHE[cache_key]["preferred_host"],
+            "100.64.0.10",
+        )
+
+    def test_minecraft_probe_skips_unscoped_link_local_ipv6(self):
+        self.assertEqual(backend._minecraft_probe_hosts([
+            "192.0.2.66", "fe80::1234", "fd7a:115c:a1e0::1", "127.0.0.1",
+        ]), ["192.0.2.66", "fd7a:115c:a1e0::1", "127.0.0.1"])
 
     def test_silent_control_starts_stops_and_resets_failed_state(self):
         self.save_servers()

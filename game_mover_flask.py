@@ -16,6 +16,7 @@ import datetime
 import sys
 import json
 import threading
+import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
@@ -56,6 +57,7 @@ WORKLOAD_LOCKS_GUARD = threading.Lock()
 SERVER_ACTIONS = ("start", "stop", "restart", "backup")
 SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
 MINECRAFT_STATUS_TIMEOUT = 8.0
+MINECRAFT_STATUS_DISCOVERY_TIMEOUT = 3.0
 MINECRAFT_STATUS_REFRESH_SECONDS = 30.0
 MINECRAFT_STATUS_RETRY_SECONDS = 15.0
 MINECRAFT_STATUS_CACHE = {}
@@ -408,15 +410,48 @@ def systemctl_stop(service_name: str):
     return systemctl_action("stop", service_name)
 
 
-def _refresh_minecraft_player_status(cache_key, host, port):
+def _minecraft_probe_hosts(hosts, preferred_host=None):
+    candidates = []
+
+    def add(host):
+        host = str(host).strip()
+        if not host or host in candidates:
+            return
+        try:
+            address = ipaddress.ip_address(host.split("%", 1)[0])
+            if address.version == 6 and address.is_link_local and "%" not in host:
+                return
+        except ValueError:
+            pass
+        candidates.append(host)
+
+    if preferred_host in hosts:
+        add(preferred_host)
+    for host in hosts:
+        add(host)
+    return candidates
+
+
+def _refresh_minecraft_player_status(cache_key, hosts, port):
     counts = None
-    error = None
-    try:
-        counts = query_server_status(
-            host, port, timeout=MINECRAFT_STATUS_TIMEOUT,
+    errors = []
+    with MINECRAFT_STATUS_LOCK:
+        preferred_host = MINECRAFT_STATUS_CACHE.get(cache_key, {}).get("preferred_host")
+    candidates = _minecraft_probe_hosts(hosts, preferred_host)
+    selected_host = None
+    for host in candidates:
+        timeout = (
+            MINECRAFT_STATUS_TIMEOUT
+            if host == preferred_host
+            else MINECRAFT_STATUS_DISCOVERY_TIMEOUT
         )
-    except (OSError, TypeError, ValueError, json.JSONDecodeError) as caught_error:
-        error = f"{type(caught_error).__name__}: {caught_error}"
+        try:
+            counts = query_server_status(host, port, timeout=timeout)
+            selected_host = host
+            break
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as caught_error:
+            errors.append(f"{host}: {type(caught_error).__name__}: {caught_error}")
+    error = None if counts is not None else "; ".join(errors) or "Žádná adresa k dotazu"
     with MINECRAFT_STATUS_LOCK:
         entry = MINECRAFT_STATUS_CACHE.setdefault(cache_key, {})
         entry["last_attempt"] = time.monotonic()
@@ -424,12 +459,14 @@ def _refresh_minecraft_player_status(cache_key, host, port):
         if counts is not None:
             entry["counts"] = dict(counts)
             entry["last_success"] = entry["last_attempt"]
+            entry["preferred_host"] = selected_host
         MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
 
 
-def cached_minecraft_player_status(server_id, host, port):
+def cached_minecraft_player_status(server_id, hosts, port):
     """Return cached counts and schedule at most one non-blocking refresh."""
-    cache_key = (str(server_id), str(host), int(port))
+    hosts = tuple(str(host) for host in hosts)
+    cache_key = (str(server_id), int(port))
     now = time.monotonic()
     should_refresh = False
     with MINECRAFT_STATUS_LOCK:
@@ -451,7 +488,7 @@ def cached_minecraft_player_status(server_id, host, port):
     if should_refresh:
         try:
             MINECRAFT_STATUS_EXECUTOR.submit(
-                _refresh_minecraft_player_status, cache_key, host, int(port),
+                _refresh_minecraft_player_status, cache_key, hosts, int(port),
             )
         except RuntimeError as caught_error:
             with MINECRAFT_STATUS_LOCK:
@@ -530,7 +567,7 @@ def game_server_status(server):
             probe_hosts = local_server_addresses()
             if probe_hosts:
                 counts, pending, probe_error = cached_minecraft_player_status(
-                    server.get("id", ""), probe_hosts[0], direct_port,
+                    server.get("id", ""), probe_hosts, direct_port,
                 )
                 if counts is not None:
                     players.update(counts)

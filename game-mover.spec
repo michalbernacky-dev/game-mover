@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        7%{?dist}
+Release:        8%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,9 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-8
+- Discover and remember the working local address for Minecraft status queries
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-7
 - Refresh server cards outside the Qt UI thread
 - Poll Minecraft player counts asynchronously with caching and retry control
