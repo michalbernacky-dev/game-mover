@@ -14,7 +14,9 @@ class ServerRegistryTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.config_path = str(Path(self.temp_dir.name) / "servers.json")
         self.original_config_path = backend.GAME_SERVERS_CONFIG_PATH
+        self.original_velocity_config_path = backend.VELOCITY_CONFIG_PATH
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
+        backend.VELOCITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "velocity.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -45,6 +47,7 @@ class ServerRegistryTest(unittest.TestCase):
 
     def tearDown(self):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
+        backend.VELOCITY_CONFIG_PATH = self.original_velocity_config_path
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
             backend.MINECRAFT_STATUS_CACHE.clear()
@@ -136,6 +139,71 @@ class ServerRegistryTest(unittest.TestCase):
         status_query.assert_called_once_with(
             "mc-test", ["192.0.2.66", "127.0.0.1", "::1"], 25570, rcon=None,
         )
+
+    def test_velocity_config_requires_pam_and_status_is_read_only(self):
+        config = backend.default_velocity_config()
+        self.assertEqual(self.client.get(
+            "/proxy/config", **self.local_options(),
+        ).status_code, 403)
+        response = self.client.put(
+            "/proxy/config", json={"proxy": config},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["proxy"]["listen"]["port"], 25580)
+
+        fake_backend = Mock()
+        fake_backend.status.return_value = WorkloadState("inactive", "exited", "Neběží")
+        fake_backend.container_exists.return_value = False
+        with patch.object(backend, "backend_for", return_value=fake_backend):
+            response = self.client.get(
+                "/proxy/status",
+                headers={backend.READ_TOKEN_HEADER: "read-secret"},
+                environ_base={"REMOTE_ADDR": "192.0.2.10"},
+            )
+        self.assertEqual(response.status_code, 403)
+
+        with (
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "require_read_access", return_value=True),
+        ):
+            response = self.client.get(
+                "/proxy/status", environ_base={"REMOTE_ADDR": "192.0.2.10"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["proxy"]["type"], "velocity")
+        self.assertFalse(response.json["proxy"]["deployed"])
+        self.assertNotIn("backends", response.json["proxy"])
+
+    def test_velocity_deploy_is_pam_protected_and_uses_staging_port(self):
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = False
+        fake_backend.pull_image.return_value = BackendResult(0, "sha256:image")
+        fake_backend.create_container.return_value = BackendResult(0, "velocity")
+        fake_backend.start.return_value = BackendResult(0)
+        layout = {
+            "data_directory": "/managed/velocity",
+            "config_path": "/managed/velocity/velocity.toml",
+            "secret_path": "/managed/velocity/forwarding.secret",
+        }
+        self.assertEqual(self.client.post(
+            "/proxy/deploy", **self.local_options(self.admin_headers),
+        ).status_code, 403)
+        with (
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "write_velocity_layout", return_value=layout),
+            patch.object(backend, "chown_velocity_layout") as chown,
+        ):
+            response = self.client.post(
+                "/proxy/deploy", **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["listen"]["port"], 25580)
+        chown.assert_called_once_with(layout, backend.PODMAN_USER)
+        create_kwargs = fake_backend.create_container.call_args.kwargs
+        self.assertEqual(create_kwargs["environment"]["TYPE"], "VELOCITY")
+        self.assertEqual(create_kwargs["environment"]["MODRINTH_PROJECTS"], "ambassador")
+        self.assertEqual(create_kwargs["ports"][0]["host_port"], 25580)
 
     def test_systemd_minecraft_prefers_configured_rcon(self):
         (self.forge_data / "server.properties").write_text(

@@ -78,6 +78,7 @@ rsync -a --delete \
   --include='/game_mover.py' \
   --include='/game_mover_mods.py' \
   --include='/game_mover_minecraft.py' \
+  --include='/game_mover_velocity.py' \
   --include='/game_mover_backups.py' \
   --include='/game_mover_version.py' \
   --include='/game_mover_workloads.py' \
@@ -87,7 +88,7 @@ rsync -a --delete \
   --exclude='*' \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
-chmod 0644 "${INSTALL_DIR}/game_mover_mods.py" "${INSTALL_DIR}/game_mover_minecraft.py" "${INSTALL_DIR}/game_mover_backups.py" "${INSTALL_DIR}/game_mover_version.py" "${INSTALL_DIR}/game_mover_workloads.py"
+chmod 0644 "${INSTALL_DIR}/game_mover_mods.py" "${INSTALL_DIR}/game_mover_minecraft.py" "${INSTALL_DIR}/game_mover_velocity.py" "${INSTALL_DIR}/game_mover_backups.py" "${INSTALL_DIR}/game_mover_version.py" "${INSTALL_DIR}/game_mover_workloads.py"
 find "${INSTALL_DIR}" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"

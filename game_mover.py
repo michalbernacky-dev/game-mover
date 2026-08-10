@@ -307,6 +307,26 @@ class ServerBackupThread(QThread):
             self.completed.emit({"error": str(error)})
 
 
+class VelocityDeployThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, headers):
+        super().__init__()
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/proxy/deploy", headers=self.headers, timeout=900,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit(data)
+        except Exception as error:
+            self.completed.emit({"error": str(error)})
+
+
 class ServerStatusThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -323,7 +343,18 @@ class ServerStatusThread(QThread):
                 timeout=12,
             )
             response.raise_for_status()
-            self.loaded.emit(response.json())
+            payload = response.json()
+            try:
+                proxy_response = requests.get(
+                    f"{self.base_url}/proxy/status",
+                    headers=self.headers,
+                    timeout=12,
+                )
+                if proxy_response.status_code == 200:
+                    payload["proxy"] = proxy_response.json().get("proxy")
+            except requests.RequestException:
+                pass
+            self.loaded.emit(payload)
         except Exception as error:
             self.loaded.emit({"request_error": str(error)})
 
@@ -352,6 +383,7 @@ class GameMover(QWidget):
         self.server_mods_thread = None
         self.compare_mods_thread = None
         self.server_backup_thread = None
+        self.velocity_deploy_thread = None
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
@@ -1136,7 +1168,16 @@ class GameMover(QWidget):
                     self.toggle_server_mods(server_id, name)
                 )
                 actions.addWidget(mods_button)
-            if self.app_mode == "server":
+            if self.app_mode == "server" and server.get("kind") == "proxy":
+                actions.addStretch()
+                deploy_button = QPushButton("Nasadit Velocity", card)
+                deploy_button.setFixedWidth(150)
+                deploy_button.setEnabled(
+                    not server.get("deployed", False) and bool(self.local_pam_headers())
+                )
+                deploy_button.clicked.connect(self.deploy_velocity_proxy)
+                actions.addWidget(deploy_button)
+            if self.app_mode == "server" and server.get("kind") != "proxy":
                 permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
                 auth_summary = " · ".join(
                     f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"
@@ -1215,11 +1256,63 @@ class GameMover(QWidget):
         if error:
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
             return
-        self.render_server_cards(data.get("servers", []))
+        servers = list(data.get("servers", []))
+        proxy = data.get("proxy")
+        if isinstance(proxy, dict):
+            listen = proxy.get("listen") if isinstance(proxy.get("listen"), dict) else {}
+            servers.insert(0, {
+                "id": "velocity-proxy",
+                "name": "Velocity Proxy",
+                "kind": "proxy",
+                "status": proxy.get("status", "unknown"),
+                "message": proxy.get("message", "Neznámý stav"),
+                "runtime_label": (
+                    f"Podman · {proxy.get('forwarding_mode', 'none')} forwarding"
+                ),
+                "connection": {"direct_port": listen.get("port")}
+                    if listen.get("port") is not None else {},
+                "deployed": proxy.get("deployed", False),
+            })
+        self.render_server_cards(servers)
         updated_at = data.get("updated_at", "")
         if updated_at:
             updated_at = updated_at.replace("T", " ").split("+")[0]
         self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
+
+    def deploy_velocity_proxy(self):
+        if self.velocity_deploy_thread and self.velocity_deploy_thread.isRunning():
+            return
+        headers = self.local_pam_headers()
+        if not headers:
+            QMessageBox.warning(
+                self, "Velocity", "Nasazení Velocity vyžaduje přihlášení v Timekpr.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Nasadit Velocity",
+            "Stáhnout a spustit Velocity na testovacím portu 25580?\n\n"
+            "Produkční Forge na portu 25565 zůstane beze změny.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.velocity_deploy_thread = VelocityDeployThread(headers)
+        self.velocity_deploy_thread.completed.connect(self.velocity_deploy_completed)
+        self.velocity_deploy_thread.start()
+
+    def velocity_deploy_completed(self, payload):
+        if payload.get("error"):
+            QMessageBox.critical(self, "Velocity", f"Nasazení selhalo: {payload['error']}")
+        else:
+            listen = payload.get("listen", {})
+            QMessageBox.information(
+                self, "Velocity",
+                f"{payload.get('message', 'Velocity byla nasazena.')}\n"
+                f"Testovací port: {listen.get('port', '—')}",
+            )
+        self.refresh_server_statuses()
 
     def local_server_action_headers(self, policy):
         if policy == "pam":

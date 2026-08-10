@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        13%{?dist}
+Release:        14%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -42,6 +42,7 @@ install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flas
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
+install -Dpm0644 game_mover_velocity.py %{buildroot}/opt/game_mover/game_mover_velocity.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
@@ -100,6 +101,7 @@ fi
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
 /opt/game_mover/game_mover_minecraft.py
+/opt/game_mover/game_mover_velocity.py
 /opt/game_mover/game_mover_backups.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
@@ -111,6 +113,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-14
+- Add PAM-protected Velocity staging configuration and rootless Podman deployment
+- Add validated proxy routes, persistent forwarding secret, and Ambassador setup
+- Show Velocity status and deployment control in the Servers tab
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-13
 - Add verified full-data backups for registered systemd servers such as Forge
 - Record the source systemd unit in migration-ready backup manifests

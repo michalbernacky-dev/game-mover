@@ -148,6 +148,17 @@ backend. The standard status protocol remains the fallback, so RCON is optional.
 The total number of known players is counted from UUIDs in persistent world data
 and `usercache.json`.
 
+### Velocity proxy staging
+
+Game Mover can stage Velocity as a rootless Podman workload. It initially listens
+on TCP `25580` and routes to the existing Forge server on `25565`, so production
+traffic is not replaced. Only validated backend IDs, hosts and ports enter the
+generated `velocity.toml`. The forwarding secret is created once under
+`/var/lib/game-platform/proxies/velocity` and is never returned by the API.
+Deployment is local-only and PAM protected. The Ambassador plugin provides Forge
+1.20.1 compatibility. Modern forwarding remains disabled until the Forge backend
+support and network isolation are enabled during migration.
+
 ## Deployment on Fedora (systemd + GNOME autostart)
 
 1) Install dependencies (as root or via sudo):
@@ -394,6 +405,17 @@ načítá autentizovaným read-only příkazem `list`; RCON heslo backend nikdy
 neposílá do API. Standardní status protokol zůstává fallbackem, takže RCON je
 volitelný. Celkový počet známých hráčů se počítá ze UUID v persistentních datech
 světa a v `usercache.json`.
+
+### Příprava Velocity proxy
+
+Game Mover umí připravit Velocity jako rootless Podman workload. Zpočátku
+poslouchá na TCP `25580` a směruje na existující Forge na `25565`, takže
+nepřebírá produkční provoz. Do generovaného `velocity.toml` se dostanou jen
+ověřená ID backendů, adresy a porty. Forwarding secret vznikne pouze jednou v
+`/var/lib/game-platform/proxies/velocity` a API jej nikdy nevrací. Nasazení je
+dostupné jen místně a vyžaduje PAM. Kompatibilitu Forge 1.20.1 zajišťuje plugin
+Ambassador. Modern forwarding zůstane vypnutý, dokud při migraci nezapneme jeho
+podporu ve Forge backendu a síťovou izolaci.
 
 ## Nasazení na Fedoře (systemd + GNOME autostart)
 

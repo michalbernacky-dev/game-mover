@@ -30,6 +30,13 @@ from game_mover_minecraft import (
     query_server_status,
 )
 from game_mover_version import __version__
+from game_mover_velocity import (
+    VelocityConfigError,
+    chown_velocity_layout,
+    default_velocity_config,
+    normalize_velocity_config,
+    write_velocity_layout,
+)
 from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
 
 app = Flask(__name__)
@@ -46,6 +53,10 @@ READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.
 READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
 GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
+VELOCITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "velocity.json")
+VELOCITY_DATA_DIRECTORY = os.path.realpath(
+    os.getenv("GAME_PLATFORM_VELOCITY_DATA", "/var/lib/game-platform/proxies/velocity")
+)
 PODMAN_USER = os.getenv("GAME_PLATFORM_PODMAN_USER", "gameplatform")
 PODMAN_SOCKET_PATH = os.getenv("GAME_PLATFORM_PODMAN_SOCKET", "").strip() or None
 PODMAN_DATA_ROOT = os.path.realpath(
@@ -146,6 +157,30 @@ def save_game_servers(servers):
     except (KeyError, OSError):
         os.chmod(temporary_path, 0o600)
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
+
+
+def load_velocity_config():
+    try:
+        with open(VELOCITY_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+            return normalize_velocity_config(json.load(config_file))
+    except (OSError, UnicodeError, json.JSONDecodeError, VelocityConfigError):
+        return normalize_velocity_config(default_velocity_config())
+
+
+def save_velocity_config(config):
+    config = normalize_velocity_config(config)
+    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    temporary_path = f"{VELOCITY_CONFIG_PATH}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
+        config_file.write("\n")
+    try:
+        os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
+        os.chmod(temporary_path, 0o640)
+    except (KeyError, OSError):
+        os.chmod(temporary_path, 0o600)
+    os.replace(temporary_path, VELOCITY_CONFIG_PATH)
+    return config
 
 
 def find_game_server(server_id):
@@ -353,7 +388,8 @@ def find_gog_prefix_dir(user, game_name):
 
 
 def require_local_admin(req):
-    token = req.headers.get(LOCAL_ADMIN_TOKEN_HEADER) or (req.json or {}).get("token")
+    payload = req.get_json(silent=True) or {}
+    token = req.headers.get(LOCAL_ADMIN_TOKEN_HEADER) or payload.get("token")
     expected = load_local_admin_token()
     return bool(token and expected and secrets.compare_digest(token, expected))
 
@@ -369,7 +405,7 @@ def restrict_remote_api():
     """A remotely bound instance exposes only authenticated read-only server data."""
     if request.remote_addr in ("127.0.0.1", "::1"):
         return None
-    if request.path not in ("/servers/status", "/servers/minecraft/mods"):
+    if request.path not in ("/servers/status", "/servers/minecraft/mods", "/proxy/status"):
         return jsonify({"message": "Remote access is limited to server status endpoints"}), 403
     if not require_read_access(request):
         return jsonify({"message": "Unauthorized"}), 403
@@ -739,7 +775,8 @@ def issue_token(username: str) -> str:
 
 
 def require_token(req):
-    tok = req.headers.get("X-Timekpr-Token") or (req.json or {}).get("token")
+    payload = req.get_json(silent=True) or {}
+    tok = req.headers.get("X-Timekpr-Token") or payload.get("token")
     if not tok:
         return None
     entry = TIMEKPRA_TOKENS.get(tok)
@@ -1155,6 +1192,130 @@ def servers_status():
         "version": __version__,
         "servers": statuses,
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+
+
+@app.route("/proxy/status", methods=["GET"])
+def velocity_proxy_status():
+    config = load_velocity_config()
+    workload = {
+        "backend": "podman",
+        "runtime": {"container_name": config["container_name"]},
+    }
+    try:
+        proxy_backend = backend_for(
+            workload,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        state = proxy_backend.status(workload)
+        container_exists = proxy_backend.container_exists(workload)
+    except (KeyError, OSError, ValueError) as error:
+        state = WorkloadState("unknown", "unknown", "Proxy nelze načíst", str(error))
+        container_exists = False
+    return jsonify({
+        "version": __version__,
+        "proxy": {
+            "type": "velocity",
+            "status": state.status,
+            "native_status": state.native_status,
+            "message": state.message,
+            "error": state.error,
+            "listen": config["listen"],
+            "forwarding_mode": config["forwarding_mode"],
+            "configured": os.path.isfile(VELOCITY_CONFIG_PATH),
+            "prepared": os.path.isdir(VELOCITY_DATA_DIRECTORY),
+            "deployed": container_exists,
+        },
+    })
+
+
+@app.route("/proxy/config", methods=["GET", "PUT"])
+def velocity_proxy_config():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    if request.method == "GET":
+        return jsonify({"proxy": load_velocity_config()})
+    try:
+        config = save_velocity_config((request.json or {}).get("proxy"))
+    except (TypeError, ValueError, OSError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({"proxy": config})
+
+
+@app.route("/proxy/deploy", methods=["POST"])
+def velocity_proxy_deploy():
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    config = load_velocity_config()
+    workload = {
+        "backend": "podman",
+        "runtime": {"container_name": config["container_name"]},
+    }
+    try:
+        proxy_backend = backend_for(
+            workload,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock("velocity-proxy"):
+            if proxy_backend.container_exists(workload):
+                return jsonify({
+                    "message": "Velocity container už existuje; změny vyžadují řízenou aktualizaci",
+                }), 409
+            layout = write_velocity_layout(config, VELOCITY_DATA_DIRECTORY)
+            chown_velocity_layout(layout, PODMAN_USER)
+            pull_result = proxy_backend.pull_image(config["image"])
+            if pull_result.returncode != 0:
+                raise RuntimeError(
+                    pull_result.error or pull_result.output or "Stažení Velocity image selhalo"
+                )
+            projects = ",".join(
+                plugin["project"] for plugin in config["plugins"]
+                if plugin["provider"] == "modrinth"
+            )
+            minecraft_versions = {
+                plugin["minecraft_version"] for plugin in config["plugins"]
+            }
+            minecraft_version = next(iter(minecraft_versions), "1.20.1")
+            create_result = proxy_backend.create_container(
+                workload,
+                config["image"],
+                environment={
+                    "TYPE": "VELOCITY",
+                    "MEMORY": "512M",
+                    "PUID": "0",
+                    "PGID": "0",
+                    "SKIP_CHOWN_DATA": "true",
+                    "MINECRAFT_VERSION": minecraft_version,
+                    "MODRINTH_PROJECTS": projects,
+                },
+                mounts=[{"source": VELOCITY_DATA_DIRECTORY, "target": "/server"}],
+                ports=[{
+                    "host": config["listen"]["host"],
+                    "host_port": config["listen"]["port"],
+                    "container_port": config["listen"]["port"],
+                }],
+                labels={
+                    "io.game-platform.workload-id": "velocity-proxy",
+                    "io.game-platform.kind": "minecraft-proxy",
+                },
+            )
+            if create_result.returncode != 0:
+                raise RuntimeError(
+                    create_result.error or create_result.output or "Vytvoření Velocity selhalo"
+                )
+            start_result = proxy_backend.start(workload)
+            if start_result.returncode != 0:
+                raise RuntimeError(
+                    start_result.error or start_result.output or "Spuštění Velocity selhalo"
+                )
+    except (KeyError, OSError, RuntimeError, ValueError) as error:
+        return jsonify({"message": str(error)}), 500
+    return jsonify({
+        "message": "Velocity byla nasazena na testovací port",
+        "listen": config["listen"],
+        "container": config["container_name"],
     })
 
 

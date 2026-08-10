@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import os
 import pwd
 import re
@@ -13,6 +14,12 @@ from typing import Callable
 
 CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]+$")
+OCI_IMAGE_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?"
+    r"(?:@sha256:[0-9a-f]{64})?$"
+)
+ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 
 
 @dataclass
@@ -210,6 +217,65 @@ class PodmanBackend:
         if ports.returncode == 0 and ports.output:
             metadata["published_ports"] = ports.output.splitlines()
         return metadata
+
+    def container_exists(self, workload: dict) -> bool:
+        result = self._command(["container", "exists", self.reference(workload)], 15)
+        return result.returncode == 0
+
+    def pull_image(self, image: str) -> BackendResult:
+        image = str(image).strip()
+        if not OCI_IMAGE_RE.fullmatch(image):
+            raise ValueError("Neplatná reference container image")
+        return self._command(["pull", "--quiet", image], 600)
+
+    def create_container(
+        self,
+        workload: dict,
+        image: str,
+        *,
+        environment: dict | None = None,
+        mounts: list[dict] | None = None,
+        ports: list[dict] | None = None,
+        labels: dict | None = None,
+    ) -> BackendResult:
+        """Create one validated adopted container without accepting raw CLI arguments."""
+        container = self.reference(workload)
+        image = str(image).strip()
+        if not OCI_IMAGE_RE.fullmatch(image):
+            raise ValueError("Neplatná reference container image")
+        arguments = ["create", "--name", container]
+        for key, value in sorted((environment or {}).items()):
+            if not ENV_NAME_RE.fullmatch(str(key)) or "\x00" in str(value):
+                raise ValueError("Neplatná proměnná prostředí containeru")
+            arguments.extend(["--env", f"{key}={value}"])
+        for mount in mounts or []:
+            raw_source = str(mount.get("source", ""))
+            source = os.path.realpath(raw_source)
+            target = str(mount.get("target", ""))
+            if not raw_source.startswith("/") or not target.startswith("/") or ":" in target:
+                raise ValueError("Neplatný mount containeru")
+            suffix = ":Z" if mount.get("selinux", True) else ""
+            arguments.extend(["--volume", f"{source}:{target}{suffix}"])
+        for mapping in ports or []:
+            host = str(mapping.get("host", "0.0.0.0"))
+            try:
+                ipaddress.ip_address(host)
+            except ValueError as error:
+                raise ValueError("Neplatná adresa publikovaného portu") from error
+            host_port = int(mapping.get("host_port"))
+            container_port = int(mapping.get("container_port"))
+            if not 1 <= host_port <= 65535 or not 1 <= container_port <= 65535:
+                raise ValueError("Neplatný publikovaný port")
+            host_display = f"[{host}]" if ":" in host else host
+            arguments.extend([
+                "--publish", f"{host_display}:{host_port}:{container_port}/tcp",
+            ])
+        for key, value in sorted((labels or {}).items()):
+            if not LABEL_NAME_RE.fullmatch(str(key)) or "\x00" in str(value):
+                raise ValueError("Neplatný label containeru")
+            arguments.extend(["--label", f"{key}={value}"])
+        arguments.append(image)
+        return self._command(arguments, 120)
 
     def start(self, workload: dict) -> BackendResult:
         return self._command(["start", self.reference(workload)], 60)

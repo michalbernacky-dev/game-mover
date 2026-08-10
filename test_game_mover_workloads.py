@@ -157,5 +157,28 @@ class WorkloadBackendTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             backend.start(workload)
 
+    def test_podman_creates_validated_velocity_container(self):
+        runner = RecordingRunner()
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+        workload = {
+            "backend": "podman", "runtime": {"container_name": "velocity"},
+        }
+
+        backend.create_container(
+            workload, "docker.io/itzg/mc-proxy:java21",
+            environment={"TYPE": "VELOCITY"},
+            mounts=[{"source": "/var/lib/game-platform/proxies/velocity", "target": "/server"}],
+            ports=[{"host": "0.0.0.0", "host_port": 25580, "container_port": 25580}],
+            labels={"io.game-platform.kind": "minecraft-proxy"},
+        )
+
+        arguments = runner.calls[0][0][4:]
+        self.assertEqual(arguments[0:3], ["create", "--name", "velocity"])
+        self.assertIn("TYPE=VELOCITY", arguments)
+        self.assertIn("0.0.0.0:25580:25580/tcp", arguments)
+        self.assertEqual(arguments[-1], "docker.io/itzg/mc-proxy:java21")
+
 if __name__ == "__main__":
     unittest.main()
