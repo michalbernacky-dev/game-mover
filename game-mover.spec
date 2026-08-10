@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.5.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -111,6 +111,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-6
+- Allow slow modded Minecraft servers eight seconds to return status data
+- Do not request the optional Pong when only player counts are needed
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.5.0-5
 - Preserve valid player counts when Forge omits or alters the optional Pong
 

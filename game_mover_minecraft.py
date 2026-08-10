@@ -72,7 +72,7 @@ def _read_varint(stream):
     raise ValueError("Minecraft status VarInt is too large")
 
 
-def query_server_status(host, port, timeout=1.0, protocol_version=763):
+def query_server_status(host, port, timeout=8.0, protocol_version=763):
     """Return online/max player counts using the Minecraft status protocol."""
     encoded_host = host.encode("utf-8")
     if len(encoded_host) > 255:
@@ -100,21 +100,6 @@ def query_server_status(host, port, timeout=1.0, protocol_version=763):
         if not 0 <= json_length <= packet_length <= MAX_STATUS_PACKET:
             raise ValueError("Invalid Minecraft status JSON length")
         payload = json.loads(_read_exact(stream, json_length).decode("utf-8"))
-
-        # Ping/Pong is a latency extension and helps standard servers close the
-        # status session cleanly. The already validated JSON remains authoritative:
-        # some Forge stacks omit the Pong or encode it non-standardly.
-        try:
-            ping_value = 0
-            ping_body = _encode_varint(1) + struct.pack(">q", ping_value)
-            stream.sendall(_encode_varint(len(ping_body)) + ping_body)
-            pong_length = _read_varint(stream)
-            if pong_length != 9 or _read_varint(stream) != 1:
-                raise ValueError("Unexpected Minecraft pong packet")
-            if struct.unpack(">q", _read_exact(stream, 8))[0] != ping_value:
-                raise ValueError("Minecraft pong payload does not match ping")
-        except (OSError, ValueError, struct.error):
-            pass
 
     players = payload.get("players") if isinstance(payload, dict) else None
     if not isinstance(players, dict):
