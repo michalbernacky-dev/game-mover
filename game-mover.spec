@@ -1,6 +1,6 @@
 Name:           game-mover
-Version:        0.6.0
-Release:        2%{?dist}
+Version:        0.7.0
+Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -49,6 +49,7 @@ install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
 install -Dpm0644 game_mover_installs.py %{buildroot}/opt/game_mover/game_mover_installs.py
 install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
+install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_mover_connections.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
@@ -122,6 +123,7 @@ fi
 /opt/game_mover/game_mover_backups.py
 /opt/game_mover/game_mover_installs.py
 /opt/game_mover/game_mover_jobs.py
+/opt/game_mover/game_mover_connections.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py
@@ -132,6 +134,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Tue Aug 11 2026 Game Mover Packager <packager@example.invalid> - 0.7.0-1
+- Add PAM-authenticated host administration through a loopback-only SSH tunnel
+- Keep notebook-local Mover services separate from the tunneled host API
+- Preserve direct LAN and Tailscale HTTP access as read-only
+
 * Mon Aug 10 2026 Game Mover Packager <packager@example.invalid> - 0.6.0-2
 - Route adopted pasta-network Podman workloads through their published host ports
 - Keep private container-name routing for Game Mover managed bridge workloads

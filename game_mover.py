@@ -20,12 +20,20 @@ from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
+from game_mover_connections import (
+    DEFAULT_SSH_TUNNEL_PORT,
+    LOCAL_API_URL,
+    is_host_management_mode,
+    management_api_url,
+    normalize_app_mode,
+    normalize_ssh_tunnel_port,
+)
 from game_mover_version import __version__
 
 # ------------------------------------------------------------
 # KONFIGURACE
 # ------------------------------------------------------------
-FLASK_URL = "http://127.0.0.1:5000"
+FLASK_URL = LOCAL_API_URL
 CLIENT_CONFIG_PATH = os.path.expanduser("~/.config/game-mover/config.json")
 
 
@@ -287,15 +295,16 @@ class CompareModsThread(QThread):
 class ServerBackupThread(QThread):
     completed = pyqtSignal(dict)
 
-    def __init__(self, server_id, headers):
+    def __init__(self, base_url, server_id, headers):
         super().__init__()
+        self.base_url = base_url
         self.server_id = server_id
         self.headers = headers
 
     def run(self):
         try:
             response = requests.post(
-                f"{FLASK_URL}/servers/backup",
+                f"{self.base_url}/servers/backup",
                 json={"id": self.server_id},
                 headers=self.headers,
                 timeout=3600,
@@ -311,14 +320,15 @@ class ServerBackupThread(QThread):
 class GateDeployThread(QThread):
     completed = pyqtSignal(dict)
 
-    def __init__(self, headers):
+    def __init__(self, base_url, headers):
         super().__init__()
+        self.base_url = base_url
         self.headers = headers
 
     def run(self):
         try:
             response = requests.post(
-                f"{FLASK_URL}/proxy/deploy", headers=self.headers, timeout=900,
+                f"{self.base_url}/proxy/deploy", headers=self.headers, timeout=900,
             )
             data = response.json()
             if response.status_code != 200:
@@ -331,15 +341,16 @@ class GateDeployThread(QThread):
 class GateRoutesSaveThread(QThread):
     completed = pyqtSignal(dict)
 
-    def __init__(self, routes, headers):
+    def __init__(self, base_url, routes, headers):
         super().__init__()
+        self.base_url = base_url
         self.routes = routes
         self.headers = headers
 
     def run(self):
         try:
             response = requests.put(
-                f"{FLASK_URL}/proxy/routes",
+                f"{self.base_url}/proxy/routes",
                 json={"routes": self.routes},
                 headers=self.headers,
                 timeout=240,
@@ -355,15 +366,16 @@ class GateRoutesSaveThread(QThread):
 class MinecraftInstallThread(QThread):
     completed = pyqtSignal(dict)
 
-    def __init__(self, payload, headers):
+    def __init__(self, base_url, payload, headers):
         super().__init__()
+        self.base_url = base_url
         self.payload = payload
         self.headers = headers
 
     def run(self):
         try:
             response = requests.post(
-                f"{FLASK_URL}/servers/minecraft/install",
+                f"{self.base_url}/servers/minecraft/install",
                 json=self.payload,
                 headers=self.headers,
                 timeout=3600,
@@ -420,7 +432,10 @@ class GameMover(QWidget):
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
         self.client_config = load_client_config()
-        self.app_mode = self.client_config.get("app_mode", "client")
+        self.app_mode = normalize_app_mode(self.client_config.get("app_mode", "client"))
+        self.ssh_tunnel_port = normalize_ssh_tunnel_port(
+            self.client_config.get("ssh_tunnel_port", DEFAULT_SSH_TUNNEL_PORT),
+        )
         self.server_profiles = server_profiles(self.client_config)
         self.active_server_profile_id = self.client_config.get(
             "active_server_profile", self.server_profiles[0]["id"]
@@ -616,6 +631,7 @@ class GameMover(QWidget):
         auth_row = QHBoxLayout()
         auth_row.addWidget(QLabel("Přihlásit jako (wheel):"))
         self.timekpr_auth_user_combo = QComboBox(self)
+        self.timekpr_auth_user_combo.setEditable(True)
         wheel_users = list_wheel_users()
         if self.user not in wheel_users:
             wheel_users.insert(0, self.user)
@@ -632,6 +648,7 @@ class GameMover(QWidget):
 
         layout.addWidget(QLabel("Uživatel:"))
         self.timekpr_user_combo = QComboBox(self)
+        self.timekpr_user_combo.setEditable(True)
         users = list_system_users()
         if self.user not in users:
             users.insert(0, self.user)
@@ -714,10 +731,26 @@ class GameMover(QWidget):
         self.app_mode_combo = QComboBox(self)
         self.app_mode_combo.addItem("Klient – vzdálený náhled", "client")
         self.app_mode_combo.addItem("Server – místní správa služeb", "server")
-        self.app_mode_combo.setCurrentIndex(1 if self.app_mode == "server" else 0)
+        self.app_mode_combo.addItem("Hostitel – správa přes SSH tunel", "ssh_tunnel")
+        selected_mode = self.app_mode_combo.findData(self.app_mode)
+        self.app_mode_combo.setCurrentIndex(max(0, selected_mode))
         self.app_mode_combo.currentIndexChanged.connect(self.on_app_mode_changed)
         mode_row.addWidget(self.app_mode_combo)
         layout.addLayout(mode_row)
+
+        tunnel_row = QHBoxLayout()
+        self.ssh_tunnel_port_label = QLabel("Lokální port SSH tunelu:")
+        tunnel_row.addWidget(self.ssh_tunnel_port_label)
+        self.ssh_tunnel_port_spin = QSpinBox(self)
+        self.ssh_tunnel_port_spin.setRange(1, 65535)
+        self.ssh_tunnel_port_spin.setValue(int(self.ssh_tunnel_port))
+        self.ssh_tunnel_port_spin.valueChanged.connect(self.on_ssh_tunnel_port_changed)
+        tunnel_row.addWidget(self.ssh_tunnel_port_spin)
+        self.ssh_tunnel_help = QLabel(self)
+        self.ssh_tunnel_help.setWordWrap(True)
+        self.ssh_tunnel_help.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        tunnel_row.addWidget(self.ssh_tunnel_help, 1)
+        layout.addLayout(tunnel_row)
 
         profile_row = QHBoxLayout()
         self.server_profile_combo = QComboBox(self)
@@ -885,47 +918,99 @@ class GameMover(QWidget):
 
     # ----------------- registr serverů -----------------
     def on_app_mode_changed(self, index):
-        self.app_mode = self.app_mode_combo.itemData(index)
+        new_mode = normalize_app_mode(self.app_mode_combo.itemData(index))
+        if new_mode != self.app_mode:
+            self.timekpr_token = ""
+            self.set_timekpr_controls_enabled(False)
+        self.app_mode = new_mode
         self.client_config["app_mode"] = self.app_mode
         save_client_config(self.client_config)
         self.update_server_mode_ui()
         self.refresh_server_statuses()
 
+    def on_ssh_tunnel_port_changed(self, port):
+        self.ssh_tunnel_port = int(port)
+        self.client_config["ssh_tunnel_port"] = self.ssh_tunnel_port
+        save_client_config(self.client_config)
+        if self.app_mode == "ssh_tunnel":
+            self.timekpr_token = ""
+            self.set_timekpr_controls_enabled(False)
+        self.update_server_mode_ui()
+        if self.app_mode == "ssh_tunnel":
+            self.refresh_server_statuses()
+
+    def host_management_api_url(self):
+        return management_api_url(self.app_mode, self.ssh_tunnel_port)
+
+    def timekpr_api_url(self):
+        if is_host_management_mode(self.app_mode):
+            return self.host_management_api_url()
+        return FLASK_URL
+
+    def ssh_tunnel_command_hint(self):
+        profile_host, _api_port = self.split_server_address(
+            self.active_server_profile().get("address", "")
+        )
+        target = profile_host or "ADRESA_HOSTITELE"
+        return (
+            f"ssh -N -L 127.0.0.1:{self.ssh_tunnel_port}:127.0.0.1:5000 "
+            f"{self.user}@{target}"
+        )
+
     def update_server_mode_ui(self):
         server_mode = self.app_mode == "server"
+        tunnel_mode = self.app_mode == "ssh_tunnel"
+        management_mode = is_host_management_mode(self.app_mode)
         connection_editing = self.connection_edit_checkbox.isChecked()
-        self.endpoint_label.setText("Zdroj: místní server" if server_mode else f"Zdroj: {self.server_api_url()}")
+        if server_mode:
+            endpoint_text = "Zdroj: místní server"
+        elif tunnel_mode:
+            endpoint_text = f"Správa hostitele: {self.host_management_api_url()} přes SSH tunel"
+        else:
+            endpoint_text = f"Zdroj: {self.server_api_url()}"
+        self.endpoint_label.setText(endpoint_text)
         self.local_services_label.setText(
             "Sledované služby tohoto počítače" if server_mode
-            else "Správa služeb je dostupná jen v režimu Server."
+            else (
+                "Služby hostitele spravované přes SSH tunel" if tunnel_mode
+                else "Správa služeb je dostupná jen v režimu Server nebo přes SSH tunel."
+            )
         )
+        self.ssh_tunnel_port_label.setVisible(tunnel_mode)
+        self.ssh_tunnel_port_spin.setVisible(tunnel_mode)
+        self.ssh_tunnel_help.setVisible(tunnel_mode)
+        self.ssh_tunnel_help.setText(self.ssh_tunnel_command_hint() if tunnel_mode else "")
+        self.ssh_tunnel_port_spin.setEnabled(tunnel_mode and connection_editing)
         self.app_mode_combo.setEnabled(connection_editing)
         self.server_profile_combo.setEnabled(not server_mode)
-        self.server_profile_test_button.setEnabled(not server_mode)
+        self.server_profile_test_button.setEnabled(True)
         for widget in self.server_profile_edit_widgets:
             widget.setEnabled(not server_mode and connection_editing)
         for field in (
             self.server_profile_name, self.server_profile_address, self.server_profile_token,
         ):
             field.setReadOnly(server_mode or not connection_editing)
-        enabled = server_mode and bool(self.timekpr_token)
+        enabled = management_mode and bool(self.timekpr_token)
         for widget in (
             self.local_services_table, self.local_services_refresh, self.local_services_add,
             self.local_services_remove, self.local_services_save,
         ):
             widget.setEnabled(enabled)
         self.minecraft_install_button.setEnabled(enabled)
-        if server_mode and self.timekpr_token:
+        if management_mode and self.timekpr_token:
             self.load_local_services()
 
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
 
     def load_local_services(self):
-        if self.app_mode != "server" or not self.timekpr_token:
+        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
             return
         try:
-            response = requests.get(f"{FLASK_URL}/servers/config", headers=self.local_pam_headers(), timeout=5)
+            response = requests.get(
+                f"{self.host_management_api_url()}/servers/config",
+                headers=self.local_pam_headers(), timeout=5,
+            )
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
@@ -988,8 +1073,11 @@ class GameMover(QWidget):
             self.local_services_table.removeRow(row)
 
     def save_local_services(self):
-        if self.app_mode != "server" or not self.timekpr_token:
-            QMessageBox.warning(self, "Služby", "Přepni na Server a ověř se ve Timekpr.")
+        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+            QMessageBox.warning(
+                self, "Služby",
+                "Přepni na místní Server nebo správu přes SSH tunel a ověř se ve Timekpr.",
+            )
             return
         servers = []
         for row in range(self.local_services_table.rowCount()):
@@ -1045,7 +1133,7 @@ class GameMover(QWidget):
             servers.append(entry)
         try:
             response = requests.put(
-                f"{FLASK_URL}/servers/config", json={"servers": servers},
+                f"{self.host_management_api_url()}/servers/config", json={"servers": servers},
                 headers=self.local_pam_headers(), timeout=8,
             )
             data = response.json()
@@ -1083,9 +1171,7 @@ class GameMover(QWidget):
         self.server_profile_address.setText(host)
         self.server_profile_port.setValue(port)
         self.server_profile_token.setText(profile.get("read_token", ""))
-        self.endpoint_label.setText(
-            "Zdroj: místní server" if self.app_mode == "server" else f"Zdroj: {self.server_api_url()}"
-        )
+        self.update_server_mode_ui()
 
     def on_server_profile_changed(self, index):
         profile_id = self.server_profile_combo.itemData(index)
@@ -1139,11 +1225,10 @@ class GameMover(QWidget):
         QMessageBox.information(self, "Připojení", "Profil byl uložen do uživatelské konfigurace s právy 0600.")
 
     def test_server_profile(self):
-        profile = self.active_server_profile()
+        base_url, headers = self.server_request_target()
         try:
             response = requests.get(
-                f"{self.server_api_url()}/servers/status",
-                headers=server_read_headers(profile), timeout=5,
+                f"{base_url}/servers/status", headers=headers, timeout=5,
             )
             if response.status_code != 200:
                 raise RuntimeError(response.json().get("message", f"HTTP {response.status_code}"))
@@ -1153,8 +1238,8 @@ class GameMover(QWidget):
 
     # ----------------- pomocné -----------------
     def server_request_target(self):
-        if self.app_mode == "server":
-            return FLASK_URL, {}
+        if is_host_management_mode(self.app_mode):
+            return self.host_management_api_url(), {}
         return self.server_api_url(), server_read_headers(self.active_server_profile())
 
     def clear_layout(self, layout):
@@ -1246,7 +1331,7 @@ class GameMover(QWidget):
                     self.toggle_server_mods(server_id, name)
                 )
                 actions.addWidget(mods_button)
-            if self.app_mode == "server" and server.get("kind") == "proxy":
+            if is_host_management_mode(self.app_mode) and server.get("kind") == "proxy":
                 actions.addStretch()
                 routes_button = QPushButton("Směrování…", card)
                 routes_button.setFixedWidth(130)
@@ -1274,7 +1359,7 @@ class GameMover(QWidget):
                             self.control_gate_proxy(selected_action)
                         )
                         actions.addWidget(button)
-            if self.app_mode == "server" and server.get("kind") != "proxy":
+            if is_host_management_mode(self.app_mode) and server.get("kind") != "proxy":
                 permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
                 auth_summary = " · ".join(
                     f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"
@@ -1403,7 +1488,7 @@ class GameMover(QWidget):
         self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
 
     def open_minecraft_installer(self):
-        if self.app_mode != "server":
+        if not is_host_management_mode(self.app_mode):
             return
         if self.minecraft_install_thread and self.minecraft_install_thread.isRunning():
             QMessageBox.information(self, "Minecraft instalace", "Jiná instalace právě probíhá.")
@@ -1485,7 +1570,7 @@ class GameMover(QWidget):
             QApplication.processEvents()
             try:
                 response = requests.get(
-                    f"{FLASK_URL}/servers/backups",
+                    f"{self.host_management_api_url()}/servers/backups",
                     params={"source_id": source.currentData()},
                     headers=headers,
                     timeout=15,
@@ -1561,7 +1646,9 @@ class GameMover(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
-        self.minecraft_install_thread = MinecraftInstallThread(payload, headers)
+        self.minecraft_install_thread = MinecraftInstallThread(
+            self.host_management_api_url(), payload, headers,
+        )
         self.minecraft_install_thread.completed.connect(self.minecraft_install_completed)
         self.minecraft_install_thread.start()
         self.operation_refresh_timer.start(1_000)
@@ -1605,14 +1692,14 @@ class GameMover(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
-        self.gate_deploy_thread = GateDeployThread(headers)
+        self.gate_deploy_thread = GateDeployThread(self.host_management_api_url(), headers)
         self.gate_deploy_thread.completed.connect(self.gate_deploy_completed)
         self.gate_deploy_thread.start()
         self.operation_refresh_timer.start(1_000)
         QTimer.singleShot(150, self.refresh_server_statuses)
 
     def open_gate_routes(self):
-        if self.app_mode != "server":
+        if not is_host_management_mode(self.app_mode):
             return
         if self.gate_routes_thread and self.gate_routes_thread.isRunning():
             QMessageBox.information(self, "Směrování Gate", "Uložení tras právě probíhá.")
@@ -1625,7 +1712,7 @@ class GameMover(QWidget):
             return
         try:
             response = requests.get(
-                f"{FLASK_URL}/proxy/routes", headers=headers, timeout=15,
+                f"{self.host_management_api_url()}/proxy/routes", headers=headers, timeout=15,
             )
             payload = response.json()
             if response.status_code != 200:
@@ -1753,7 +1840,9 @@ class GameMover(QWidget):
                 self, "Směrování Gate", "Každá trasa musí mít hostname a cílový server.",
             )
             return
-        self.gate_routes_thread = GateRoutesSaveThread(routes, headers)
+        self.gate_routes_thread = GateRoutesSaveThread(
+            self.host_management_api_url(), routes, headers,
+        )
         self.gate_routes_thread.completed.connect(self.gate_routes_saved)
         self.gate_routes_thread.start()
 
@@ -1783,7 +1872,7 @@ class GameMover(QWidget):
         self.refresh_server_statuses()
 
     def control_gate_proxy(self, action):
-        if self.app_mode != "server":
+        if not is_host_management_mode(self.app_mode):
             return
         headers = self.local_pam_headers()
         if not headers:
@@ -1806,7 +1895,8 @@ class GameMover(QWidget):
                 return
         try:
             response = requests.post(
-                f"{FLASK_URL}/proxy/{action}", headers=headers, timeout=210,
+                f"{self.host_management_api_url()}/proxy/{action}",
+                headers=headers, timeout=210,
             )
             data = response.json()
             if response.status_code != 200:
@@ -1820,11 +1910,13 @@ class GameMover(QWidget):
         if policy == "pam":
             return self.local_pam_headers()
         if policy == "silent":
+            if self.app_mode == "ssh_tunnel":
+                return self.local_pam_headers()
             return self.local_admin_headers()
         return {}
 
     def control_local_server(self, action, server_id, name, policy):
-        if self.app_mode != "server":
+        if not is_host_management_mode(self.app_mode):
             return
         if action in ("stop", "restart"):
             verb = "vypnout" if action == "stop" else "restartovat"
@@ -1843,7 +1935,8 @@ class GameMover(QWidget):
         }[action]
         try:
             response = requests.post(
-                f"{FLASK_URL}/servers/{action}", json={"id": server_id}, headers=headers, timeout=210,
+                f"{self.host_management_api_url()}/servers/{action}",
+                json={"id": server_id}, headers=headers, timeout=210,
             )
             data = response.json()
             if response.status_code != 200:
@@ -1854,7 +1947,7 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "Server", f"{action_label} selhalo: {error}")
 
     def backup_local_server(self, server_id, name, policy):
-        if self.app_mode != "server":
+        if not is_host_management_mode(self.app_mode):
             return
         if self.server_backup_thread and self.server_backup_thread.isRunning():
             QMessageBox.information(self, "Záloha serveru", "Jiná záloha právě probíhá.")
@@ -1873,7 +1966,9 @@ class GameMover(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
-        self.server_backup_thread = ServerBackupThread(server_id, headers)
+        self.server_backup_thread = ServerBackupThread(
+            self.host_management_api_url(), server_id, headers,
+        )
         self.server_backup_thread.completed.connect(self.on_server_backup_completed)
         self.server_backup_thread.start()
         QMessageBox.information(
@@ -2302,7 +2397,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Zadej uživatele a heslo (wheel).")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/auth",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/auth",
                                  json={"username": username, "password": password},
                                  timeout=8)
             try:
@@ -2336,10 +2431,15 @@ class GameMover(QWidget):
                 self.update_server_mode_ui()
                 QMessageBox.critical(self, "Timekpr", f"Přihlášení proběhlo, ale Timekpr není použitelný: {detail}")
         except requests.ConnectionError:
+            backend_url = self.timekpr_api_url()
+            guidance = (
+                "Zkontroluj spuštěný SSH tunel."
+                if self.app_mode == "ssh_tunnel"
+                else "Spusť jej příkazem: sudo systemctl enable --now game_mover.service"
+            )
             QMessageBox.critical(
                 self, "Timekpr",
-                "Místní Game Mover backend na 127.0.0.1:5000 neběží.\n"
-                "Spusť jej příkazem: sudo systemctl enable --now game_mover.service",
+                f"Game Mover backend na {backend_url} není dostupný.\n{guidance}",
             )
             self.set_timekpr_controls_enabled(False)
             self.update_server_mode_ui()
@@ -2360,7 +2460,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/add_bonus",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/add_bonus",
                                  json={"user": user, "minutes": minutes, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)
@@ -2378,7 +2478,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/disable_today",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/disable_today",
                                  json={"user": user, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)
@@ -2396,7 +2496,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/reset_today",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/reset_today",
                                  json={"user": user, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)
@@ -2421,7 +2521,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/userinfo",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/userinfo",
                                  json={"user": user, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)
@@ -2460,7 +2560,7 @@ class GameMover(QWidget):
         if not self.timekpr_token:
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/day_plan",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/day_plan",
                                  json={"user": user, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=8)
@@ -2495,7 +2595,7 @@ class GameMover(QWidget):
             return
         user = self.timekpr_user_combo.currentText()
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/set_hours_today",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/set_hours_today",
                                  json={"user": user, "hours": hours_str, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)
@@ -2518,7 +2618,7 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "Timekpr", "Nemám původní plán, nejprve načti stav.")
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/timekpr/set_hours_today",
+            resp = requests.post(f"{self.timekpr_api_url()}/timekpr/set_hours_today",
                                  json={"user": user, "hours": orig_hours, "token": self.timekpr_token},
                                  headers={"X-Timekpr-Token": self.timekpr_token},
                                  timeout=10)

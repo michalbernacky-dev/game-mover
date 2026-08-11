@@ -98,10 +98,14 @@ Typical defaults:
   the operation is privileged or destructive;
 - security policy changes themselves: always PAM protected.
 
-Remote notebook/client access remains read-only unless a later explicit design
-decision grants narrowly scoped mutations. The Podman socket, RCON passwords,
-and API tokens never leave the host API and must not
-appear in logs or responses.
+Direct remote notebook/client access over LAN or Tailscale remains read-only.
+Administrative access from a notebook is permitted only through an explicitly
+opened SSH local-forwarding tunnel to the host loopback API. The GUI accepts
+only a loopback endpoint for this mode, PAM remains mandatory for the remote
+administrative session, and the host `api.token` is never copied to the client.
+This is transport-level access through an existing SSH account, not a remotely
+exposed administrative HTTP API. The Podman socket, RCON passwords, and API
+tokens never leave the host API and must not appear in logs or responses.
 
 ## Implementation sequence
 

@@ -931,7 +931,11 @@ def require_local_server_action(req, server, action):
     if policy == "pam":
         return bool(require_token(req))
     if policy == "silent":
-        return require_local_admin(req)
+        # A wheel-authenticated local session may perform actions that are also
+        # available through the machine-local silent token. This lets an SSH
+        # local-forwarding client administer the host without copying api.token
+        # away from that host.
+        return require_local_admin(req) or bool(require_token(req))
     return False
 
 

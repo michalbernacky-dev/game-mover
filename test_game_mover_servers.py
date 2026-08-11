@@ -515,6 +515,21 @@ class ServerRegistryTest(unittest.TestCase):
         fake_backend.stop.assert_called_once()
         self.assertEqual(fake_backend.start.call_args.args[0]["backend"], "systemd")
 
+    def test_local_pam_session_can_authorize_silent_action_without_admin_token(self):
+        self.save_servers()
+        fake_backend = Mock()
+        fake_backend.start.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "load_local_admin_token", return_value="host-only-secret"),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+        ):
+            response = self.client.post(
+                "/servers/start", json={"id": "pixelmon"},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200)
+        fake_backend.start.assert_called_once()
+
     def test_pam_policy_and_remote_control_are_enforced(self):
         self.save_servers()
         fake_backend = Mock()

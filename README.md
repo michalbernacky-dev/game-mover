@@ -65,11 +65,13 @@ used only for the two remote read-only endpoints. Tokens entered in the registry
 are stored in `~/.config/game-mover/config.json` with file mode `0600`; do not
 enter the local `api.token` there.
 
-### Client and server modes
+### Client, server, and SSH tunnel modes
 
 The **Connection** tab selects either Client mode for remote read-only monitoring
-or Server mode for local administration. In Server mode, authenticate as a wheel
-user in the **Timekpr** tab, then edit the local service registry. Each row has an
+or Server mode for local administration. A third SSH tunnel mode administers a
+host through a manually opened SSH local forward while keeping the administrative
+HTTP API on loopback at both ends. In Server or SSH tunnel mode, authenticate as
+a wheel user in the **Timekpr** tab, then edit the host service registry. Each row has an
 ID, display name, systemd unit, type (`generic` or `minecraft`), absolute
 data and `mods` directories for Minecraft services, and an independent policy
 for every available action. The
@@ -77,10 +79,31 @@ game port is discovered from the workload at runtime. Multiple Minecraft
 instances such as Forge and Pixelmon each keep their own mod path and comparison;
 for example, Pixelmon can use the `pixelmon-srv` systemd unit. A `silent` action
 uses the same local `api.token` as Mover actions, `pam` requires Timekpr login,
-and `disabled` rejects the action. Server registry editing itself remains behind
-wheel/PAM authentication. All control is always rejected over LAN/Tailscale.
+and `disabled` rejects the action. In SSH tunnel mode, PAM also authorizes a
+`silent` action so that the host-only `api.token` never has to be copied to the
+notebook. Server registry editing itself remains behind wheel/PAM authentication.
+Direct control over LAN/Tailscale HTTP is always rejected.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
+
+Open the tunnel before selecting **Host – administration through SSH tunnel**.
+The local bind address is explicit so the forwarded administrative API is not
+available to other devices on the notebook network:
+
+```bash
+ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 127.0.0.1:5500:127.0.0.1:5000 \
+  alice@100.64.0.10
+```
+
+Use the host LAN address at home or its Tailscale address when away. Tailscale
+only transports SSH; Game Mover still connects to `http://127.0.0.1:5500` and
+the host backend still sees a loopback request. The selected connection profile stays
+selected so displayed game connection addresses continue to use the appropriate
+LAN or Tailscale host. Closing SSH immediately removes administrative reachability.
 
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
@@ -350,20 +373,42 @@ vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
 `~/.config/game-mover/config.json` s právy `0600`; nikdy sem nezadávej lokální
 `api.token`.
 
-### Režimy Klient a Server
+### Režimy Klient, Server a SSH tunel
 
 V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only dohled,
-nebo režim Server pro místní správu. V režimu Server se ověř jako wheel uživatel
-v záložce **Timekpr** a poté uprav registr místních služeb. Každý řádek obsahuje
+režim Server pro místní správu nebo třetí režim SSH tunelu pro správu hostitele
+přes ručně otevřený místní SSH forward. Administrativní HTTP API tak na obou
+koncích zůstává pouze na loopbacku. V režimu Server nebo SSH tunelu se ověř jako
+wheel uživatel v záložce **Timekpr** a poté uprav registr služeb hostitele. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
 Minecraftu absolutní cestu k datovému adresáři a adresáři `mods` a samostatnou
 politiku každé dostupné akce. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
 `pixelmon-srv`. Tichá akce používá stejný místní `api.token` jako funkce Moveru,
-PAM akce vyžaduje přihlášení v Timekpr a zakázaná akce je vždy odmítnuta. Úprava
-registru samotného zůstává za wheel/PAM ověřením. Veškeré ovládání je vždy
-odmítnuto z LAN/Tailscale. Po úspěšném vypnutí se také vyčistí systemd stav
+PAM akce vyžaduje přihlášení v Timekpr a zakázaná akce je vždy odmítnuta. V
+tunelovém režimu PAM relace autorizuje také tichou akci, takže hostitelský
+`api.token` není potřeba kopírovat na laptop. Úprava registru samotného zůstává
+za wheel/PAM ověřením. Přímé ovládání přes LAN/Tailscale HTTP je vždy odmítnuto.
+Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
+
+Před přepnutím na **Hostitel – správa přes SSH tunel** otevři tunel. Explicitní
+lokální bind zabrání zpřístupnění přeposlaného API dalším zařízením v síti laptopu:
+
+```bash
+ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -L 127.0.0.1:5500:127.0.0.1:5000 \
+  alice@100.64.0.10
+```
+
+Doma použij LAN adresu hostitele, z práce jeho Tailscale adresu. Tailscale zde
+jen přenáší SSH; Game Mover se stále připojuje na `http://127.0.0.1:5500` a
+backend hostitele vidí loopback požadavek. Vybraný profil připojení zůstává zdrojem
+adres zobrazovaných hráčům, takže může být podle místa LAN nebo Tailscale. Zavřením
+SSH spojení administrační cesta okamžitě zanikne.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se
