@@ -81,8 +81,10 @@ state requires confirmation. Immediate commands such as RCON, ban, or restart
 are clearly distinguished from pending form edits.
 
 The **Connections** tab is limited to host profiles and registered/adopted
-workloads. The existing action-authentication controls will move into a separate
-**Security** tab.
+workloads. A separate **Security** tab contains the central policy registry for
+global platform operations and per-server lifecycle/backup actions. Fixed
+PAM-only rows keep security-policy changes and Timekpr administration visible in
+the same model without allowing those protections to be weakened.
 
 ## Security model
 
@@ -114,5 +116,6 @@ tokens never leave the host API and must not appear in logs or responses.
 3. Use the UI to back up and restore the current Forge server into Podman, verify it,
    and expose cut-over as a separate explicit user action.
 4. Add the per-server Management tab: logs, RCON, properties, players and lists.
-5. Extract and extend operation policies into the Security tab.
+5. Extend the delivered Security policy registry as new management operations
+   are implemented.
 6. Continue with modpacks, worlds, quotas and broader Linux gaming features.

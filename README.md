@@ -72,17 +72,13 @@ or Server mode for local administration. A third SSH tunnel mode administers a
 host through a manually opened SSH local forward while keeping the administrative
 HTTP API on loopback at both ends. In Server or SSH tunnel mode, authenticate as
 a wheel user in the **Timekpr** tab, then edit the host service registry. Each row has an
-ID, display name, systemd unit, type (`generic` or `minecraft`), absolute
-data and `mods` directories for Minecraft services, and an independent policy
-for every available action. The
+ID, display name, systemd unit, type (`generic` or `minecraft`), and absolute
+data and `mods` directories for Minecraft services. The
 game port is discovered from the workload at runtime. Multiple Minecraft
 instances such as Forge and Pixelmon each keep their own mod path and comparison;
-for example, Pixelmon can use the `pixelmon-srv` systemd unit. A `silent` action
-uses the same local `api.token` as Mover actions, `pam` requires Timekpr login,
-and `disabled` rejects the action. In SSH tunnel mode, PAM also authorizes a
-`silent` action so that the host-only `api.token` never has to be copied to the
-notebook. Server registry editing itself remains behind wheel/PAM authentication.
-Direct control over LAN/Tailscale HTTP is always rejected.
+for example, Pixelmon can use the `pixelmon-srv` systemd unit. Authorization is
+configured separately in the **Security** tab. Direct control over LAN/Tailscale
+HTTP is always rejected.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
 
@@ -104,6 +100,23 @@ only transports SSH; Game Mover still connects to `http://127.0.0.1:5500` and
 the host backend still sees a loopback request. The selected connection profile stays
 selected so displayed game connection addresses continue to use the appropriate
 LAN or Tailscale host. Closing SSH immediately removes administrative reachability.
+
+### Security policy registry
+
+The **Security** tab is the single editor for backend-enforced authorization.
+It contains policies for global platform operations and independent
+start/stop/restart/backup policies for every registered server. `silent` uses
+the host-local `api.token`, `pam` requires a valid wheel-user session, and
+`disabled` rejects the operation in the backend. In SSH tunnel mode the PAM
+session may also authorize a `silent` operation, so `api.token` never leaves the
+host. Timekpr administration and changes to the security registry itself are
+shown in the same table style as fixed, disabled controls with the only policy
+**Requires PAM**; they cannot be weakened in the GUI or API.
+
+Policies are stored atomically in `/etc/game_mover/security.json`. On the first
+load, per-server values are migrated in memory from legacy `permissions` or
+`control_auth` fields in `/etc/game_mover/servers.json`; saving the Security tab
+creates the central file. The service registry no longer edits authorization.
 
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
@@ -136,12 +149,6 @@ Example entry in `/etc/game_mover/servers.json`:
   "name": "Minecraft Test",
   "backend": "podman",
   "kind": "minecraft",
-  "permissions": {
-    "start": "silent",
-    "stop": "silent",
-    "restart": "silent",
-    "backup": "pam"
-  },
   "management_mode": "adopted",
   "runtime": {
     "container_name": "mc-test"
@@ -154,11 +161,9 @@ Example entry in `/etc/game_mover/servers.json`:
 }
 ```
 
-The workload ID fixes the allowed data path to `<data root>/<id>/data`. Each
-local action has an independent `silent`, `pam`, or `disabled` policy. `silent`
-uses the local group-readable capability token, `pam` requires an administrator
-session, and `disabled` rejects the action. These policies never enable remote
-control. If a workload is running during backup, it is cleanly
+The workload ID fixes the allowed data path to `<data root>/<id>/data`.
+Authorization for its actions lives in the central Security registry and never
+enables remote control. If a workload is running during backup, it is cleanly
 stopped, the complete data directory is archived and verified, and its previous
 running state is restored. Each gzip archive has a SHA-256 file and a JSON
 manifest with selected non-secret image/runtime metadata. The local PAM-protected
@@ -380,15 +385,11 @@ režim Server pro místní správu nebo třetí režim SSH tunelu pro správu ho
 přes ručně otevřený místní SSH forward. Administrativní HTTP API tak na obou
 koncích zůstává pouze na loopbacku. V režimu Server nebo SSH tunelu se ověř jako
 wheel uživatel v záložce **Timekpr** a poté uprav registr služeb hostitele. Každý řádek obsahuje
-ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`), u
-Minecraftu absolutní cestu k datovému adresáři a adresáři `mods` a samostatnou
-politiku každé dostupné akce. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
+ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`) a u
+Minecraftu absolutní cestu k datovému adresáři a adresáři `mods`. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
-`pixelmon-srv`. Tichá akce používá stejný místní `api.token` jako funkce Moveru,
-PAM akce vyžaduje přihlášení v Timekpr a zakázaná akce je vždy odmítnuta. V
-tunelovém režimu PAM relace autorizuje také tichou akci, takže hostitelský
-`api.token` není potřeba kopírovat na laptop. Úprava registru samotného zůstává
-za wheel/PAM ověřením. Přímé ovládání přes LAN/Tailscale HTTP je vždy odmítnuto.
+`pixelmon-srv`. Autorizace se nastavuje samostatně v záložce **Zabezpečení**.
+Přímé ovládání přes LAN/Tailscale HTTP je vždy odmítnuto.
 Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
 
@@ -409,6 +410,22 @@ jen přenáší SSH; Game Mover se stále připojuje na `http://127.0.0.1:5500` 
 backend hostitele vidí loopback požadavek. Vybraný profil připojení zůstává zdrojem
 adres zobrazovaných hráčům, takže může být podle místa LAN nebo Tailscale. Zavřením
 SSH spojení administrační cesta okamžitě zanikne.
+
+### Registr bezpečnostních zásad
+
+Záložka **Zabezpečení** je jednotný editor autorizace vynucované backendem.
+Obsahuje zásady globálních operací platformy i samostatné zásady
+spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent` používá
+místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
+operaci odmítne přímo backend. V režimu SSH tunelu může PAM relace autorizovat i
+tichou operaci, takže `api.token` nikdy neopustí hostitele. Správa Timekpr a změny
+samotného zabezpečení jsou kvůli jednotnému vzhledu zobrazené ve stejné tabulce
+jako pevné neaktivní volby **Vyžaduje PAM**; přes GUI ani API je nelze oslabit.
+
+Zásady se atomicky ukládají do `/etc/game_mover/security.json`. Při prvním
+načtení se serverové hodnoty v paměti převezmou ze starších polí `permissions`
+nebo `control_auth` v `/etc/game_mover/servers.json`; prvním uložením záložky
+Zabezpečení vznikne centrální soubor. Registr služeb už autorizaci neupravuje.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se
@@ -441,12 +458,6 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
   "name": "Minecraft Test",
   "backend": "podman",
   "kind": "minecraft",
-  "permissions": {
-    "start": "silent",
-    "stop": "silent",
-    "restart": "silent",
-    "backup": "pam"
-  },
   "management_mode": "adopted",
   "runtime": {
     "container_name": "mc-test"
@@ -459,10 +470,9 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
 }
 ```
 
-ID workloadu určuje povolenou datovou cestu `<data root>/<id>/data`. Každá místní
-akce má vlastní politiku `silent`, `pam` nebo `disabled`. `silent` používá místní
-token dostupný skupině, `pam` vyžaduje administrátorskou relaci a `disabled` akci
-zakáže. Žádná z těchto politik nepovoluje vzdálené ovládání. Běžící workload se
+ID workloadu určuje povolenou datovou cestu `<data root>/<id>/data`.
+Autorizace jeho akcí žije v centrálním registru Zabezpečení a nikdy nepovoluje
+vzdálené ovládání. Běžící workload se
 korektně zastaví, zazálohuje
 se celý datový adresář, archiv se ověří a následně se obnoví původní stav běhu.
 Ke gzip archivu vznikne SHA-256 soubor a JSON manifest s vybranými nesekretními

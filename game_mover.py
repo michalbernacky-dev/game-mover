@@ -28,6 +28,11 @@ from game_mover_connections import (
     normalize_app_mode,
     normalize_ssh_tunnel_port,
 )
+from game_mover_security import (
+    FIXED_OPERATION_DEFINITIONS,
+    GLOBAL_OPERATION_DEFAULTS,
+    SERVER_ACTION_IDS,
+)
 from game_mover_version import __version__
 
 # ------------------------------------------------------------
@@ -75,7 +80,7 @@ EXCLUDE_LIST = {
 }
 
 TIMEKPRA_DISABLE_SECONDS = 24 * 3600       # kolik času nastavit pro "vypnout kontrolu na dnešek"
-SERVER_ACTIONS = ("start", "stop", "restart", "backup")
+SERVER_ACTIONS = SERVER_ACTION_IDS
 SERVER_ACTION_LABELS = {
     "start": "Spuštění", "stop": "Vypnutí", "restart": "Restart", "backup": "Záloha",
 }
@@ -451,6 +456,8 @@ class GameMover(QWidget):
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
         self.last_server_statuses = []
+        self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
+        self.security_payload = None
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
@@ -492,6 +499,7 @@ class GameMover(QWidget):
         self.init_mover_tab()
         self.init_servers_tab()
         self.init_server_registry_tab()
+        self.init_security_tab()
         self.init_timekpr_tab()
 
         layout = QVBoxLayout()
@@ -792,10 +800,10 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(11)
+        self.local_services_table.setColumnCount(7)
         self.local_services_table.setHorizontalHeaderLabels([
             "ID", "Název", "Backend", "Jednotka / container", "Typ",
-            "Datový adresář", "Adresář mods", "Spuštění", "Vypnutí", "Restart", "Záloha",
+            "Datový adresář", "Adresář mods",
         ])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
@@ -807,8 +815,6 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(5, QHeaderView.Stretch)
         services_header.setSectionResizeMode(6, QHeaderView.Stretch)
-        for column in range(7, 11):
-            services_header.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         layout.addWidget(self.local_services_table)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
@@ -835,6 +841,245 @@ class GameMover(QWidget):
         self.update_server_mode_ui()
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Připojení")
+
+    def init_security_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        title = QLabel("Zabezpečení herní platformy", tab)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        help_label = QLabel(
+            "Každá operace má samostatnou backendem vynucovanou zásadu. "
+            "Tichá používá místní api.token, PAM vyžaduje wheel ověření a "
+            "zakázaná operace není dostupná. Změny tohoto registru vždy vyžadují PAM.",
+            tab,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        self.security_status_label = QLabel("Zásady zatím nejsou načtené.", tab)
+        self.security_status_label.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(self.security_status_label)
+
+        layout.addWidget(QLabel("Globální operace:", tab))
+        self.security_global_table = QTableWidget(tab)
+        self.security_global_table.setColumnCount(3)
+        self.security_global_table.setHorizontalHeaderLabels([
+            "Operace", "Popis", "Ověření",
+        ])
+        self.security_global_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.security_global_table.verticalHeader().setVisible(False)
+        self.security_global_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.security_global_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.security_global_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.security_global_table.setFixedHeight(230)
+        layout.addWidget(self.security_global_table)
+
+        layout.addWidget(QLabel("Akce jednotlivých serverů:", tab))
+        self.security_server_table = QTableWidget(tab)
+        self.security_server_table.setColumnCount(1 + len(SERVER_ACTIONS))
+        self.security_server_table.setHorizontalHeaderLabels([
+            "Server", *[SERVER_ACTION_LABELS[action] for action in SERVER_ACTIONS],
+        ])
+        self.security_server_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.security_server_table.verticalHeader().setVisible(False)
+        self.security_server_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        for column in range(1, 1 + len(SERVER_ACTIONS)):
+            self.security_server_table.horizontalHeader().setSectionResizeMode(
+                column, QHeaderView.ResizeToContents,
+            )
+        self.security_server_table.setFixedHeight(220)
+        layout.addWidget(self.security_server_table)
+
+        layout.addWidget(QLabel("Pevně chráněné operace:", tab))
+        self.security_fixed_table = QTableWidget(tab)
+        self.security_fixed_table.setColumnCount(3)
+        self.security_fixed_table.setHorizontalHeaderLabels([
+            "Operace", "Popis", "Ověření",
+        ])
+        self.security_fixed_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.security_fixed_table.verticalHeader().setVisible(False)
+        self.security_fixed_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.security_fixed_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.security_fixed_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.security_fixed_table.setFixedHeight(110)
+        layout.addWidget(self.security_fixed_table)
+        self.populate_fixed_security_operations(FIXED_OPERATION_DEFINITIONS)
+
+        actions = QHBoxLayout()
+        self.security_load_button = QPushButton("Načíst zásady", tab)
+        self.security_load_button.clicked.connect(self.load_security_policies)
+        actions.addWidget(self.security_load_button)
+        self.security_save_button = QPushButton("Uložit zásady", tab)
+        self.security_save_button.clicked.connect(self.save_security_policies)
+        actions.addWidget(self.security_save_button)
+        layout.addLayout(actions)
+        layout.addStretch()
+        self.tabs.addTab(tab, "Zabezpečení")
+        self.update_security_mode_ui()
+
+    def create_policy_combo(self, parent, policy):
+        combo = QComboBox(parent)
+        combo.addItem("Tichá", "silent")
+        combo.addItem("Vyžaduje PAM", "pam")
+        combo.addItem("Zakázaná", "disabled")
+        combo.setCurrentIndex(max(0, combo.findData(policy)))
+        return combo
+
+    def populate_fixed_security_operations(self, definitions):
+        self.security_fixed_table.setRowCount(0)
+        for definition in definitions:
+            row = self.security_fixed_table.rowCount()
+            self.security_fixed_table.insertRow(row)
+            values = (
+                definition.get("label", definition.get("id", "")),
+                definition.get("description", ""),
+            )
+            for column, value in enumerate(values):
+                self.security_fixed_table.setItem(row, column, QTableWidgetItem(value))
+            policy_combo = QComboBox(self.security_fixed_table)
+            policy_combo.addItem("Vyžaduje PAM", "pam")
+            policy_combo.setEnabled(False)
+            self.security_fixed_table.setCellWidget(row, 2, policy_combo)
+
+    def update_security_mode_ui(self):
+        enabled = is_host_management_mode(self.app_mode) and bool(self.timekpr_token)
+        for widget in (
+            self.security_global_table, self.security_server_table,
+            self.security_load_button, self.security_save_button,
+        ):
+            widget.setEnabled(enabled)
+        if not is_host_management_mode(self.app_mode):
+            text = "Přepni na místní Server nebo správu hostitele přes SSH tunel."
+        elif not self.timekpr_token:
+            text = "Pro správu bezpečnostních zásad se ověř jako wheel uživatel v Timekpr."
+        elif self.security_payload:
+            text = "Bezpečnostní zásady jsou načtené z hostitele."
+        else:
+            text = "PAM je ověřený; načti bezpečnostní zásady hostitele."
+        self.security_status_label.setText(text)
+
+    def load_security_policies(self):
+        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+            self.update_security_mode_ui()
+            return
+        try:
+            response = requests.get(
+                f"{self.host_management_api_url()}/security/policies",
+                headers=self.local_pam_headers(), timeout=10,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            self.populate_security_tables(payload)
+        except Exception as error:
+            QMessageBox.critical(self, "Zabezpečení", f"Načtení zásad selhalo: {error}")
+
+    def populate_security_tables(self, payload):
+        self.security_payload = payload
+        policies = payload.get("policies") if isinstance(payload.get("policies"), dict) else {}
+        global_policies = policies.get("global") if isinstance(policies.get("global"), dict) else {}
+        server_policies = policies.get("servers") if isinstance(policies.get("servers"), dict) else {}
+        catalog = payload.get("catalog") if isinstance(payload.get("catalog"), dict) else {}
+
+        global_definitions = catalog.get("global") if isinstance(catalog.get("global"), list) else []
+        self.security_global_table.setRowCount(0)
+        for definition in global_definitions:
+            operation = definition.get("id", "")
+            row = self.security_global_table.rowCount()
+            self.security_global_table.insertRow(row)
+            name_item = QTableWidgetItem(definition.get("label", operation))
+            name_item.setData(Qt.UserRole, operation)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.security_global_table.setItem(row, 0, name_item)
+            description_item = QTableWidgetItem(definition.get("description", ""))
+            description_item.setFlags(description_item.flags() & ~Qt.ItemIsEditable)
+            self.security_global_table.setItem(row, 1, description_item)
+            self.security_global_table.setCellWidget(
+                row, 2,
+                self.create_policy_combo(
+                    self.security_global_table,
+                    global_policies.get(operation, definition.get("default", "pam")),
+                ),
+            )
+
+        self.security_server_table.setRowCount(0)
+        for server in payload.get("servers", []):
+            server_id = server.get("id", "")
+            row = self.security_server_table.rowCount()
+            self.security_server_table.insertRow(row)
+            name_item = QTableWidgetItem(server.get("name", server_id))
+            name_item.setData(Qt.UserRole, server_id)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.security_server_table.setItem(row, 0, name_item)
+            configured = server_policies.get(server_id, {})
+            for column, action in enumerate(SERVER_ACTIONS, start=1):
+                self.security_server_table.setCellWidget(
+                    row, column,
+                    self.create_policy_combo(
+                        self.security_server_table, configured.get(action, "disabled"),
+                    ),
+                )
+
+        fixed_definitions = catalog.get("fixed") if isinstance(catalog.get("fixed"), list) else []
+        self.populate_fixed_security_operations(
+            fixed_definitions or FIXED_OPERATION_DEFINITIONS,
+        )
+
+        self.global_operation_policies = {
+            **GLOBAL_OPERATION_DEFAULTS, **global_policies,
+        }
+        self.update_security_mode_ui()
+        self.update_management_action_availability()
+
+    def collect_security_policies(self):
+        global_policies = {}
+        for row in range(self.security_global_table.rowCount()):
+            item = self.security_global_table.item(row, 0)
+            combo = self.security_global_table.cellWidget(row, 2)
+            if item and combo:
+                global_policies[item.data(Qt.UserRole)] = combo.currentData()
+        server_policies = {}
+        for row in range(self.security_server_table.rowCount()):
+            item = self.security_server_table.item(row, 0)
+            if not item:
+                continue
+            server_id = item.data(Qt.UserRole)
+            server_policies[server_id] = {}
+            for column, action in enumerate(SERVER_ACTIONS, start=1):
+                combo = self.security_server_table.cellWidget(row, column)
+                server_policies[server_id][action] = (
+                    combo.currentData() if combo else "disabled"
+                )
+        return {"global": global_policies, "servers": server_policies}
+
+    def save_security_policies(self):
+        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+            self.update_security_mode_ui()
+            return
+        answer = QMessageBox.question(
+            self, "Uložit zabezpečení",
+            "Opravdu uložit nové zásady? Změny se projeví okamžitě na backendu hostitele.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        try:
+            response = requests.put(
+                f"{self.host_management_api_url()}/security/policies",
+                json={"policies": self.collect_security_policies()},
+                headers=self.local_pam_headers(), timeout=15,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            self.populate_security_tables(payload)
+            self.refresh_server_statuses()
+            QMessageBox.information(
+                self, "Zabezpečení",
+                payload.get("message", "Bezpečnostní zásady byly uloženy."),
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "Zabezpečení", f"Uložení zásad selhalo: {error}")
 
     def init_servers_tab(self):
         tab = QWidget(self)
@@ -990,26 +1235,48 @@ class GameMover(QWidget):
             self.server_profile_name, self.server_profile_address, self.server_profile_token,
         ):
             field.setReadOnly(server_mode or not connection_editing)
-        enabled = management_mode and bool(self.timekpr_token)
+        self.update_management_action_availability()
+        if hasattr(self, "security_status_label"):
+            self.update_security_mode_ui()
+        if management_mode and self.timekpr_token:
+            self.load_local_services()
+            if hasattr(self, "security_global_table"):
+                self.load_security_policies()
+
+    def update_management_action_availability(self):
+        management_mode = is_host_management_mode(self.app_mode)
+        registry_enabled = management_mode and bool(
+            self.local_operation_headers("server.registry")
+        )
         for widget in (
             self.local_services_table, self.local_services_refresh, self.local_services_add,
             self.local_services_remove, self.local_services_save,
         ):
-            widget.setEnabled(enabled)
-        self.minecraft_install_button.setEnabled(enabled)
-        if management_mode and self.timekpr_token:
-            self.load_local_services()
+            widget.setEnabled(registry_enabled)
+        install_enabled = management_mode and bool(
+            self.local_operation_headers("minecraft.install")
+        )
+        self.minecraft_install_button.setEnabled(install_enabled)
 
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
 
+    def operation_policy(self, operation):
+        return self.global_operation_policies.get(
+            operation, GLOBAL_OPERATION_DEFAULTS.get(operation, "disabled"),
+        )
+
+    def local_operation_headers(self, operation):
+        return self.local_server_action_headers(self.operation_policy(operation))
+
     def load_local_services(self):
-        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+        headers = self.local_operation_headers("server.registry")
+        if not is_host_management_mode(self.app_mode) or not headers:
             return
         try:
             response = requests.get(
                 f"{self.host_management_api_url()}/servers/config",
-                headers=self.local_pam_headers(), timeout=5,
+                headers=headers, timeout=5,
             )
             data = response.json()
             if response.status_code != 200:
@@ -1055,17 +1322,6 @@ class GameMover(QWidget):
         kind = service.get("kind", "generic")
         kind_combo.setCurrentIndex(max(0, kind_combo.findData(kind)))
         self.local_services_table.setCellWidget(row, 4, kind_combo)
-        permissions = service.get("permissions") if isinstance(service.get("permissions"), dict) else {}
-        legacy_policy = service.get("control_auth", "silent")
-        for column, action in enumerate(SERVER_ACTIONS, start=7):
-            policy_combo = QComboBox(self.local_services_table)
-            policy_combo.addItem("Tiché", "silent")
-            policy_combo.addItem("Vyžaduje PAM", "pam")
-            policy_combo.addItem("Zakázáno", "disabled")
-            default_policy = legacy_policy if action != "backup" else "pam"
-            policy = permissions.get(action, default_policy)
-            policy_combo.setCurrentIndex(max(0, policy_combo.findData(policy)))
-            self.local_services_table.setCellWidget(row, column, policy_combo)
 
     def remove_local_service_rows(self):
         rows = sorted({item.row() for item in self.local_services_table.selectedItems()}, reverse=True)
@@ -1073,10 +1329,11 @@ class GameMover(QWidget):
             self.local_services_table.removeRow(row)
 
     def save_local_services(self):
-        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+        headers = self.local_operation_headers("server.registry")
+        if not is_host_management_mode(self.app_mode) or not headers:
             QMessageBox.warning(
                 self, "Služby",
-                "Přepni na místní Server nebo správu přes SSH tunel a ověř se ve Timekpr.",
+                "Pro změnu registru serverů chybí oprávnění podle bezpečnostní zásady.",
             )
             return
         servers = []
@@ -1089,10 +1346,6 @@ class GameMover(QWidget):
             kind_combo = self.local_services_table.cellWidget(row, 4)
             backend = backend_combo.currentData() if backend_combo else "systemd"
             kind = kind_combo.currentData() if kind_combo else "generic"
-            permissions = {}
-            for column, action in enumerate(SERVER_ACTIONS, start=7):
-                policy_combo = self.local_services_table.cellWidget(row, column)
-                permissions[action] = policy_combo.currentData() if policy_combo else "disabled"
             runtime_reference = cell_text(3)
             data_directory = cell_text(5)
             mods_dir = cell_text(6)
@@ -1110,7 +1363,7 @@ class GameMover(QWidget):
             entry = dict(original) if isinstance(original, dict) else {}
             entry.update({
                 "id": cell_text(0), "name": cell_text(1), "backend": backend,
-                "kind": kind, "permissions": permissions,
+                "kind": kind,
             })
             entry.pop("control_auth", None)
             if backend == "systemd":
@@ -1134,7 +1387,7 @@ class GameMover(QWidget):
         try:
             response = requests.put(
                 f"{self.host_management_api_url()}/servers/config", json={"servers": servers},
-                headers=self.local_pam_headers(), timeout=8,
+                headers=headers, timeout=8,
             )
             data = response.json()
             if response.status_code != 200:
@@ -1335,17 +1588,17 @@ class GameMover(QWidget):
                 actions.addStretch()
                 routes_button = QPushButton("Směrování…", card)
                 routes_button.setFixedWidth(130)
-                routes_button.setEnabled(bool(self.local_pam_headers()))
+                routes_button.setEnabled(bool(self.local_operation_headers("gate.routes")))
                 routes_button.clicked.connect(self.open_gate_routes)
                 actions.addWidget(routes_button)
                 if not server.get("deployed", False):
                     deploy_button = QPushButton("Nasadit Gate Lite", card)
                     deploy_button.setFixedWidth(150)
-                    deploy_button.setEnabled(bool(self.local_pam_headers()))
+                    deploy_button.setEnabled(bool(self.local_operation_headers("gate.deploy")))
                     deploy_button.clicked.connect(self.deploy_gate_proxy)
                     actions.addWidget(deploy_button)
                 else:
-                    proxy_authorized = bool(self.local_pam_headers())
+                    proxy_authorized = bool(self.local_operation_headers("gate.lifecycle"))
                     for action, label, enabled_states in (
                         ("start", "Spustit", ("inactive", "failed")),
                         ("restart", "Restartovat", ("active", "activating")),
@@ -1438,6 +1691,12 @@ class GameMover(QWidget):
         if error:
             self.servers_updated_label.setText(f"Poslední aktualizace: chyba ({error})")
             return
+        operation_policies = data.get("operation_policies")
+        if isinstance(operation_policies, dict):
+            self.global_operation_policies = {
+                **GLOBAL_OPERATION_DEFAULTS, **operation_policies,
+            }
+            self.update_management_action_availability()
         servers = list(data.get("servers", []))
         self.last_server_statuses = list(servers)
         proxy = data.get("proxy")
@@ -1493,10 +1752,11 @@ class GameMover(QWidget):
         if self.minecraft_install_thread and self.minecraft_install_thread.isRunning():
             QMessageBox.information(self, "Minecraft instalace", "Jiná instalace právě probíhá.")
             return
-        headers = self.local_pam_headers()
+        headers = self.local_operation_headers("minecraft.install")
         if not headers:
             QMessageBox.warning(
-                self, "Minecraft instalace", "Instalace vyžaduje přihlášení v Timekpr.",
+                self, "Minecraft instalace",
+                "Instalace není podle bezpečnostní zásady povolená.",
             )
             return
 
@@ -1572,7 +1832,7 @@ class GameMover(QWidget):
                 response = requests.get(
                     f"{self.host_management_api_url()}/servers/backups",
                     params={"source_id": source.currentData()},
-                    headers=headers,
+                    headers=self.local_operation_headers("backup.catalog"),
                     timeout=15,
                 )
                 data = response.json()
@@ -1676,10 +1936,10 @@ class GameMover(QWidget):
     def deploy_gate_proxy(self):
         if self.gate_deploy_thread and self.gate_deploy_thread.isRunning():
             return
-        headers = self.local_pam_headers()
+        headers = self.local_operation_headers("gate.deploy")
         if not headers:
             QMessageBox.warning(
-                self, "Gate Lite", "Nasazení Gate Lite vyžaduje přihlášení v Timekpr.",
+                self, "Gate Lite", "Nasazení Gate Lite není podle zásady povolené.",
             )
             return
         answer = QMessageBox.question(
@@ -1704,10 +1964,10 @@ class GameMover(QWidget):
         if self.gate_routes_thread and self.gate_routes_thread.isRunning():
             QMessageBox.information(self, "Směrování Gate", "Uložení tras právě probíhá.")
             return
-        headers = self.local_pam_headers()
+        headers = self.local_operation_headers("gate.routes")
         if not headers:
             QMessageBox.warning(
-                self, "Směrování Gate", "Úprava tras vyžaduje přihlášení v Timekpr.",
+                self, "Směrování Gate", "Úprava tras není podle zásady povolená.",
             )
             return
         try:
@@ -1874,10 +2134,10 @@ class GameMover(QWidget):
     def control_gate_proxy(self, action):
         if not is_host_management_mode(self.app_mode):
             return
-        headers = self.local_pam_headers()
+        headers = self.local_operation_headers("gate.lifecycle")
         if not headers:
             QMessageBox.warning(
-                self, "Gate Lite", "Ovládání Gate Lite vyžaduje přihlášení v Timekpr.",
+                self, "Gate Lite", "Ovládání Gate Lite není podle zásady povolené.",
             )
             return
         labels = {

@@ -15,10 +15,12 @@ class ServerRegistryTest(unittest.TestCase):
         self.config_path = str(Path(self.temp_dir.name) / "servers.json")
         self.original_config_path = backend.GAME_SERVERS_CONFIG_PATH
         self.original_gate_config_path = backend.GATE_CONFIG_PATH
+        self.original_security_config_path = backend.SECURITY_CONFIG_PATH
         self.original_operations = backend.OPERATIONS
         backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
         backend.GATE_CONFIG_PATH = str(Path(self.temp_dir.name) / "gate.json")
+        backend.SECURITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "security.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -50,6 +52,7 @@ class ServerRegistryTest(unittest.TestCase):
     def tearDown(self):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
         backend.GATE_CONFIG_PATH = self.original_gate_config_path
+        backend.SECURITY_CONFIG_PATH = self.original_security_config_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
@@ -111,6 +114,62 @@ class ServerRegistryTest(unittest.TestCase):
         })
         self.assertEqual(statuses["forge"]["permissions"]["start"], "pam")
         self.assertEqual(statuses["pixelmon"]["permissions"]["backup"], "pam")
+
+    def test_security_registry_requires_local_pam_and_applies_immediately(self):
+        self.save_servers()
+        response = self.client.get("/security/policies", **self.local_options())
+        self.assertEqual(response.status_code, 403)
+        response = self.client.get(
+            "/security/policies", headers=self.pam_headers,
+            environ_base={"REMOTE_ADDR": "100.64.0.20"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+        response = self.client.get(
+            "/security/policies", **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        fixed = {item["id"]: item for item in response.json["catalog"]["fixed"]}
+        self.assertEqual(fixed["timekpr.manage"]["policy"], "pam")
+        policies = response.json["policies"]
+        policies["servers"]["pixelmon"]["start"] = "disabled"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Path(backend.SECURITY_CONFIG_PATH).is_file())
+
+        fake_backend = Mock()
+        fake_backend.start.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "load_local_admin_token", return_value="local-secret"),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+        ):
+            response = self.client.post(
+                "/servers/start", json={"id": "pixelmon"},
+                **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(response.status_code, 403)
+        fake_backend.start.assert_not_called()
+
+    def test_global_silent_policy_uses_host_local_token(self):
+        self.save_servers()
+        response = self.client.get(
+            "/security/policies", **self.local_options(self.pam_headers),
+        )
+        policies = response.json["policies"]
+        policies["global"]["server.registry"] = "silent"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        with patch.object(backend, "load_local_admin_token", return_value="local-secret"):
+            response = self.client.get(
+                "/servers/config", **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(response.status_code, 200)
 
     def test_minecraft_status_exposes_read_only_player_statistics(self):
         data_directory = Path(self.temp_dir.name) / "managed-servers" / "mc-test" / "data"

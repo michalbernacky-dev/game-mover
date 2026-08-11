@@ -23,6 +23,16 @@ from concurrent.futures import ThreadPoolExecutor
 from game_mover_backups import BackupError, create_workload_backup
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
 from game_mover_mods import scan_mod_directory
+from game_mover_security import (
+    POLICY_MODES,
+    SERVER_ACTION_IDS,
+    disabled_security_config,
+    global_policy,
+    normalize_security_config,
+    public_security_payload,
+    server_policy,
+    validate_security_update,
+)
 from game_mover_minecraft import (
     configured_rcon,
     configured_server_port,
@@ -65,6 +75,7 @@ READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
 GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
 GATE_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "gate.json")
+SECURITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "security.json")
 GATE_DATA_DIRECTORY = os.path.realpath(
     os.getenv("GAME_PLATFORM_GATE_DATA", "/var/lib/game-platform/proxies/gate")
 )
@@ -80,8 +91,8 @@ WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
 OPERATIONS = OperationRegistry()
 GATE_DEPLOY_OPERATION_ID = "gate-deploy"
-SERVER_ACTIONS = ("start", "stop", "restart", "backup")
-SERVER_AUTH_POLICIES = ("silent", "pam", "disabled")
+SERVER_ACTIONS = SERVER_ACTION_IDS
+SERVER_AUTH_POLICIES = POLICY_MODES
 MINECRAFT_STATUS_TIMEOUT = 8.0
 MINECRAFT_STATUS_DISCOVERY_TIMEOUT = 3.0
 MINECRAFT_STATUS_REFRESH_SECONDS = 30.0
@@ -90,6 +101,7 @@ MINECRAFT_STATUS_CACHE = {}
 MINECRAFT_STATUS_INFLIGHT = set()
 MINECRAFT_STATUS_LOCK = threading.Lock()
 MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+SECURITY_CONFIG_LOCK = threading.Lock()
 CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 
@@ -170,6 +182,35 @@ def save_game_servers(servers):
     except (KeyError, OSError):
         os.chmod(temporary_path, 0o600)
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
+
+
+def load_security_config(servers=None):
+    servers = load_game_servers() if servers is None else servers
+    try:
+        with SECURITY_CONFIG_LOCK:
+            with open(SECURITY_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+                raw_config = json.load(config_file)
+    except FileNotFoundError:
+        raw_config = None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return disabled_security_config(servers)
+    return normalize_security_config(raw_config, servers)
+
+
+def save_security_config(config):
+    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    temporary_path = f"{SECURITY_CONFIG_PATH}.tmp"
+    with SECURITY_CONFIG_LOCK:
+        with open(temporary_path, "w", encoding="utf-8") as config_file:
+            json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
+            config_file.write("\n")
+        try:
+            os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
+            os.chmod(temporary_path, 0o640)
+        except (KeyError, OSError):
+            os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, SECURITY_CONFIG_PATH)
+    return config
 
 
 def load_gate_config():
@@ -687,7 +728,7 @@ def cached_minecraft_player_status(server_id, hosts, port, rcon=None):
     return snapshot, pending, error
 
 
-def game_server_status(server):
+def game_server_status(server, security_config=None):
     backend_name = server.get("backend", "systemd")
     runtime = server.get("runtime", {})
     reference = (
@@ -719,7 +760,8 @@ def game_server_status(server):
         "kind": server.get("kind", "generic"),
         "has_mods": bool(server.get("mods_dir")),
         "permissions": {
-            action: server_action_policy(server, action) for action in SERVER_ACTIONS
+            action: server_action_policy(server, action, security_config)
+            for action in SERVER_ACTIONS
         },
         "status": state.status,
         "native_status": state.native_status,
@@ -913,21 +955,9 @@ def require_local_pam_session(req):
     return req.remote_addr in ("127.0.0.1", "::1") and bool(require_token(req))
 
 
-def server_action_policy(server, action):
-    permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
-    policy = permissions.get(action)
-    if policy in SERVER_AUTH_POLICIES:
-        return policy
-    legacy_policy = server.get("control_auth", "silent")
-    if action in ("start", "stop", "restart") and legacy_policy in ("silent", "pam"):
-        return legacy_policy
-    return "pam" if action == "backup" else "disabled"
-
-
-def require_local_server_action(req, server, action):
+def authorize_local_policy(req, policy):
     if req.remote_addr not in ("127.0.0.1", "::1"):
         return False
-    policy = server_action_policy(server, action)
     if policy == "pam":
         return bool(require_token(req))
     if policy == "silent":
@@ -937,6 +967,24 @@ def require_local_server_action(req, server, action):
         # away from that host.
         return require_local_admin(req) or bool(require_token(req))
     return False
+
+
+def server_action_policy(server, action, security_config=None):
+    config = security_config if security_config is not None else load_security_config()
+    return server_policy(config, server, action)
+
+
+def operation_policy(operation, security_config=None):
+    config = security_config if security_config is not None else load_security_config()
+    return global_policy(config, operation)
+
+
+def require_local_operation(req, operation):
+    return authorize_local_policy(req, operation_policy(operation))
+
+
+def require_local_server_action(req, server, action):
+    return authorize_local_policy(req, server_action_policy(server, action))
 
 
 def limit_for_today(user: str) -> Optional[int]:
@@ -1308,9 +1356,12 @@ def set_steam_cache():
 @app.route("/servers/status", methods=["GET"])
 def servers_status():
     servers = load_game_servers()
+    security_config = load_security_config(servers)
     if servers:
         with ThreadPoolExecutor(max_workers=min(8, len(servers))) as executor:
-            statuses = list(executor.map(game_server_status, servers))
+            statuses = list(executor.map(
+                lambda server: game_server_status(server, security_config), servers,
+            ))
     else:
         statuses = []
     known_ids = {server.get("id") for server in statuses}
@@ -1331,7 +1382,28 @@ def servers_status():
     return jsonify({
         "version": __version__,
         "servers": statuses,
+        "operation_policies": dict(security_config["global"]),
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+
+
+@app.route("/security/policies", methods=["GET", "PUT"])
+def security_policies():
+    # The policy controlling security.manage is intentionally not configurable.
+    if not require_local_pam_session(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    servers = load_game_servers()
+    if request.method == "GET":
+        return jsonify(public_security_payload(load_security_config(servers), servers))
+    raw_config = (request.json or {}).get("policies")
+    try:
+        config = validate_security_update(raw_config, servers)
+        save_security_config(config)
+    except (OSError, TypeError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": "Bezpečnostní zásady byly uloženy",
+        **public_security_payload(config, servers),
     })
 
 
@@ -1388,7 +1460,7 @@ def gate_proxy_status():
 
 @app.route("/proxy/config", methods=["GET", "PUT"])
 def gate_proxy_config():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "gate.config"):
         return jsonify({"message": "Unauthorized"}), 403
     if request.method == "GET":
         return jsonify({"proxy": load_gate_config()})
@@ -1401,7 +1473,7 @@ def gate_proxy_config():
 
 @app.route("/proxy/routes", methods=["GET", "PUT"])
 def gate_proxy_routes():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "gate.routes"):
         return jsonify({"message": "Unauthorized"}), 403
     old_config = load_gate_config()
     targets = minecraft_route_targets()
@@ -1478,7 +1550,7 @@ def gate_proxy_routes():
 
 @app.route("/proxy/deploy", methods=["POST"])
 def gate_proxy_deploy():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "gate.deploy"):
         return jsonify({"message": "Unauthorized"}), 403
     try:
         OPERATIONS.begin(
@@ -1619,7 +1691,7 @@ def gate_proxy_deploy():
 @app.route("/proxy/stop", methods=["POST"])
 @app.route("/proxy/restart", methods=["POST"])
 def gate_proxy_control():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "gate.lifecycle"):
         return jsonify({"message": "Unauthorized"}), 403
     action = request.path.rsplit("/", 1)[-1]
     config = load_gate_config()
@@ -1745,7 +1817,7 @@ def validate_game_server_entry(server, seen_ids):
 
 @app.route("/servers/config", methods=["GET", "PUT"])
 def servers_config():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "server.registry"):
         return jsonify({"message": "Unauthorized"}), 403
     if request.method == "GET":
         return jsonify({"servers": load_game_servers()})
@@ -1767,7 +1839,7 @@ def servers_config():
 
 @app.route("/servers/backups", methods=["GET"])
 def servers_backups():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "backup.catalog"):
         return jsonify({"message": "Unauthorized"}), 403
     source_id = request.args.get("source_id", "")
     try:
@@ -1779,7 +1851,7 @@ def servers_backups():
 
 @app.route("/servers/minecraft/install", methods=["POST"])
 def minecraft_install():
-    if not require_local_pam_session(request):
+    if not require_local_operation(request, "minecraft.install"):
         return jsonify({"message": "Unauthorized"}), 403
     try:
         config = normalize_install_request(request.json or {})
