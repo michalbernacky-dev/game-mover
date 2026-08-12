@@ -2640,7 +2640,15 @@ class GameMover(QWidget):
         entry["logs_output"].setTextCursor(cursor)
         updated = str(payload.get("updated_at", "")).replace("T", " ").split("+")[0]
         clipped = " Výpis byl zkrácen na bezpečnou maximální velikost." if payload.get("truncated") else ""
-        entry["logs_status"].setText(f"Log načten: {updated or 'nyní'}.{clipped}")
+        source_labels = {
+            "minecraft-file": "Minecraft latest.log",
+            "systemd-runtime": "systemd journal",
+            "podman-runtime": "Podman stdout",
+        }
+        source = source_labels.get(payload.get("source"), "registrovaný zdroj")
+        entry["logs_status"].setText(
+            f"Log načten z {source}: {updated or 'nyní'}.{clipped}"
+        )
 
     def load_server_properties(self, server_id):
         entry = self.server_management_pages.get(server_id)

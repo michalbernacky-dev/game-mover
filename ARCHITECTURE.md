@@ -68,7 +68,9 @@ that server (for example, `Management: Forge`). It is not a separate desktop
 window.
 
 The first delivered management-tab slice contains the common workload overview,
-lifecycle, bounded live log viewing, verified backup catalog and backup creation.
+lifecycle, bounded log viewing, verified backup catalog and backup creation.
+Minecraft prefers its persistent `data/logs/latest.log`, preserving Forge and
+mod output, and falls back to the systemd journal or Podman runtime output.
 Minecraft tabs also contain the existing mod inventory and client comparison. The
 Servers card keeps only the status, a context-sensitive quick start/stop action
 and **Management**.

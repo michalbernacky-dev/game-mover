@@ -46,6 +46,7 @@ from game_mover_properties import (
     read_minecraft_properties,
     write_minecraft_properties,
 )
+from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_version import __version__
 from game_mover_gate import (
     GateConfigError,
@@ -2200,13 +2201,27 @@ def server_logs():
         return jsonify({"message": "Server not found"}), 404
     try:
         tail = normalize_log_tail(request.args.get("tail", 100))
+        data = server.get("data", {})
+        minecraft_log = None
+        if server.get("kind") == "minecraft" and isinstance(data, dict):
+            minecraft_log = read_minecraft_latest_log(data.get("directory", ""), tail)
+        if minecraft_log is not None:
+            return jsonify({
+                "server_id": server["id"],
+                "backend": server.get("backend", "systemd"),
+                "tail": tail,
+                "output": minecraft_log["output"],
+                "truncated": minecraft_log["truncated"],
+                "source": minecraft_log["source"],
+                "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            })
         backend = backend_for(
             server, podman_user=PODMAN_USER, podman_socket_path=PODMAN_SOCKET_PATH,
         )
         with workload_lock(server["id"]):
             result = backend.logs(server, tail)
         output, truncated = bounded_log_output(result)
-    except (AttributeError, KeyError, ValueError) as error:
+    except (AttributeError, KeyError, ValueError, WorkloadLogError) as error:
         return jsonify({"message": str(error)}), 400
     if result.returncode != 0:
         return jsonify({"message": output or "Načtení logu selhalo"}), 500
@@ -2216,6 +2231,7 @@ def server_logs():
         "tail": tail,
         "output": output,
         "truncated": truncated,
+        "source": f"{server.get('backend', 'systemd')}-runtime",
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 

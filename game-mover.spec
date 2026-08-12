@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.11.0
+Version:        0.11.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -53,6 +53,7 @@ install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.
 install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_mover_connections.py
 install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_security.py
 install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
+install -Dpm0644 game_mover_logs.py %{buildroot}/opt/game_mover/game_mover_logs.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
@@ -129,6 +130,7 @@ fi
 /opt/game_mover/game_mover_connections.py
 /opt/game_mover/game_mover_security.py
 /opt/game_mover/game_mover_properties.py
+/opt/game_mover/game_mover_logs.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py
@@ -139,6 +141,9 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.11.1-1
+- Prefer each Minecraft server's persistent logs/latest.log over runtime stdout
+
 * Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.11.0-1
 - Add policy-protected, bounded systemd and Podman log viewing to server management
 - Add manual tail selection and optional five-second log refresh

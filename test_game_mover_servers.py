@@ -274,6 +274,40 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_minecraft_logs_prefer_persistent_latest_log_for_podman_and_systemd(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        data_directory = data_root / "forge" / "data"
+        logs_directory = data_directory / "logs"
+        logs_directory.mkdir(parents=True)
+        (logs_directory / "latest.log").write_text(
+            "old line\nvanilla or forge server line\nlatest line\n", encoding="utf-8",
+        )
+        self.servers[0].update({
+            "backend": "podman",
+            "runtime": {"container_name": "mc-test"},
+            "mods_dir": str(data_directory / "mods"),
+        })
+        (data_directory / "mods").mkdir()
+
+        fake_backend = Mock()
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+        ):
+            self.save_servers()
+            response = self.client.get(
+                "/servers/logs?server_id=forge&tail=10",
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["source"], "minecraft-file")
+        self.assertEqual(
+            response.json["output"],
+            "old line\nvanilla or forge server line\nlatest line",
+        )
+        fake_backend.logs.assert_not_called()
+
     def test_gate_config_requires_pam_and_status_is_read_only(self):
         config = backend.default_gate_config()
         self.assertEqual(self.client.get(
