@@ -1,6 +1,6 @@
 Name:           game-mover
-Version:        0.8.0
-Release:        2%{?dist}
+Version:        0.9.0
+Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -14,6 +14,7 @@ Requires:       python3-qt5
 Requires:       python3-requests
 Requires:       python3-psutil
 Requires:       python3-pam
+Requires:       openssh-clients
 Requires:       curl
 Requires:       jq
 Requires:       rsync
@@ -136,6 +137,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.9.0-1
+- Move SSH host administration from Connection into PAM-protected Security UI
+- Create and own a key-only loopback SSH tunnel without storing SSH passwords
+- Require separate local and host PAM sessions and close access with the tunnel
+
 * Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.8.0-2
 - Prevent Security policy tables from overlapping at constrained window heights
 - Scroll the complete Security page and size tables to their actual rows

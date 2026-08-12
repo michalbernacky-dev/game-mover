@@ -153,6 +153,15 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         fake_backend.start.assert_not_called()
 
+    def test_health_probe_is_fast_local_only(self):
+        response = self.client.get("/health", **self.local_options())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "ok", "version": __version__})
+        response = self.client.get(
+            "/health", environ_base={"REMOTE_ADDR": "100.64.0.20"},
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_global_silent_policy_uses_host_local_token(self):
         self.save_servers()
         response = self.client.get(

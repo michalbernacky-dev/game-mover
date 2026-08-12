@@ -1387,6 +1387,12 @@ def servers_status():
     })
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    """Fast loopback probe used while establishing a managed SSH tunnel."""
+    return jsonify({"status": "ok", "version": __version__})
+
+
 @app.route("/security/policies", methods=["GET", "PUT"])
 def security_policies():
     # The policy controlling security.manage is intentionally not configurable.

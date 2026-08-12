@@ -17,16 +17,21 @@ from PyQt5.QtWidgets import (
     QDialog, QDialogButtonBox
 )
 from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_connections import (
+    DEFAULT_SSH_PORT,
     DEFAULT_SSH_TUNNEL_PORT,
     LOCAL_API_URL,
+    connection_profile_host,
     is_host_management_mode,
+    managed_ssh_tunnel_arguments,
     management_api_url,
     normalize_app_mode,
+    normalize_ssh_port,
     normalize_ssh_tunnel_port,
+    ssh_tunnel_api_url,
 )
 from game_mover_security import (
     FIXED_OPERATION_DEFINITIONS,
@@ -436,11 +441,26 @@ class GameMover(QWidget):
         self.timekpra_add_flag = None
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
+        self.local_security_token = ""
         self.client_config = load_client_config()
         self.app_mode = normalize_app_mode(self.client_config.get("app_mode", "client"))
+        # An SSH management mode is valid only while this process owns a live
+        # tunnel. Never restore it from a previous GUI session.
+        if self.app_mode == "ssh_tunnel":
+            self.app_mode = "client"
+            self.client_config["app_mode"] = "client"
         self.ssh_tunnel_port = normalize_ssh_tunnel_port(
             self.client_config.get("ssh_tunnel_port", DEFAULT_SSH_TUNNEL_PORT),
         )
+        self.ssh_port = normalize_ssh_port(
+            self.client_config.get("ssh_port", DEFAULT_SSH_PORT),
+        )
+        self.ssh_user = str(self.client_config.get("ssh_user", self.user)).strip() or self.user
+        self.ssh_tunnel_process = None
+        self.ssh_tunnel_stopping = False
+        self.ssh_tunnel_error_reported = False
+        self.ssh_tunnel_ready_deadline = 0.0
+        self.application_closing = False
         self.server_profiles = server_profiles(self.client_config)
         self.active_server_profile_id = self.client_config.get(
             "active_server_profile", self.server_profiles[0]["id"]
@@ -458,6 +478,9 @@ class GameMover(QWidget):
         self.last_server_statuses = []
         self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
         self.security_payload = None
+        self.ssh_tunnel_probe_timer = QTimer(self)
+        self.ssh_tunnel_probe_timer.setInterval(250)
+        self.ssh_tunnel_probe_timer.timeout.connect(self.probe_managed_ssh_tunnel)
         self.initUI()
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
@@ -726,7 +749,8 @@ class GameMover(QWidget):
         layout.addWidget(title)
         connection_help = QLabel(
             "Profily lze vybírat a testovat bez ověření. Jejich úpravy chrání místní "
-            "pojistka níže. Port 5000 je výchozí pro Game Mover."
+            "pojistka níže. Port 5000 je výchozí pro Game Mover. Vzdálenou správu "
+            "a SSH tunel odemyká PAM v záložce Zabezpečení."
         )
         connection_help.setWordWrap(True)
         layout.addWidget(connection_help)
@@ -739,26 +763,11 @@ class GameMover(QWidget):
         self.app_mode_combo = QComboBox(self)
         self.app_mode_combo.addItem("Klient – vzdálený náhled", "client")
         self.app_mode_combo.addItem("Server – místní správa služeb", "server")
-        self.app_mode_combo.addItem("Hostitel – správa přes SSH tunel", "ssh_tunnel")
         selected_mode = self.app_mode_combo.findData(self.app_mode)
         self.app_mode_combo.setCurrentIndex(max(0, selected_mode))
         self.app_mode_combo.currentIndexChanged.connect(self.on_app_mode_changed)
         mode_row.addWidget(self.app_mode_combo)
         layout.addLayout(mode_row)
-
-        tunnel_row = QHBoxLayout()
-        self.ssh_tunnel_port_label = QLabel("Lokální port SSH tunelu:")
-        tunnel_row.addWidget(self.ssh_tunnel_port_label)
-        self.ssh_tunnel_port_spin = QSpinBox(self)
-        self.ssh_tunnel_port_spin.setRange(1, 65535)
-        self.ssh_tunnel_port_spin.setValue(int(self.ssh_tunnel_port))
-        self.ssh_tunnel_port_spin.valueChanged.connect(self.on_ssh_tunnel_port_changed)
-        tunnel_row.addWidget(self.ssh_tunnel_port_spin)
-        self.ssh_tunnel_help = QLabel(self)
-        self.ssh_tunnel_help.setWordWrap(True)
-        self.ssh_tunnel_help.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        tunnel_row.addWidget(self.ssh_tunnel_help, 1)
-        layout.addLayout(tunnel_row)
 
         profile_row = QHBoxLayout()
         self.server_profile_combo = QComboBox(self)
@@ -864,6 +873,61 @@ class GameMover(QWidget):
         self.security_status_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.security_status_label)
 
+        layout.addWidget(QLabel("Vzdálená správa hostitele:", content))
+        tunnel_unlock_row = QHBoxLayout()
+        self.security_tunnel_lock_status = QLabel(
+            "Nastavení spravovaného SSH tunelu je uzamčené.", content,
+        )
+        self.security_tunnel_lock_status.setStyleSheet("color: #aab7c0;")
+        tunnel_unlock_row.addWidget(self.security_tunnel_lock_status, 1)
+        self.security_tunnel_unlock_button = QPushButton("Odemknout místním PAM…", content)
+        self.security_tunnel_unlock_button.clicked.connect(self.unlock_tunnel_management)
+        tunnel_unlock_row.addWidget(self.security_tunnel_unlock_button)
+        layout.addLayout(tunnel_unlock_row)
+
+        self.security_tunnel_panel = QFrame(content)
+        self.security_tunnel_panel.setFrameShape(QFrame.StyledPanel)
+        tunnel_layout = QVBoxLayout(self.security_tunnel_panel)
+        self.security_tunnel_target_label = QLabel(self.security_tunnel_panel)
+        self.security_tunnel_target_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        tunnel_layout.addWidget(self.security_tunnel_target_label)
+        tunnel_help = QLabel(
+            "Tunel používá pouze SSH klíč nebo ssh-agent a známý host key. "
+            "SSH heslo Game Mover nepřijímá ani neukládá.",
+            self.security_tunnel_panel,
+        )
+        tunnel_help.setWordWrap(True)
+        tunnel_layout.addWidget(tunnel_help)
+        tunnel_form = QFormLayout()
+        self.security_ssh_user = QLineEdit(self.ssh_user, self.security_tunnel_panel)
+        tunnel_form.addRow("SSH uživatel:", self.security_ssh_user)
+        self.security_ssh_port = QSpinBox(self.security_tunnel_panel)
+        self.security_ssh_port.setRange(1, 65535)
+        self.security_ssh_port.setValue(self.ssh_port)
+        tunnel_form.addRow("SSH port:", self.security_ssh_port)
+        self.ssh_tunnel_port_spin = QSpinBox(self.security_tunnel_panel)
+        self.ssh_tunnel_port_spin.setRange(1024, 65535)
+        self.ssh_tunnel_port_spin.setValue(self.ssh_tunnel_port)
+        tunnel_form.addRow("Místní port tunelu:", self.ssh_tunnel_port_spin)
+        tunnel_layout.addLayout(tunnel_form)
+        self.security_tunnel_status = QLabel("Tunel není spuštěný.", self.security_tunnel_panel)
+        self.security_tunnel_status.setStyleSheet("color: #aab7c0;")
+        self.security_tunnel_status.setWordWrap(True)
+        tunnel_layout.addWidget(self.security_tunnel_status)
+        tunnel_actions = QHBoxLayout()
+        self.security_tunnel_start_button = QPushButton("Otevřít SSH tunel", self.security_tunnel_panel)
+        self.security_tunnel_start_button.clicked.connect(self.start_managed_ssh_tunnel)
+        tunnel_actions.addWidget(self.security_tunnel_start_button)
+        self.security_tunnel_stop_button = QPushButton("Zavřít SSH tunel", self.security_tunnel_panel)
+        self.security_tunnel_stop_button.clicked.connect(self.stop_managed_ssh_tunnel)
+        tunnel_actions.addWidget(self.security_tunnel_stop_button)
+        self.security_tunnel_lock_button = QPushButton("Zamknout", self.security_tunnel_panel)
+        self.security_tunnel_lock_button.clicked.connect(self.lock_tunnel_management)
+        tunnel_actions.addWidget(self.security_tunnel_lock_button)
+        tunnel_layout.addLayout(tunnel_actions)
+        self.security_tunnel_panel.setVisible(False)
+        layout.addWidget(self.security_tunnel_panel)
+
         layout.addWidget(QLabel("Globální operace:", content))
         self.security_global_table = QTableWidget(content)
         self.security_global_table.setColumnCount(3)
@@ -926,6 +990,318 @@ class GameMover(QWidget):
         self.tabs.addTab(tab, "Zabezpečení")
         self.update_security_mode_ui()
 
+    def local_security_headers(self):
+        return (
+            {"X-Timekpr-Token": self.local_security_token}
+            if self.local_security_token else {}
+        )
+
+    def unlock_tunnel_management(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Odemknout vzdálenou správu")
+        dialog.setMinimumWidth(420)
+        layout = QVBoxLayout(dialog)
+        explanation = QLabel(
+            "Toto místní PAM ověření pouze zpřístupní vytvoření SSH tunelu. "
+            "Po jeho otevření bude správa hostitele vyžadovat samostatné PAM ověření.",
+            dialog,
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
+        form = QFormLayout()
+        username = QComboBox(dialog)
+        username.setEditable(True)
+        wheel_users = list_wheel_users()
+        if self.user not in wheel_users:
+            wheel_users.insert(0, self.user)
+        username.addItems(wheel_users)
+        password = QLineEdit(dialog)
+        password.setEchoMode(QLineEdit.Password)
+        password.setPlaceholderText("heslo místního wheel uživatele")
+        form.addRow("Místní uživatel:", username)
+        form.addRow("Heslo:", password)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.button(QDialogButtonBox.Ok).setText("Odemknout")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        password.returnPressed.connect(dialog.accept)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        local_user = username.currentText().strip()
+        local_password = password.text()
+        password.clear()
+        if not local_user or not local_password:
+            QMessageBox.warning(self, "Zabezpečení", "Zadej místního wheel uživatele a heslo.")
+            return
+        try:
+            response = requests.post(
+                f"{LOCAL_API_URL}/timekpr/auth",
+                json={"username": local_user, "password": local_password},
+                timeout=8,
+            )
+            payload = response.json()
+            if response.status_code != 200 or not payload.get("token"):
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            self.local_security_token = payload["token"]
+            self.security_tunnel_lock_status.setText(
+                f"Správa tunelu je místním PAM odemčená pro {local_user}."
+            )
+            self.update_security_tunnel_ui()
+        except requests.ConnectionError:
+            QMessageBox.critical(
+                self, "Zabezpečení",
+                "Místní Game Mover backend není dostupný. Spusť službu příkazem "
+                "sudo systemctl enable --now game_mover.service.",
+            )
+        except Exception as error:
+            QMessageBox.critical(self, "Zabezpečení", f"Místní PAM ověření selhalo: {error}")
+
+    def lock_tunnel_management(self, _checked=False):
+        if self.managed_ssh_tunnel_running():
+            QMessageBox.warning(
+                self, "Zabezpečení", "Před zamknutím nejprve zavři spravovaný SSH tunel.",
+            )
+            return
+        self.local_security_token = ""
+        self.security_tunnel_lock_status.setText(
+            "Nastavení spravovaného SSH tunelu je uzamčené."
+        )
+        self.update_security_tunnel_ui()
+
+    def managed_ssh_tunnel_running(self):
+        return bool(
+            self.ssh_tunnel_process
+            and self.ssh_tunnel_process.state() != QProcess.NotRunning
+        )
+
+    def update_security_tunnel_ui(self):
+        unlocked = bool(self.local_security_token)
+        running = self.managed_ssh_tunnel_running()
+        active = running and self.app_mode == "ssh_tunnel"
+        self.security_tunnel_unlock_button.setVisible(not unlocked)
+        self.security_tunnel_panel.setVisible(unlocked)
+        try:
+            profile = self.active_server_profile()
+            host = connection_profile_host(profile.get("address", ""))
+            target = f"{profile.get('name', profile.get('id', 'Hostitel'))}: {host}"
+        except ValueError as error:
+            target = str(error)
+        self.security_tunnel_target_label.setText(f"Cíl z aktivního profilu: {target}")
+        settings_enabled = unlocked and not running and self.app_mode != "server"
+        for widget in (
+            self.security_ssh_user, self.security_ssh_port, self.ssh_tunnel_port_spin,
+        ):
+            widget.setEnabled(settings_enabled)
+        self.security_tunnel_start_button.setEnabled(settings_enabled)
+        self.security_tunnel_stop_button.setEnabled(running)
+        self.security_tunnel_lock_button.setEnabled(unlocked and not running)
+        if self.app_mode == "server" and not running:
+            self.security_tunnel_status.setText(
+                "Na tomto počítači je aktivní místní režim Server. Pro tunel zvol nejprve Klient."
+            )
+        elif active:
+            self.security_tunnel_status.setText(
+                f"SSH tunel běží na {ssh_tunnel_api_url(self.ssh_tunnel_port)}. "
+                "Pro správu hostitele se nyní ověř v Timekpr."
+            )
+            self.security_tunnel_status.setStyleSheet("color: #66cc66; font-weight: bold;")
+        elif running:
+            self.security_tunnel_status.setText("SSH proces běží; ověřuji dostupnost hostitelského API…")
+            self.security_tunnel_status.setStyleSheet("color: #ffcc66; font-weight: bold;")
+        else:
+            self.security_tunnel_status.setText("Tunel není spuštěný.")
+            self.security_tunnel_status.setStyleSheet("color: #aab7c0;")
+
+    def start_managed_ssh_tunnel(self):
+        if self.managed_ssh_tunnel_running() or not self.local_security_token:
+            return
+        try:
+            validation = requests.get(
+                f"{LOCAL_API_URL}/timekpr/status",
+                headers=self.local_security_headers(), timeout=5,
+            )
+            if validation.status_code != 200:
+                self.lock_tunnel_management()
+                raise RuntimeError("Místní PAM relace vypršela; odemkni správu znovu")
+            profile = self.active_server_profile()
+            host = connection_profile_host(profile.get("address", ""))
+            username = self.security_ssh_user.text().strip()
+            local_port = int(self.ssh_tunnel_port_spin.value())
+            ssh_port = int(self.security_ssh_port.value())
+            if local_port == 5000:
+                raise ValueError("Port 5000 používá místní Game Mover backend; zvol jiný port")
+            arguments = managed_ssh_tunnel_arguments(
+                host, username, local_port, ssh_port,
+            )
+            ssh_program = "/usr/bin/ssh"
+            if not os.path.isfile(ssh_program) or not os.access(ssh_program, os.X_OK):
+                raise RuntimeError("Chybí důvěryhodný systémový SSH klient /usr/bin/ssh")
+        except Exception as error:
+            QMessageBox.critical(self, "SSH tunel", str(error))
+            return
+
+        self.ssh_user = username
+        self.ssh_port = ssh_port
+        self.ssh_tunnel_port = local_port
+        self.client_config.update({
+            "ssh_user": username,
+            "ssh_port": ssh_port,
+            "ssh_tunnel_port": local_port,
+            "app_mode": "client",
+        })
+        save_client_config(self.client_config)
+        self.timekpr_token = ""
+        self.set_timekpr_controls_enabled(False)
+        self.ssh_tunnel_stopping = False
+        self.ssh_tunnel_error_reported = False
+        self.ssh_tunnel_ready_deadline = time.monotonic() + 15
+        process = QProcess(self)
+        process.setProgram(ssh_program)
+        process.setArguments(arguments)
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.started.connect(self.managed_ssh_tunnel_started)
+        process.finished.connect(self.managed_ssh_tunnel_finished)
+        process.errorOccurred.connect(self.managed_ssh_tunnel_process_error)
+        self.ssh_tunnel_process = process
+        self.security_tunnel_status.setText("Spouštím SSH proces…")
+        self.update_security_tunnel_ui()
+        process.start()
+
+    def managed_ssh_tunnel_started(self):
+        self.ssh_tunnel_probe_timer.start()
+        self.update_security_tunnel_ui()
+
+    def managed_ssh_process_owns_listener(self):
+        """Do not send host credentials through a listener not owned by our ssh PID."""
+        if not self.managed_ssh_tunnel_running():
+            return False
+        try:
+            process = psutil.Process(int(self.ssh_tunnel_process.processId()))
+            for connection in process.net_connections(kind="tcp"):
+                address = connection.laddr
+                address_ip = getattr(address, "ip", address[0] if address else None)
+                address_port = getattr(address, "port", address[1] if address else None)
+                if (
+                    connection.status == psutil.CONN_LISTEN
+                    and address_ip == "127.0.0.1"
+                    and address_port == self.ssh_tunnel_port
+                ):
+                    return True
+        except (psutil.Error, OSError, ValueError):
+            return False
+        return False
+
+    def probe_managed_ssh_tunnel(self):
+        if not self.managed_ssh_tunnel_running():
+            self.ssh_tunnel_probe_timer.stop()
+            return
+        try:
+            if not self.managed_ssh_process_owns_listener():
+                raise requests.ConnectionError("SSH ještě nevlastní místní listener")
+            response = requests.get(
+                f"{ssh_tunnel_api_url(self.ssh_tunnel_port)}/health",
+                timeout=0.5,
+            )
+            if response.status_code == 200 and response.json().get("status") == "ok":
+                self.ssh_tunnel_probe_timer.stop()
+                self.app_mode = "ssh_tunnel"
+                self.timekpr_token = ""
+                self.set_timekpr_controls_enabled(False)
+                self.update_server_mode_ui()
+                self.update_security_tunnel_ui()
+                self.refresh_server_statuses()
+                QMessageBox.information(
+                    self, "SSH tunel",
+                    "Tunel je připravený. Nyní se v záložce Timekpr ověř vůči hostiteli.",
+                )
+                return
+        except (requests.RequestException, ValueError):
+            pass
+        if time.monotonic() >= self.ssh_tunnel_ready_deadline:
+            self.ssh_tunnel_probe_timer.stop()
+            self.ssh_tunnel_error_reported = True
+            QMessageBox.critical(
+                self, "SSH tunel",
+                "SSH proces sice běží, ale hostitelské Game Mover API se přes tunel "
+                "do 15 sekund neozvalo.",
+            )
+            self.stop_managed_ssh_tunnel(silent=True)
+
+    def managed_ssh_tunnel_output(self):
+        if not self.ssh_tunnel_process:
+            return ""
+        raw = bytes(self.ssh_tunnel_process.readAll()).decode("utf-8", errors="replace").strip()
+        return raw[-1200:]
+
+    def managed_ssh_tunnel_process_error(self, _error):
+        if not self.ssh_tunnel_process or self.ssh_tunnel_error_reported:
+            return
+        if self.ssh_tunnel_process.state() != QProcess.NotRunning:
+            return
+        self.ssh_tunnel_error_reported = True
+        process = self.ssh_tunnel_process
+        detail = process.errorString()
+        self.ssh_tunnel_process = None
+        process.deleteLater()
+        self.deactivate_managed_ssh_tunnel()
+        QMessageBox.critical(self, "SSH tunel", f"SSH proces se nepodařilo spustit: {detail}")
+
+    def managed_ssh_tunnel_finished(self, exit_code, _exit_status):
+        expected = self.ssh_tunnel_stopping or self.application_closing
+        detail = self.managed_ssh_tunnel_output()
+        process = self.ssh_tunnel_process
+        self.ssh_tunnel_process = None
+        if process:
+            process.deleteLater()
+        self.ssh_tunnel_probe_timer.stop()
+        self.deactivate_managed_ssh_tunnel()
+        if not expected and not self.ssh_tunnel_error_reported:
+            self.ssh_tunnel_error_reported = True
+            message = (
+                "SSH tunel byl neočekávaně ukončen. Ověř SSH klíč/agent a známý host key."
+            )
+            if detail:
+                message += f"\n\n{detail}"
+            else:
+                message += f"\n\nSSH skončilo s kódem {exit_code}."
+            QMessageBox.critical(self, "SSH tunel", message)
+
+    def deactivate_managed_ssh_tunnel(self):
+        if self.app_mode == "ssh_tunnel":
+            self.app_mode = "client"
+        self.timekpr_token = ""
+        self.security_payload = None
+        self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
+        self.set_timekpr_controls_enabled(False)
+        self.ssh_tunnel_stopping = False
+        self.update_server_mode_ui()
+        self.update_security_tunnel_ui()
+        if not self.application_closing:
+            self.refresh_server_statuses()
+
+    def stop_managed_ssh_tunnel(self, _checked=False, silent=False):
+        if not self.managed_ssh_tunnel_running():
+            self.deactivate_managed_ssh_tunnel()
+            return
+        if not silent:
+            answer = QMessageBox.question(
+                self, "Zavřít SSH tunel",
+                "Opravdu ukončit vzdálenou správu hostitele?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        self.ssh_tunnel_stopping = True
+        self.ssh_tunnel_probe_timer.stop()
+        self.ssh_tunnel_process.terminate()
+        QTimer.singleShot(1500, self.force_stop_managed_ssh_tunnel)
+
+    def force_stop_managed_ssh_tunnel(self):
+        if self.managed_ssh_tunnel_running():
+            self.ssh_tunnel_process.kill()
+
     def create_policy_combo(self, parent, policy):
         combo = QComboBox(parent)
         combo.addItem("Tichá", "silent")
@@ -966,14 +1342,19 @@ class GameMover(QWidget):
         ):
             widget.setEnabled(enabled)
         if not is_host_management_mode(self.app_mode):
-            text = "Přepni na místní Server nebo správu hostitele přes SSH tunel."
+            text = (
+                "Zásady hostitele jsou dostupné v místním režimu Server nebo po otevření "
+                "spravovaného SSH tunelu níže."
+            )
         elif not self.timekpr_token:
-            text = "Pro správu bezpečnostních zásad se ověř jako wheel uživatel v Timekpr."
+            text = "Pro správu zásad se nyní ověř jako wheel uživatel hostitele v Timekpr."
         elif self.security_payload:
             text = "Bezpečnostní zásady jsou načtené z hostitele."
         else:
             text = "PAM je ověřený; načti bezpečnostní zásady hostitele."
         self.security_status_label.setText(text)
+        if hasattr(self, "security_tunnel_panel"):
+            self.update_security_tunnel_ui()
 
     def load_security_policies(self):
         if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
@@ -1193,17 +1574,6 @@ class GameMover(QWidget):
         self.update_server_mode_ui()
         self.refresh_server_statuses()
 
-    def on_ssh_tunnel_port_changed(self, port):
-        self.ssh_tunnel_port = int(port)
-        self.client_config["ssh_tunnel_port"] = self.ssh_tunnel_port
-        save_client_config(self.client_config)
-        if self.app_mode == "ssh_tunnel":
-            self.timekpr_token = ""
-            self.set_timekpr_controls_enabled(False)
-        self.update_server_mode_ui()
-        if self.app_mode == "ssh_tunnel":
-            self.refresh_server_statuses()
-
     def host_management_api_url(self):
         return management_api_url(self.app_mode, self.ssh_tunnel_port)
 
@@ -1212,21 +1582,21 @@ class GameMover(QWidget):
             return self.host_management_api_url()
         return FLASK_URL
 
-    def ssh_tunnel_command_hint(self):
-        profile_host, _api_port = self.split_server_address(
-            self.active_server_profile().get("address", "")
-        )
-        target = profile_host or "ADRESA_HOSTITELE"
-        return (
-            f"ssh -N -L 127.0.0.1:{self.ssh_tunnel_port}:127.0.0.1:5000 "
-            f"{self.user}@{target}"
-        )
-
     def update_server_mode_ui(self):
         server_mode = self.app_mode == "server"
         tunnel_mode = self.app_mode == "ssh_tunnel"
         management_mode = is_host_management_mode(self.app_mode)
         connection_editing = self.connection_edit_checkbox.isChecked()
+        self.app_mode_combo.blockSignals(True)
+        tunnel_index = self.app_mode_combo.findData("ssh_tunnel")
+        if tunnel_mode and tunnel_index < 0:
+            self.app_mode_combo.addItem("Hostitel – aktivní spravovaný SSH tunel", "ssh_tunnel")
+            tunnel_index = self.app_mode_combo.findData("ssh_tunnel")
+        elif not tunnel_mode and tunnel_index >= 0:
+            self.app_mode_combo.removeItem(tunnel_index)
+        selected_mode = self.app_mode_combo.findData(self.app_mode)
+        self.app_mode_combo.setCurrentIndex(max(0, selected_mode))
+        self.app_mode_combo.blockSignals(False)
         if server_mode:
             endpoint_text = "Zdroj: místní server"
         elif tunnel_mode:
@@ -1241,23 +1611,21 @@ class GameMover(QWidget):
                 else "Správa služeb je dostupná jen v režimu Server nebo přes SSH tunel."
             )
         )
-        self.ssh_tunnel_port_label.setVisible(tunnel_mode)
-        self.ssh_tunnel_port_spin.setVisible(tunnel_mode)
-        self.ssh_tunnel_help.setVisible(tunnel_mode)
-        self.ssh_tunnel_help.setText(self.ssh_tunnel_command_hint() if tunnel_mode else "")
-        self.ssh_tunnel_port_spin.setEnabled(tunnel_mode and connection_editing)
-        self.app_mode_combo.setEnabled(connection_editing)
-        self.server_profile_combo.setEnabled(not server_mode)
+        self.connection_edit_checkbox.setEnabled(not tunnel_mode)
+        self.app_mode_combo.setEnabled(connection_editing and not tunnel_mode)
+        self.server_profile_combo.setEnabled(not server_mode and not tunnel_mode)
         self.server_profile_test_button.setEnabled(True)
         for widget in self.server_profile_edit_widgets:
-            widget.setEnabled(not server_mode and connection_editing)
+            widget.setEnabled(not server_mode and not tunnel_mode and connection_editing)
         for field in (
             self.server_profile_name, self.server_profile_address, self.server_profile_token,
         ):
-            field.setReadOnly(server_mode or not connection_editing)
+            field.setReadOnly(server_mode or tunnel_mode or not connection_editing)
         self.update_management_action_availability()
         if hasattr(self, "security_status_label"):
             self.update_security_mode_ui()
+        if hasattr(self, "security_tunnel_panel"):
+            self.update_security_tunnel_ui()
         if management_mode and self.timekpr_token:
             self.load_local_services()
             if hasattr(self, "security_global_table"):
@@ -3061,6 +3429,18 @@ class GameMover(QWidget):
             self.refresh_game_lists()
         except Exception as e:
             QMessageBox.critical(self, "Chyba", str(e))
+
+    def closeEvent(self, event):
+        self.application_closing = True
+        self.ssh_tunnel_probe_timer.stop()
+        if self.managed_ssh_tunnel_running():
+            self.ssh_tunnel_stopping = True
+            process = self.ssh_tunnel_process
+            process.terminate()
+            if not process.waitForFinished(1200):
+                process.kill()
+                process.waitForFinished(500)
+        event.accept()
 
 # ------------------------------------------------------------
 # Spuštění aplikace

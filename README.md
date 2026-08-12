@@ -65,13 +65,15 @@ used only for the two remote read-only endpoints. Tokens entered in the registry
 are stored in `~/.config/game-mover/config.json` with file mode `0600`; do not
 enter the local `api.token` there.
 
-### Client, server, and SSH tunnel modes
+### Client, server, and managed SSH administration
 
 The **Connection** tab selects either Client mode for remote read-only monitoring
-or Server mode for local administration. A third SSH tunnel mode administers a
-host through a manually opened SSH local forward while keeping the administrative
-HTTP API on loopback at both ends. In Server or SSH tunnel mode, authenticate as
-a wheel user in the **Timekpr** tab, then edit the host service registry. Each row has an
+or Server mode for local administration. It no longer exposes an SSH management
+mode. Remote host administration is opened from the **Security** tab after local
+wheel/PAM authentication. Game Mover then owns a key-only SSH process and a local
+forward while keeping the administrative HTTP API on loopback at both ends. Once
+the tunnel is ready, authenticate separately as a wheel user of the host in the
+**Timekpr** tab, then edit the host service registry. Each row has an
 ID, display name, systemd unit, type (`generic` or `minecraft`), and absolute
 data and `mods` directories for Minecraft services. The
 game port is discovered from the workload at runtime. Multiple Minecraft
@@ -82,24 +84,18 @@ HTTP is always rejected.
 A successful stop also clears systemd's failed state caused by Minecraft exiting
 with status 130.
 
-Open the tunnel before selecting **Host – administration through SSH tunnel**.
-The local bind address is explicit so the forwarded administrative API is not
-available to other devices on the notebook network:
-
-```bash
-ssh -N \
-  -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 \
-  -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:5500:127.0.0.1:5000 \
-  alice@100.64.0.10
-```
-
-Use the host LAN address at home or its Tailscale address when away. Tailscale
-only transports SSH; Game Mover still connects to `http://127.0.0.1:5500` and
-the host backend still sees a loopback request. The selected connection profile stays
-selected so displayed game connection addresses continue to use the appropriate
-LAN or Tailscale host. Closing SSH immediately removes administrative reachability.
+The selected connection profile supplies the SSH destination: use the host LAN
+profile at home or its Tailscale profile when away. Tailscale only transports
+SSH; Game Mover still connects to `http://127.0.0.1:5500` and the host backend
+still sees a loopback request. The managed SSH client requires a key or
+`ssh-agent`, rejects password and keyboard-interactive authentication, verifies
+the existing `known_hosts` entry, disables agent/X11 forwarding, and binds the
+forward only to `127.0.0.1`. Enrol a new host key interactively in a terminal and
+verify its fingerprint before using the GUI. Game Mover verifies that its own SSH
+PID owns the listener before sending host PAM credentials through it. Closing the
+tunnel or GUI clears the host session and immediately returns to read-only Client
+mode. Only the SSH username and ports are stored in client config; SSH passwords,
+private keys, and the host `api.token` are never copied into it.
 
 ### Security policy registry
 
@@ -117,6 +113,10 @@ Policies are stored atomically in `/etc/game_mover/security.json`. On the first
 load, per-server values are migrated in memory from legacy `permissions` or
 `control_auth` fields in `/etc/game_mover/servers.json`; saving the Security tab
 creates the central file. The service registry no longer edits authorization.
+The same tab contains the otherwise hidden managed-tunnel controls. Revealing
+them requires PAM against the notebook's local Game Mover service; opening the
+tunnel does not reuse that token for the host. A second host PAM login is always
+required for administrative API operations.
 
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
@@ -378,13 +378,15 @@ vzdálené read-only operace. Tokeny zapsané v registru se ukládají do
 `~/.config/game-mover/config.json` s právy `0600`; nikdy sem nezadávej lokální
 `api.token`.
 
-### Režimy Klient, Server a SSH tunel
+### Režimy Klient, Server a spravovaná SSH administrace
 
-V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only dohled,
-režim Server pro místní správu nebo třetí režim SSH tunelu pro správu hostitele
-přes ručně otevřený místní SSH forward. Administrativní HTTP API tak na obou
-koncích zůstává pouze na loopbacku. V režimu Server nebo SSH tunelu se ověř jako
-wheel uživatel v záložce **Timekpr** a poté uprav registr služeb hostitele. Každý řádek obsahuje
+V záložce **Připojení** lze zvolit režim Klient pro vzdálený read-only dohled
+nebo režim Server pro místní správu. Volbu SSH správy už tato záložka
+nezpřístupňuje. Vzdálená správa hostitele se otevírá v záložce **Zabezpečení** až
+po místním wheel/PAM ověření. Game Mover následně vlastní SSH proces používající
+jen klíč a místní forward; administrativní HTTP API tak na obou koncích zůstává
+pouze na loopbacku. Po připravení tunelu se samostatně ověř jako wheel uživatel
+hostitele v záložce **Timekpr** a poté uprav registr služeb. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`) a u
 Minecraftu absolutní cestu k datovému adresáři a adresáři `mods`. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
@@ -393,23 +395,17 @@ Přímé ovládání přes LAN/Tailscale HTTP je vždy odmítnuto.
 Po úspěšném vypnutí se také vyčistí systemd stav
 `failed`, který Minecraft může zanechat návratovým kódem 130.
 
-Před přepnutím na **Hostitel – správa přes SSH tunel** otevři tunel. Explicitní
-lokální bind zabrání zpřístupnění přeposlaného API dalším zařízením v síti laptopu:
-
-```bash
-ssh -N \
-  -o ExitOnForwardFailure=yes \
-  -o ServerAliveInterval=30 \
-  -o ServerAliveCountMax=3 \
-  -L 127.0.0.1:5500:127.0.0.1:5000 \
-  alice@100.64.0.10
-```
-
-Doma použij LAN adresu hostitele, z práce jeho Tailscale adresu. Tailscale zde
-jen přenáší SSH; Game Mover se stále připojuje na `http://127.0.0.1:5500` a
-backend hostitele vidí loopback požadavek. Vybraný profil připojení zůstává zdrojem
-adres zobrazovaných hráčům, takže může být podle místa LAN nebo Tailscale. Zavřením
-SSH spojení administrační cesta okamžitě zanikne.
+SSH cíl se bere z vybraného profilu připojení: doma použij LAN profil hostitele,
+z práce jeho Tailscale profil. Tailscale zde jen přenáší SSH; Game Mover se stále
+připojuje na `http://127.0.0.1:5500` a backend hostitele vidí loopback požadavek.
+Spravovaný SSH klient vyžaduje klíč nebo `ssh-agent`, odmítá heslo i
+keyboard-interactive ověření, kontroluje existující záznam `known_hosts`, vypíná
+agent/X11 forwarding a poslouchá výhradně na `127.0.0.1`. Nový host key nejprve
+interaktivně zapiš v terminálu a ověř jeho fingerprint. Game Mover před odesláním
+hostitelských PAM údajů kontroluje, že listener skutečně vlastní jeho SSH proces.
+Zavřením tunelu nebo GUI se hostitelská relace zahodí a aplikace se okamžitě vrátí
+do read-only režimu Klient. Do klientské konfigurace se ukládá pouze SSH uživatel
+a porty; SSH heslo, privátní klíč ani hostitelský `api.token` se do ní nekopírují.
 
 ### Registr bezpečnostních zásad
 
@@ -426,6 +422,10 @@ Zásady se atomicky ukládají do `/etc/game_mover/security.json`. Při prvním
 načtení se serverové hodnoty v paměti převezmou ze starších polí `permissions`
 nebo `control_auth` v `/etc/game_mover/servers.json`; prvním uložením záložky
 Zabezpečení vznikne centrální soubor. Registr služeb už autorizaci neupravuje.
+Ve stejné záložce jsou jinak skryté ovládací prvky spravovaného tunelu. Jejich
+zobrazení vyžaduje PAM proti místní službě Game Mover na laptopu; otevření tunelu
+tuto relaci nepřenáší na hostitele. Pro administrativní operace je vždy nutné
+druhé PAM přihlášení vůči hostiteli.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se

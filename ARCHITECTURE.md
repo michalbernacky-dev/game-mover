@@ -84,7 +84,9 @@ The **Connections** tab is limited to host profiles and registered/adopted
 workloads. A separate **Security** tab contains the central policy registry for
 global platform operations and per-server lifecycle/backup actions. Fixed
 PAM-only rows keep security-policy changes and Timekpr administration visible in
-the same model without allowing those protections to be weakened.
+the same model without allowing those protections to be weakened. Remote SSH
+administration is absent from Connections and remains hidden in Security until
+local PAM authentication.
 
 ## Security model
 
@@ -101,10 +103,13 @@ Typical defaults:
 - security policy changes themselves: always PAM protected.
 
 Direct remote notebook/client access over LAN or Tailscale remains read-only.
-Administrative access from a notebook is permitted only through an explicitly
-opened SSH local-forwarding tunnel to the host loopback API. The GUI accepts
-only a loopback endpoint for this mode, PAM remains mandatory for the remote
-administrative session, and the host `api.token` is never copied to the client.
+Administrative access from a notebook is permitted only through an SSH
+local-forwarding tunnel owned by the GUI and bound explicitly to loopback. The
+tunnel controls require a local wheel/PAM session; the SSH process uses only a
+key or agent, strict host-key checking, no password input, and no agent
+forwarding. The GUI verifies that this SSH PID owns the listener before using
+it. A separate host wheel/PAM session remains mandatory for the remote
+administrative API, and the host `api.token` is never copied to the client.
 This is transport-level access through an existing SSH account, not a remotely
 exposed administrative HTTP API. The Podman socket, RCON passwords, and API
 tokens never leave the host API and must not appear in logs or responses.
