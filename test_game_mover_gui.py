@@ -91,6 +91,20 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(set(entry["lifecycle"]), {"start", "stop", "restart"})
         self.assertIn("properties_fields", entry)
 
+    def test_properties_unauthorized_response_expires_host_pam_session(self):
+        self.window.open_server_management("mc-test")
+        self.window.timekpr_token = "temporary-host-token"
+        with patch.object(self.window, "update_server_mode_ui") as update_ui:
+            self.window.on_server_properties_completed({
+                "server_id": "mc-test", "error": "Unauthorized",
+            })
+        self.assertEqual(self.window.timekpr_token, "")
+        self.assertIn(
+            "PAM relace už není platná",
+            self.window.server_management_pages["mc-test"]["properties_status"].text(),
+        )
+        update_ui.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

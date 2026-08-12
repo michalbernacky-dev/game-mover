@@ -135,6 +135,10 @@ button yet. Current verified restore creates a new isolated Minecraft workload
 through the installer. In-place restore will be added later as a separate
 destructive, policy-controlled operation.
 
+When a host PAM session expires, the first rejected protected request immediately
+locks the host-management controls and tells the user to authenticate again in
+the Timekpr tab; it is never silently retried with broader credentials.
+
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
 returned to its previous running state afterward. The manifest records the
@@ -460,6 +464,10 @@ Obnova do existujícího workloadu zatím záměrně není nabízena jako funkč
 tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft
 workload. In-place obnova přibude později jako samostatná destruktivní operace s
 vlastní bezpečnostní zásadou.
+
+Při vypršení PAM relace hostitele první odmítnutá chráněná operace okamžitě zamkne
+ovládací prvky správy a vyzve k novému ověření v záložce Timekpr. Aplikace ji
+nikdy nezkouší potichu opakovat s širšími oprávněními.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se

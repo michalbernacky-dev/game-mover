@@ -1686,6 +1686,15 @@ class GameMover(QWidget):
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
 
+    def host_pam_session_expired(self, detail=""):
+        """Fail closed immediately when the host rejects a cached PAM session."""
+        self.timekpr_token = ""
+        self.security_payload = None
+        self.set_timekpr_controls_enabled(False)
+        self.update_server_mode_ui()
+        message = "Hostitelská PAM relace už není platná. Znovu se ověř v Timekpr."
+        return f"{message} ({detail})" if detail else message
+
     def operation_policy(self, operation):
         return self.global_operation_policies.get(
             operation, GLOBAL_OPERATION_DEFAULTS.get(operation, "disabled"),
@@ -2579,7 +2588,12 @@ class GameMover(QWidget):
             self.update_server_management_page(server)
         error = result.get("error")
         if error:
-            entry["properties_status"].setText(f"Operace nad server.properties selhala: {error}")
+            if "Unauthorized" in error or "403" in error:
+                entry["properties_status"].setText(
+                    self.host_pam_session_expired("Pak nastavení načti znovu")
+                )
+            else:
+                entry["properties_status"].setText(f"Operace nad server.properties selhala: {error}")
             return
         payload = result.get("payload", {})
         if result.get("action") == "load":

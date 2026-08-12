@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.10.0
+Version:        0.10.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -139,6 +139,9 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.10.1-1
+- Clearly report host PAM-session expiry from Minecraft settings and lock management
+
 * Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.10.0-1
 - Add one closable in-application management tab per registered server
 - Keep only a quick start/stop action and server management on overview cards
