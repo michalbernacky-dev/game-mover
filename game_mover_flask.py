@@ -52,6 +52,11 @@ from game_mover_operators import (
     operator_command,
     read_operators,
 )
+from game_mover_whitelist import (
+    MinecraftWhitelistError,
+    read_whitelist,
+    whitelist_command,
+)
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_version import __version__
 from game_mover_gate import (
@@ -2198,15 +2203,39 @@ def minecraft_properties():
     })
 
 
+def execute_registered_minecraft_rcon(server, command, data_directory):
+    """Execute a prevalidated command without exposing credentials or a shell."""
+    if server.get("backend", "systemd") == "podman":
+        adapter = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        result = adapter.minecraft_rcon(server, command)
+        if result.returncode != 0:
+            raise ValueError(result.error or result.output or "RCON příkaz selhal")
+        return result.output
+    rcon = configured_rcon(data_directory)
+    if not rcon:
+        raise ValueError("RCON není na tomto serveru nakonfigurován")
+    return execute_rcon_command(
+        "127.0.0.1", rcon["port"], rcon["password"], command, timeout=5.0,
+    )
+
+
+def requested_minecraft_server(payload):
+    server = find_game_server(request.args.get("server_id") or payload.get("server_id", ""))
+    return server if server and server.get("kind") == "minecraft" else None
+
+
 @app.route("/servers/minecraft/operators", methods=["GET", "POST"])
 def minecraft_operators():
     if not require_local_operation(request, "minecraft.operators"):
         return jsonify({"message": "Unauthorized"}), 403
-    payload = request.get_json(silent=True) or {}
-    server = find_game_server(
-        request.args.get("server_id") or payload.get("server_id", "")
-    )
-    if not server or server.get("kind") != "minecraft":
+    raw_payload = request.get_json(silent=True)
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    server = requested_minecraft_server(payload)
+    if not server:
         return jsonify({"message": "Minecraft server not found"}), 404
     data = server.get("data") if isinstance(server.get("data"), dict) else {}
     data_directory = data.get("directory")
@@ -2219,34 +2248,61 @@ def minecraft_operators():
 
         command = operator_command(payload.get("action"), payload.get("player"))
         with workload_lock(server["id"]):
-            if server.get("backend", "systemd") == "podman":
-                adapter = backend_for(
-                    server,
-                    podman_user=PODMAN_USER,
-                    podman_socket_path=PODMAN_SOCKET_PATH,
-                )
-                result = adapter.minecraft_rcon(server, command)
-                if result.returncode != 0:
-                    raise MinecraftOperatorsError(
-                        result.error or result.output or "RCON příkaz selhal"
-                    )
-                response = result.output
-            else:
-                rcon = configured_rcon(data_directory)
-                if not rcon:
-                    raise MinecraftOperatorsError(
-                        "RCON není na tomto serveru nakonfigurován"
-                    )
-                response = execute_rcon_command(
-                    "127.0.0.1", rcon["port"], rcon["password"], command,
-                    timeout=5.0,
-                )
+            response = execute_registered_minecraft_rcon(
+                server, command, data_directory,
+            )
         return jsonify({
             "server_id": server["id"],
             "message": response or "RCON příkaz byl proveden",
             "operators": read_operators(data_directory),
         })
     except (MinecraftOperatorsError, OSError, PermissionError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+
+
+@app.route("/servers/minecraft/whitelist", methods=["GET", "POST"])
+def minecraft_whitelist():
+    if not require_local_operation(request, "minecraft.whitelist"):
+        return jsonify({"message": "Unauthorized"}), 403
+    raw_payload = request.get_json(silent=True)
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    server = requested_minecraft_server(payload)
+    if not server:
+        return jsonify({"message": "Minecraft server not found"}), 404
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    data_directory = data.get("directory")
+    try:
+        settings = read_minecraft_properties(data_directory)["settings"]
+        if request.method == "GET":
+            return jsonify({
+                "server_id": server["id"],
+                "enabled": settings.get("white-list", "false") == "true",
+                "players": read_whitelist(data_directory),
+            })
+        action = str(payload.get("action", "")).strip().lower()
+        command = whitelist_command(action, payload.get("player"))
+        with workload_lock(server["id"]):
+            response = execute_registered_minecraft_rcon(
+                server, command, data_directory,
+            )
+        if action == "on":
+            enabled = True
+        elif action == "off":
+            enabled = False
+        else:
+            enabled = read_minecraft_properties(data_directory)["settings"].get(
+                "white-list", "false"
+            ) == "true"
+        return jsonify({
+            "server_id": server["id"],
+            "message": response or "Whitelist příkaz byl proveden",
+            "enabled": enabled,
+            "players": read_whitelist(data_directory),
+        })
+    except (
+        MinecraftPropertiesError, MinecraftWhitelistError, OSError,
+        PermissionError, ValueError,
+    ) as error:
         return jsonify({"message": str(error)}), 400
 
 

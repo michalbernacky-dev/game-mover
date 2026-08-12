@@ -136,6 +136,11 @@ The Minecraft **Players** section lists operators from the registered
 commands over host-internal RCON. Podman uses the image-local `rcon-cli`, so no
 RCON port or password is exposed outside the container. The independent
 `minecraft.operators` policy defaults to PAM.
+The separate **Whitelist** section displays the effective state and safely reads
+the registered `whitelist.json`. Its form maps only to `whitelist on`, `off`,
+`add`, `remove`, and `reload`; the independent `minecraft.whitelist` policy
+defaults to PAM. Enabling the whitelist does not disconnect players who are
+already online.
 Remote Client mode may inspect safe read-only content but cannot run host
 operations.
 
@@ -478,6 +483,10 @@ Přidání a odebrání OP používá pouze validované příkazy `op`/`deop` p�
 RCON. Podman používá `rcon-cli` uvnitř image, takže se RCON port ani heslo
 nezveřejňují mimo container. Samostatná zásada `minecraft.operators` má výchozí
 režim PAM.
+Samostatná sekce **Whitelist** zobrazuje účinný stav a bezpečně čte registrovaný
+`whitelist.json`. Formulář se mapuje pouze na příkazy `whitelist on`, `off`,
+`add`, `remove` a `reload`; samostatná zásada `minecraft.whitelist` má výchozí
+režim PAM. Zapnutí whitelistu neodpojí hráče, kteří už jsou online.
 
 Obnova do existujícího workloadu zatím záměrně není nabízena jako funkční
 tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft

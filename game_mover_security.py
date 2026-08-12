@@ -42,6 +42,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "minecraft.whitelist",
+        "label": "Whitelist Minecraftu",
+        "description": "Zapnutí a správa povolených hráčů přes interní RCON.",
+        "default": "pam",
+    },
+    {
         "id": "server.logs",
         "label": "Logy serverů",
         "description": "Čtení omezeného výpisu systemd nebo Podman logu registrovaného serveru.",

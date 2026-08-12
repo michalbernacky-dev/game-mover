@@ -426,6 +426,47 @@ class ServerOperatorsThread(QThread):
             self.completed.emit({"server_id": self.server_id, "error": str(error)})
 
 
+class ServerWhitelistThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, headers, action=None, player=None):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.headers = headers
+        self.action = action
+        self.player = player
+
+    def run(self):
+        try:
+            if self.action is None:
+                response = requests.get(
+                    f"{self.base_url}/servers/minecraft/whitelist",
+                    params={"server_id": self.server_id},
+                    headers=self.headers, timeout=20,
+                )
+                operation = "load"
+            else:
+                response = requests.post(
+                    f"{self.base_url}/servers/minecraft/whitelist",
+                    json={
+                        "server_id": self.server_id,
+                        "action": self.action,
+                        "player": self.player,
+                    },
+                    headers=self.headers, timeout=20,
+                )
+                operation = self.action
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({
+                "server_id": self.server_id, "action": operation, "payload": data,
+            })
+        except Exception as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+
+
 class ServerLogsThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -604,6 +645,7 @@ class GameMover(QWidget):
         self.server_backups_threads = {}
         self.server_properties_threads = {}
         self.server_operator_threads = {}
+        self.server_whitelist_threads = {}
         self.server_log_threads = {}
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
@@ -2475,6 +2517,87 @@ class GameMover(QWidget):
                 "operators_reload": operators_reload,
             })
 
+            whitelist_page = QWidget(sections)
+            whitelist_layout = QVBoxLayout(whitelist_page)
+            whitelist_title = QLabel("Povolení hráči (whitelist)", whitelist_page)
+            whitelist_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+            whitelist_layout.addWidget(whitelist_title)
+            whitelist_help = QLabel(
+                "Zapnutí whitelistu dovolí nové připojení pouze hráčům v tomto seznamu. "
+                "Již připojené nepovolené hráče příkaz automaticky neodpojí.", whitelist_page,
+            )
+            whitelist_help.setWordWrap(True)
+            whitelist_layout.addWidget(whitelist_help)
+            whitelist_status = QLabel("Whitelist zatím nebyl načten.", whitelist_page)
+            whitelist_status.setStyleSheet("color: #aab7c0;")
+            whitelist_status.setWordWrap(True)
+            whitelist_layout.addWidget(whitelist_status)
+            whitelist_state = QLabel("Stav: —", whitelist_page)
+            whitelist_state.setStyleSheet("font-weight: bold;")
+            whitelist_layout.addWidget(whitelist_state)
+            whitelist_table = QTableWidget(whitelist_page)
+            whitelist_table.setColumnCount(2)
+            whitelist_table.setHorizontalHeaderLabels(["Minecraft jméno", "UUID"])
+            whitelist_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            whitelist_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            whitelist_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            whitelist_table.setAlternatingRowColors(True)
+            whitelist_table.verticalHeader().setVisible(False)
+            whitelist_header = whitelist_table.horizontalHeader()
+            whitelist_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            whitelist_header.setSectionResizeMode(1, QHeaderView.Stretch)
+            whitelist_layout.addWidget(whitelist_table)
+            whitelist_actions = QHBoxLayout()
+            whitelist_name = QLineEdit(whitelist_page)
+            whitelist_name.setMaxLength(16)
+            whitelist_name.setPlaceholderText("Minecraft jméno hráče")
+            whitelist_actions.addWidget(whitelist_name)
+            whitelist_add = QPushButton("Přidat hráče", whitelist_page)
+            whitelist_add.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.change_server_whitelist(selected_id, "add")
+            )
+            whitelist_actions.addWidget(whitelist_add)
+            whitelist_remove = QPushButton("Odebrat vybraného", whitelist_page)
+            whitelist_remove.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.remove_selected_whitelist_player(selected_id)
+            )
+            whitelist_actions.addWidget(whitelist_remove)
+            whitelist_toggle = QPushButton("Zapnout whitelist", whitelist_page)
+            whitelist_toggle.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.toggle_server_whitelist(selected_id)
+            )
+            whitelist_actions.addWidget(whitelist_toggle)
+            whitelist_apply = QPushButton("Reload serveru", whitelist_page)
+            whitelist_apply.setToolTip("Načte whitelist.json znovu do běžícího Minecraft serveru")
+            whitelist_apply.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.change_server_whitelist(selected_id, "reload")
+            )
+            whitelist_actions.addWidget(whitelist_apply)
+            whitelist_reload = QPushButton("Obnovit zobrazení", whitelist_page)
+            whitelist_reload.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.load_server_whitelist(selected_id)
+            )
+            whitelist_actions.addWidget(whitelist_reload)
+            whitelist_layout.addLayout(whitelist_actions)
+            sections.addTab(whitelist_page, "Whitelist")
+            entry.update({
+                "whitelist_status": whitelist_status,
+                "whitelist_state": whitelist_state,
+                "whitelist_table": whitelist_table,
+                "whitelist_name": whitelist_name,
+                "whitelist_add": whitelist_add,
+                "whitelist_remove": whitelist_remove,
+                "whitelist_toggle": whitelist_toggle,
+                "whitelist_apply": whitelist_apply,
+                "whitelist_reload": whitelist_reload,
+                "whitelist_enabled": False,
+            })
+
         if server.get("backup_supported"):
             backups_page = QWidget(sections)
             backups_layout = QVBoxLayout(backups_page)
@@ -2584,6 +2707,8 @@ class GameMover(QWidget):
             self.load_server_properties(server_id)
         if "operators_table" in entry:
             self.load_server_operators(server_id)
+        if "whitelist_table" in entry:
+            self.load_server_whitelist(server_id)
         if "mods_table" in entry:
             self.load_server_mods(server_id)
         if "backups_table" in entry and self.local_operation_headers("backup.catalog"):
@@ -2689,6 +2814,24 @@ class GameMover(QWidget):
                 entry["operators_status"].setText(
                     "Seznam lze načíst, ale změny přes RCON vyžadují běžící server."
                 )
+        if "whitelist_table" in entry:
+            whitelist_allowed = management and bool(
+                self.local_operation_headers("minecraft.whitelist")
+            )
+            entry["whitelist_reload"].setEnabled(whitelist_allowed)
+            for key in (
+                "whitelist_name", "whitelist_add", "whitelist_remove",
+                "whitelist_toggle", "whitelist_apply",
+            ):
+                entry[key].setEnabled(whitelist_allowed and status == "active")
+            if not whitelist_allowed:
+                entry["whitelist_status"].setText(
+                    "Whitelist vyžaduje správu hostitele a oprávnění podle zásady „Whitelist Minecraftu“."
+                )
+            elif status != "active":
+                entry["whitelist_status"].setText(
+                    "Seznam lze načíst, ale změny přes RCON vyžadují běžící server."
+                )
 
     def update_open_server_management_pages(self):
         current = {server.get("id"): server for server in self.last_server_statuses}
@@ -2704,6 +2847,8 @@ class GameMover(QWidget):
                     "create_backup", "reload_backups", "reload_mods", "compare_mods",
                     "logs_tail", "logs_reload", "logs_auto", "operator_name",
                     "operator_add", "operator_remove", "operators_reload",
+                    "whitelist_name", "whitelist_add", "whitelist_remove",
+                    "whitelist_toggle", "whitelist_apply", "whitelist_reload",
                 ):
                     if key in entry:
                         entry[key].setEnabled(False)
@@ -3031,6 +3176,160 @@ class GameMover(QWidget):
             entry["operator_name"].clear()
             entry["operators_status"].setText(
                 payload.get("message", "RCON změna byla provedena.")
+            )
+
+    def set_server_whitelist(self, server_id, payload):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "whitelist_table" not in entry:
+            return
+        enabled = bool(payload.get("enabled"))
+        entry["whitelist_enabled"] = enabled
+        entry["whitelist_state"].setText(
+            "Stav: zapnutý" if enabled else "Stav: vypnutý"
+        )
+        entry["whitelist_state"].setStyleSheet(
+            "font-weight: bold; color: #55d66b;" if enabled
+            else "font-weight: bold; color: #e4b95f;"
+        )
+        entry["whitelist_toggle"].setText(
+            "Vypnout whitelist" if enabled else "Zapnout whitelist"
+        )
+        table = entry["whitelist_table"]
+        table.setRowCount(0)
+        players = payload.get("players", [])
+        for player in players if isinstance(players, list) else []:
+            row = table.rowCount()
+            table.insertRow(row)
+            for column, value in enumerate((player.get("name", "—"), player.get("uuid", "—"))):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                table.setItem(row, column, item)
+
+    def load_server_whitelist(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "whitelist_table" not in entry:
+            return
+        if not is_host_management_mode(self.app_mode):
+            entry["whitelist_status"].setText(
+                "Whitelist je dostupný pouze ve správě hostitele."
+            )
+            return
+        headers = self.local_operation_headers("minecraft.whitelist")
+        if not headers:
+            entry["whitelist_status"].setText(
+                "Pro načtení whitelistu chybí oprávnění podle zásady."
+            )
+            return
+        running = self.server_whitelist_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["whitelist_status"].setText("Načítám whitelist…")
+        entry["whitelist_reload"].setEnabled(False)
+        thread = ServerWhitelistThread(
+            self.host_management_api_url(), server_id, headers,
+        )
+        self.server_whitelist_threads[server_id] = thread
+        thread.completed.connect(self.on_server_whitelist_completed)
+        thread.start()
+
+    def change_server_whitelist(self, server_id, action, player=None):
+        entry = self.server_management_pages.get(server_id)
+        server = self.server_status_by_id(server_id)
+        if not entry or not server or server.get("status") != "active":
+            return
+        if action in ("add", "remove"):
+            player = str(player or entry["whitelist_name"].text()).strip()
+            if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", player):
+                QMessageBox.warning(
+                    self, "Whitelist Minecraftu",
+                    "Minecraft jméno musí mít 3–16 znaků: písmena, číslice nebo podtržítko.",
+                )
+                return
+        headers = self.local_operation_headers("minecraft.whitelist")
+        if not headers:
+            QMessageBox.warning(
+                self, "Whitelist Minecraftu",
+                "Pro změnu whitelistu chybí oprávnění podle zásady.",
+            )
+            return
+        running = self.server_whitelist_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        descriptions = {
+            "on": "Zapínám whitelist…",
+            "off": "Vypínám whitelist…",
+            "add": f"Přidávám hráče {player}…",
+            "remove": f"Odebírám hráče {player}…",
+            "reload": "Načítám whitelist.json do serveru…",
+        }
+        entry["whitelist_status"].setText(descriptions[action])
+        for key in (
+            "whitelist_add", "whitelist_remove", "whitelist_toggle",
+            "whitelist_apply", "whitelist_reload",
+        ):
+            entry[key].setEnabled(False)
+        thread = ServerWhitelistThread(
+            self.host_management_api_url(), server_id, headers,
+            action=action, player=player,
+        )
+        self.server_whitelist_threads[server_id] = thread
+        thread.completed.connect(self.on_server_whitelist_completed)
+        thread.start()
+
+    def toggle_server_whitelist(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if entry:
+            self.change_server_whitelist(
+                server_id, "off" if entry.get("whitelist_enabled") else "on"
+            )
+
+    def remove_selected_whitelist_player(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry:
+            return
+        row = entry["whitelist_table"].currentRow()
+        item = entry["whitelist_table"].item(row, 0) if row >= 0 else None
+        if item is None:
+            QMessageBox.information(
+                self, "Whitelist Minecraftu", "Nejdřív vyber hráče v tabulce."
+            )
+            return
+        player = item.text()
+        answer = QMessageBox.question(
+            self, "Odebrat hráče z whitelistu",
+            f"Odebrat hráče {player} z whitelistu?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.change_server_whitelist(server_id, "remove", player)
+
+    def on_server_whitelist_completed(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "whitelist_table" not in entry:
+            return
+        server = self.server_status_by_id(server_id)
+        if server:
+            self.update_server_management_page(server)
+        error = result.get("error")
+        if error:
+            if "Unauthorized" in error or "403" in error:
+                entry["whitelist_status"].setText(
+                    self.host_pam_session_expired("Pak whitelist načti znovu")
+                )
+            else:
+                entry["whitelist_status"].setText(f"Operace s whitelistem selhala: {error}")
+            return
+        payload = result.get("payload", {})
+        self.set_server_whitelist(server_id, payload)
+        if result.get("action") == "load":
+            entry["whitelist_status"].setText(
+                f"Načteno povolených hráčů: {len(payload.get('players', []))}."
+            )
+        else:
+            entry["whitelist_name"].clear()
+            entry["whitelist_status"].setText(
+                payload.get("message", "Whitelist změna byla provedena.")
             )
 
     def load_server_backups(self, server_id):

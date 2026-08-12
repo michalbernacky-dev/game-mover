@@ -75,6 +75,10 @@ The first player-management slice reads `ops.json` as a bounded, symlink-safe
 catalog and maps form actions only to validated `op`/`deop` commands. Podman
 executes its image-local `rcon-cli`; systemd uses host-local configured RCON.
 RCON credentials are never returned to the GUI or published for this feature.
+Whitelist management follows the same boundary: a symlink-safe catalog plus a
+fixed command map for `on`, `off`, `add`, `remove`, and `reload`, protected by
+its own policy. Enabling it affects subsequent joins and does not imply kicking
+already connected players.
 Minecraft tabs also contain the existing mod inventory and client comparison. The
 Servers card keeps only the status, a context-sensitive quick start/stop action
 and **Management**.

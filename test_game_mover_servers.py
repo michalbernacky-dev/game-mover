@@ -316,6 +316,47 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 400)
 
+    def test_minecraft_whitelist_requires_policy_and_uses_validated_rcon(self):
+        (self.forge_data / "whitelist.json").write_text(
+            '[{"uuid":"one","name":"Alex"}]', encoding="utf-8",
+        )
+        (self.forge_data / "server.properties").write_text(
+            "white-list=false\nenable-rcon=true\nrcon.port=25575\nrcon.password=secret\n",
+            encoding="utf-8",
+        )
+        self.save_servers()
+
+        denied = self.client.get(
+            "/servers/minecraft/whitelist?server_id=forge", **self.local_options(),
+        )
+        self.assertEqual(denied.status_code, 403)
+        catalog = self.client.get(
+            "/servers/minecraft/whitelist?server_id=forge",
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(catalog.status_code, 200)
+        self.assertFalse(catalog.json["enabled"])
+        self.assertEqual(catalog.json["players"][0]["name"], "Alex")
+
+        with patch.object(
+            backend, "execute_rcon_command", return_value="Added Bernye to the whitelist",
+        ) as execute:
+            response = self.client.post(
+                "/servers/minecraft/whitelist",
+                json={"server_id": "forge", "action": "add", "player": "Bernye"},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        execute.assert_called_once_with(
+            "127.0.0.1", 25575, "secret", "whitelist add Bernye", timeout=5.0,
+        )
+        invalid = self.client.post(
+            "/servers/minecraft/whitelist",
+            json={"server_id": "forge", "action": "add", "player": "Alex; stop"},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(invalid.status_code, 400)
+
     def test_minecraft_logs_prefer_persistent_latest_log_for_podman_and_systemd(self):
         data_root = Path(self.temp_dir.name) / "managed-servers"
         data_directory = data_root / "forge" / "data"
