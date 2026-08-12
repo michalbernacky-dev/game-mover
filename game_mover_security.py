@@ -30,6 +30,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "minecraft.properties",
+        "label": "Nastavení Minecraft serveru",
+        "description": "Čtení a validovaný zápis server.properties registrovaného Minecraft serveru.",
+        "default": "pam",
+    },
+    {
         "id": "gate.config",
         "label": "Konfigurace Gate Lite",
         "description": "Změny základní konfigurace sdíleného ingressu.",

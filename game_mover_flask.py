@@ -41,6 +41,11 @@ from game_mover_minecraft import (
     query_server_rcon,
     query_server_status,
 )
+from game_mover_properties import (
+    MinecraftPropertiesError,
+    read_minecraft_properties,
+    write_minecraft_properties,
+)
 from game_mover_version import __version__
 from game_mover_gate import (
     GateConfigError,
@@ -2150,6 +2155,37 @@ def minecraft_mods():
         return jsonify({"message": f"Inventář modů selhal: {e}"}), 500
     inventory["updated_at"] = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
     return jsonify(inventory)
+
+
+@app.route("/servers/minecraft/properties", methods=["GET", "PUT"])
+def minecraft_properties():
+    if not require_local_operation(request, "minecraft.properties"):
+        return jsonify({"message": "Unauthorized"}), 403
+    server = find_game_server(request.args.get("server_id") or (request.json or {}).get("server_id", ""))
+    if not server or server.get("kind") != "minecraft":
+        return jsonify({"message": "Minecraft server not found"}), 404
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    data_directory = data.get("directory")
+    try:
+        if request.method == "GET":
+            result = read_minecraft_properties(data_directory)
+            return jsonify({
+                "server_id": server["id"],
+                "settings": result["settings"],
+                "effective": {
+                    "server-port": result["effective"].get("server-port", "25565"),
+                    "enable-rcon": result["effective"].get("enable-rcon", "false"),
+                },
+            })
+        result = write_minecraft_properties(data_directory, (request.json or {}).get("settings"))
+    except MinecraftPropertiesError as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": "Nastavení Minecraft serveru bylo bezpečně uloženo",
+        "server_id": server["id"],
+        "settings": result["settings"],
+        "changed": result["changed"],
+    })
 
 
 @app.route("/dnsmasq/status", methods=["GET"])

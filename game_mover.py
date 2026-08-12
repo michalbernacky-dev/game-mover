@@ -352,6 +352,39 @@ class ServerBackupsThread(QThread):
             self.loaded.emit({"error": str(error), "server_id": self.server_id})
 
 
+class ServerPropertiesThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, headers, settings=None):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.headers = headers
+        self.settings = settings
+
+    def run(self):
+        try:
+            if self.settings is None:
+                response = requests.get(
+                    f"{self.base_url}/servers/minecraft/properties",
+                    params={"server_id": self.server_id}, headers=self.headers, timeout=20,
+                )
+                action = "load"
+            else:
+                response = requests.put(
+                    f"{self.base_url}/servers/minecraft/properties",
+                    json={"server_id": self.server_id, "settings": self.settings},
+                    headers=self.headers, timeout=20,
+                )
+                action = "save"
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({"server_id": self.server_id, "action": action, "payload": data})
+        except Exception as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+
+
 class GateDeployThread(QThread):
     completed = pyqtSignal(dict)
 
@@ -503,6 +536,7 @@ class GameMover(QWidget):
         self.server_mod_threads = {}
         self.compare_mod_threads = {}
         self.server_backups_threads = {}
+        self.server_properties_threads = {}
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
@@ -2157,6 +2191,95 @@ class GameMover(QWidget):
             "lifecycle": lifecycle_buttons,
         }
 
+        if server.get("kind") == "minecraft":
+            properties_page = QWidget(sections)
+            properties_layout = QVBoxLayout(properties_page)
+            properties_help = QLabel(
+                "Formulář upravuje jen běžné validované položky server.properties. "
+                "Neznámé položky, komentáře i RCON heslo zůstávají beze změny. "
+                "Změny se projeví po restartu serveru.",
+                properties_page,
+            )
+            properties_help.setWordWrap(True)
+            properties_layout.addWidget(properties_help)
+            properties_status = QLabel(
+                "Nastavení zatím nebylo načteno.", properties_page,
+            )
+            properties_status.setStyleSheet("color: #aab7c0;")
+            properties_status.setWordWrap(True)
+            properties_layout.addWidget(properties_status)
+            properties_form = QFormLayout()
+            properties_fields = {}
+            motd = QLineEdit(properties_page)
+            motd.setMaxLength(120)
+            properties_form.addRow("MOTD:", motd)
+            properties_fields["motd"] = motd
+            world = QLineEdit(properties_page)
+            world.setMaxLength(64)
+            properties_form.addRow("Název světa:", world)
+            properties_fields["level-name"] = world
+            for key, label, values in (
+                ("gamemode", "Herní režim:", ("survival", "creative", "adventure", "spectator")),
+                ("difficulty", "Obtížnost:", ("peaceful", "easy", "normal", "hard")),
+            ):
+                combo = QComboBox(properties_page)
+                for value in values:
+                    combo.addItem(value, value)
+                properties_form.addRow(label, combo)
+                properties_fields[key] = combo
+            max_players = QSpinBox(properties_page)
+            max_players.setRange(1, 1000)
+            properties_form.addRow("Max. hráčů:", max_players)
+            properties_fields["max-players"] = max_players
+            for key, label in (
+                ("white-list", "Použít whitelist"),
+                ("online-mode", "Ověřovat Minecraft účty (online-mode)"),
+                ("pvp", "Povolit PvP"),
+                ("allow-flight", "Povolit létání"),
+                ("enable-command-block", "Povolit command blocky"),
+            ):
+                checkbox = QCheckBox(label, properties_page)
+                properties_form.addRow(checkbox)
+                properties_fields[key] = checkbox
+            for key, label in (
+                ("view-distance", "View distance:"),
+                ("simulation-distance", "Simulation distance:"),
+            ):
+                spin = QSpinBox(properties_page)
+                spin.setRange(3, 32)
+                properties_form.addRow(label, spin)
+                properties_fields[key] = spin
+            port_label = QLabel("—", properties_page)
+            rcon_label = QLabel("—", properties_page)
+            properties_form.addRow("Interní server port (jen informace):", port_label)
+            properties_form.addRow("RCON (jen informace):", rcon_label)
+            properties_layout.addLayout(properties_form)
+            properties_actions = QHBoxLayout()
+            properties_reload = QPushButton("Načíst znovu", properties_page)
+            properties_reload.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.load_server_properties(selected_id)
+            )
+            properties_actions.addWidget(properties_reload)
+            properties_save = QPushButton("Uložit nastavení", properties_page)
+            properties_save.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.save_server_properties(selected_id)
+            )
+            properties_actions.addWidget(properties_save)
+            properties_actions.addStretch()
+            properties_layout.addLayout(properties_actions)
+            properties_layout.addStretch()
+            sections.addTab(properties_page, "Nastavení")
+            entry.update({
+                "properties_status": properties_status,
+                "properties_fields": properties_fields,
+                "properties_port": port_label,
+                "properties_rcon": rcon_label,
+                "properties_reload": properties_reload,
+                "properties_save": properties_save,
+            })
+
         if server.get("backup_supported"):
             backups_page = QWidget(sections)
             backups_layout = QVBoxLayout(backups_page)
@@ -2260,6 +2383,8 @@ class GameMover(QWidget):
         index = self.tabs.addTab(page, f"Správa: {server.get('name', server_id)}")
         self.tabs.setCurrentIndex(index)
         self.update_server_management_page(server)
+        if "properties_fields" in entry:
+            self.load_server_properties(server_id)
         if "mods_table" in entry:
             self.load_server_mods(server_id)
         if "backups_table" in entry and self.local_operation_headers("backup.catalog"):
@@ -2327,6 +2452,18 @@ class GameMover(QWidget):
             entry["reload_backups"].setEnabled(
                 management and bool(self.local_operation_headers("backup.catalog"))
             )
+        if "properties_fields" in entry:
+            properties_allowed = management and bool(
+                self.local_operation_headers("minecraft.properties")
+            )
+            for field in entry["properties_fields"].values():
+                field.setEnabled(properties_allowed)
+            entry["properties_reload"].setEnabled(properties_allowed)
+            entry["properties_save"].setEnabled(properties_allowed)
+            if not properties_allowed:
+                entry["properties_status"].setText(
+                    "Nastavení vyžaduje správu hostitele a oprávnění podle zásady „Nastavení Minecraft serveru“."
+                )
 
     def update_open_server_management_pages(self):
         current = {server.get("id"): server for server in self.last_server_statuses}
@@ -2341,6 +2478,127 @@ class GameMover(QWidget):
                 for key in ("create_backup", "reload_backups", "reload_mods", "compare_mods"):
                     if key in entry:
                         entry[key].setEnabled(False)
+
+    def load_server_properties(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "properties_fields" not in entry:
+            return
+        if not is_host_management_mode(self.app_mode):
+            entry["properties_status"].setText("Nastavení je dostupné pouze ve správě hostitele.")
+            return
+        headers = self.local_operation_headers("minecraft.properties")
+        if not headers:
+            entry["properties_status"].setText("Pro načtení nastavení chybí oprávnění podle zásady.")
+            return
+        running = self.server_properties_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["properties_status"].setText("Načítám server.properties…")
+        entry["properties_reload"].setEnabled(False)
+        entry["properties_save"].setEnabled(False)
+        thread = ServerPropertiesThread(
+            self.host_management_api_url(), server_id, headers,
+        )
+        self.server_properties_threads[server_id] = thread
+        thread.completed.connect(self.on_server_properties_completed)
+        thread.start()
+
+    def current_server_properties(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry:
+            return {}
+        values = {}
+        for key, field in entry["properties_fields"].items():
+            if isinstance(field, QLineEdit):
+                values[key] = field.text().strip()
+            elif isinstance(field, QComboBox):
+                values[key] = field.currentData()
+            elif isinstance(field, QSpinBox):
+                values[key] = field.value()
+            elif isinstance(field, QCheckBox):
+                values[key] = field.isChecked()
+        return values
+
+    def set_server_properties(self, server_id, settings):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or not isinstance(settings, dict):
+            return
+        for key, field in entry["properties_fields"].items():
+            value = settings.get(key)
+            if value is None:
+                continue
+            if isinstance(field, QLineEdit):
+                field.setText(str(value))
+            elif isinstance(field, QComboBox):
+                field.setCurrentIndex(max(0, field.findData(str(value))))
+            elif isinstance(field, QSpinBox):
+                field.setValue(int(value))
+            elif isinstance(field, QCheckBox):
+                field.setChecked(str(value).lower() == "true")
+
+    def save_server_properties(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        server = self.server_status_by_id(server_id)
+        if not entry or not server:
+            return
+        headers = self.local_operation_headers("minecraft.properties")
+        if not headers:
+            QMessageBox.warning(
+                self, "Nastavení Minecraftu",
+                "Pro uložení nastavení chybí oprávnění podle zásady.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Uložit Minecraft nastavení",
+            f"Uložit validované změny server.properties pro {server.get('name', server_id)}?\n\n"
+            "Nastavení se uloží bezpečně a projeví se po příštím restartu serveru.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        entry["properties_status"].setText("Ukládám server.properties…")
+        entry["properties_reload"].setEnabled(False)
+        entry["properties_save"].setEnabled(False)
+        thread = ServerPropertiesThread(
+            self.host_management_api_url(), server_id, headers,
+            settings=self.current_server_properties(server_id),
+        )
+        self.server_properties_threads[server_id] = thread
+        thread.completed.connect(self.on_server_properties_completed)
+        thread.start()
+
+    def on_server_properties_completed(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "properties_fields" not in entry:
+            return
+        server = self.server_status_by_id(server_id)
+        if server:
+            self.update_server_management_page(server)
+        error = result.get("error")
+        if error:
+            entry["properties_status"].setText(f"Operace nad server.properties selhala: {error}")
+            return
+        payload = result.get("payload", {})
+        if result.get("action") == "load":
+            self.set_server_properties(server_id, payload.get("settings", {}))
+            effective = payload.get("effective") if isinstance(payload.get("effective"), dict) else {}
+            entry["properties_port"].setText(str(effective.get("server-port", "25565")))
+            enabled_rcon = str(effective.get("enable-rcon", "false")).lower() == "true"
+            entry["properties_rcon"].setText("zapnuté" if enabled_rcon else "vypnuté")
+            entry["properties_status"].setText(
+                "Nastavení načteno. Neznámé položky, komentáře a RCON heslo formulář nemění."
+            )
+            return
+        changed = payload.get("changed", [])
+        changed_text = ", ".join(changed) if changed else "žádné hodnoty"
+        entry["properties_status"].setText(
+            f"Nastavení bylo uloženo. Změněno: {changed_text}. Projeví se po restartu serveru."
+        )
+        self.set_server_properties(server_id, payload.get("settings", {}))
+        self.refresh_server_statuses()
 
     def load_server_backups(self, server_id):
         entry = self.server_management_pages.get(server_id)

@@ -211,6 +211,45 @@ class ServerRegistryTest(unittest.TestCase):
             "mc-test", ["192.0.2.66", "127.0.0.1", "::1"], 25570, rcon=None,
         )
 
+    def test_minecraft_properties_require_policy_and_preserve_unknown_values(self):
+        (self.forge_data / "server.properties").write_text(
+            "motd=Old MOTD\ncustom-mod-option=keep\nserver-port=25565\n",
+            encoding="utf-8",
+        )
+        self.save_servers()
+        response = self.client.get(
+            "/servers/minecraft/properties?server_id=forge", **self.local_options(),
+        )
+        self.assertEqual(response.status_code, 403)
+        response = self.client.get(
+            "/servers/minecraft/properties?server_id=forge", **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["settings"]["motd"], "Old MOTD")
+        self.assertEqual(response.json["effective"]["server-port"], "25565")
+
+        settings = dict(response.json["settings"])
+        settings.update({"motd": "New MOTD", "max-players": 12, "white-list": True})
+        response = self.client.put(
+            "/servers/minecraft/properties",
+            json={"server_id": "forge", "settings": settings},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        content = (self.forge_data / "server.properties").read_text(encoding="utf-8")
+        self.assertIn("motd=New MOTD", content)
+        self.assertIn("max-players=12", content)
+        self.assertIn("white-list=true", content)
+        self.assertIn("custom-mod-option=keep", content)
+        self.assertIn("server-port=25565", content)
+
+        response = self.client.put(
+            "/servers/minecraft/properties",
+            json={"server_id": "forge", "settings": {"motd": "incomplete"}},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_gate_config_requires_pam_and_status_is_read_only(self):
         config = backend.default_gate_config()
         self.assertEqual(self.client.get(

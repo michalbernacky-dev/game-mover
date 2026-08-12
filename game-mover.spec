@@ -52,6 +52,7 @@ install -Dpm0644 game_mover_installs.py %{buildroot}/opt/game_mover/game_mover_i
 install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
 install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_mover_connections.py
 install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_security.py
+install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
 install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
@@ -127,6 +128,7 @@ fi
 /opt/game_mover/game_mover_jobs.py
 /opt/game_mover/game_mover_connections.py
 /opt/game_mover/game_mover_security.py
+/opt/game_mover/game_mover_properties.py
 /opt/game_mover/game_mover_version.py
 /opt/game_mover/game-mover
 /opt/game_mover/game_mover_workloads.py

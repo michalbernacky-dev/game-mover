@@ -83,12 +83,13 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.assertEqual(entry["status"].text(), "Běží")
         self.assertEqual(entry["players"].text(), "1 / 20 online · již viděno 2")
-        self.assertEqual(entry["sections"].count(), 3)
+        self.assertEqual(entry["sections"].count(), 4)
         self.assertEqual(
-            [entry["sections"].tabText(index) for index in range(3)],
-            ["Přehled", "Zálohy", "Mody"],
+            [entry["sections"].tabText(index) for index in range(4)],
+            ["Přehled", "Nastavení", "Zálohy", "Mody"],
         )
         self.assertEqual(set(entry["lifecycle"]), {"start", "stop", "restart"})
+        self.assertIn("properties_fields", entry)
 
 
 if __name__ == "__main__":
