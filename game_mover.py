@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (
     QTabWidget, QHBoxLayout, QSpinBox, QLineEdit, QTimeEdit, QFrame,
     QFileDialog, QPlainTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QTabBar
 )
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, pyqtSignal, QTimer
@@ -327,6 +327,31 @@ class ServerBackupThread(QThread):
             self.completed.emit({"error": str(error)})
 
 
+class ServerBackupsThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{self.base_url}/servers/backups",
+                params={"source_id": self.server_id},
+                headers=self.headers,
+                timeout=30,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit({"backups": data.get("backups", []), "server_id": self.server_id})
+        except Exception as error:
+            self.loaded.emit({"error": str(error), "server_id": self.server_id})
+
+
 class GateDeployThread(QThread):
     completed = pyqtSignal(dict)
 
@@ -472,6 +497,12 @@ class GameMover(QWidget):
         self.server_mods_thread = None
         self.compare_mods_thread = None
         self.server_backup_thread = None
+        self.server_backup_server_id = ""
+        self.server_management_pages = {}
+        self.server_mod_inventories = {}
+        self.server_mod_threads = {}
+        self.compare_mod_threads = {}
+        self.server_backups_threads = {}
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
@@ -524,6 +555,12 @@ class GameMover(QWidget):
         self.init_server_registry_tab()
         self.init_security_tab()
         self.init_timekpr_tab()
+        self.fixed_tab_count = self.tabs.count()
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self.close_server_management_tab)
+        for index in range(self.fixed_tab_count):
+            self.tabs.tabBar().setTabButton(index, QTabBar.LeftSide, None)
+            self.tabs.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
         layout = QVBoxLayout()
         layout.addWidget(self.tabs)
@@ -1511,42 +1548,6 @@ class GameMover(QWidget):
         self.server_card_layouts = {}
         layout.addWidget(self.server_cards_widget)
 
-        self.minecraft_details = QFrame(content)
-        self.minecraft_details.setFrameShape(QFrame.StyledPanel)
-        minecraft_layout = QVBoxLayout(self.minecraft_details)
-        self.minecraft_mods_summary = QLabel("Vyber Minecraft server a načti jeho mody.")
-        minecraft_layout.addWidget(self.minecraft_mods_summary)
-        self.minecraft_mods_table = QTableWidget(self)
-        self.minecraft_mods_table.setColumnCount(3)
-        self.minecraft_mods_table.setHorizontalHeaderLabels(["Název", "Verze", "JAR soubor"])
-        self.minecraft_mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.minecraft_mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.minecraft_mods_table.setAlternatingRowColors(True)
-        self.minecraft_mods_table.setSortingEnabled(True)
-        self.minecraft_mods_table.verticalHeader().setVisible(False)
-        mods_header = self.minecraft_mods_table.horizontalHeader()
-        mods_header.setSectionResizeMode(0, QHeaderView.Interactive)
-        mods_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        mods_header.setSectionResizeMode(2, QHeaderView.Stretch)
-        self.minecraft_mods_table.setColumnWidth(0, 260)
-        self.minecraft_mods_table.setFixedHeight(220)
-        minecraft_layout.addWidget(self.minecraft_mods_table)
-        mods_actions = QHBoxLayout()
-        self.load_server_mods_button = QPushButton("Znovu načíst mody", self)
-        self.load_server_mods_button.clicked.connect(self.reload_selected_server_mods)
-        mods_actions.addWidget(self.load_server_mods_button)
-        self.compare_mods_button = QPushButton("Porovnat klientské mody…", self)
-        self.compare_mods_button.clicked.connect(self.choose_client_mods)
-        self.compare_mods_button.setEnabled(False)
-        mods_actions.addWidget(self.compare_mods_button)
-        minecraft_layout.addLayout(mods_actions)
-        self.minecraft_diff_output = QPlainTextEdit(self)
-        self.minecraft_diff_output.setReadOnly(True)
-        self.minecraft_diff_output.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
-        self.minecraft_diff_output.setFixedHeight(120)
-        minecraft_layout.addWidget(self.minecraft_diff_output)
-        self.minecraft_details.setVisible(False)
-
         self.servers_updated_label = QLabel("Poslední aktualizace: —")
         layout.addWidget(self.servers_updated_label)
         server_actions = QHBoxLayout()
@@ -1645,6 +1646,8 @@ class GameMover(QWidget):
             self.local_operation_headers("minecraft.install")
         )
         self.minecraft_install_button.setEnabled(install_enabled)
+        if self.server_management_pages:
+            self.update_open_server_management_pages()
 
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
@@ -1891,8 +1894,6 @@ class GameMover(QWidget):
                 widget.deleteLater()
 
     def render_server_cards(self, servers):
-        details_open = not self.minecraft_details.isHidden()
-        self.minecraft_details.setParent(self.server_cards_widget)
         self.clear_layout(self.server_cards_layout)
         self.server_card_layouts = {}
         colors = {
@@ -1964,14 +1965,6 @@ class GameMover(QWidget):
                 operation_progress.setTextVisible(True)
                 card_layout.addWidget(operation_progress)
             actions = QHBoxLayout()
-            has_mods = server.get("has_mods", server.get("kind") == "minecraft")
-            if server.get("kind") == "minecraft" and has_mods:
-                mods_button = QPushButton("Mody a porovnání", card)
-                mods_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Minecraft"):
-                    self.toggle_server_mods(server_id, name)
-                )
-                actions.addWidget(mods_button)
             if is_host_management_mode(self.app_mode) and server.get("kind") == "proxy":
                 actions.addStretch()
                 routes_button = QPushButton("Směrování…", card)
@@ -2000,71 +1993,411 @@ class GameMover(QWidget):
                             self.control_gate_proxy(selected_action)
                         )
                         actions.addWidget(button)
-            if is_host_management_mode(self.app_mode) and server.get("kind") != "proxy":
-                permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
-                auth_summary = " · ".join(
-                    f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"
-                    for action in SERVER_ACTIONS
-                    if action != "backup" or server.get("backup_supported")
-                )
-                auth_label = QLabel(f"Oprávnění: {auth_summary}", card)
-                auth_label.setStyleSheet("color: #aab7c0;")
-                auth_label.setWordWrap(True)
-                card_layout.addWidget(auth_label)
+            if server.get("kind") != "proxy":
                 actions.addStretch()
-                start_policy = permissions.get("start", "disabled")
-                start_button = QPushButton("Spustit", card)
-                start_button.setFixedWidth(120)
-                start_button.setEnabled(
-                    bool(self.local_server_action_headers(start_policy))
-                    and status in ("inactive", "failed")
-                )
-                start_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=start_policy:
-                    self.control_local_server("start", server_id, name, policy)
-                )
-                actions.addWidget(start_button)
-                restart_policy = permissions.get("restart", "disabled")
-                restart_button = QPushButton("Restartovat", card)
-                restart_button.setFixedWidth(120)
-                restart_button.setEnabled(
-                    bool(self.local_server_action_headers(restart_policy))
-                    and status in ("active", "activating")
-                )
-                restart_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=restart_policy:
-                    self.control_local_server("restart", server_id, name, policy)
-                )
-                actions.addWidget(restart_button)
-                stop_policy = permissions.get("stop", "disabled")
-                stop_button = QPushButton("Vypnout", card)
-                stop_button.setFixedWidth(120)
-                stop_button.setEnabled(
-                    bool(self.local_server_action_headers(stop_policy))
-                    and status in ("active", "activating")
-                )
-                stop_button.clicked.connect(
-                    lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=stop_policy:
-                    self.control_local_server("stop", server_id, name, policy)
-                )
-                actions.addWidget(stop_button)
-                if server.get("backup_supported"):
-                    backup_policy = permissions.get("backup", "disabled")
-                    backup_button = QPushButton("Vytvořit zálohu", card)
-                    backup_button.setFixedWidth(150)
-                    backup_button.setEnabled(bool(self.local_server_action_headers(backup_policy)))
-                    backup_button.clicked.connect(
-                        lambda _checked=False, server_id=server.get("id", ""), name=server.get("name", "Server"), policy=backup_policy:
-                        self.backup_local_server(server_id, name, policy)
+                if is_host_management_mode(self.app_mode):
+                    quick_action = (
+                        "start" if status in ("inactive", "failed") else "stop"
                     )
-                    actions.addWidget(backup_button)
+                    permissions = (
+                        server.get("permissions")
+                        if isinstance(server.get("permissions"), dict) else {}
+                    )
+                    quick_policy = permissions.get(quick_action, "disabled")
+                    quick_button = QPushButton(
+                        "Spustit" if quick_action == "start" else "Vypnout", card,
+                    )
+                    quick_button.setFixedWidth(120)
+                    quick_button.setEnabled(
+                        bool(self.local_server_action_headers(quick_policy))
+                        and status in ("inactive", "failed", "active", "activating")
+                    )
+                    quick_button.clicked.connect(
+                        lambda _checked=False, selected_id=server_id:
+                        self.quick_control_server(selected_id)
+                    )
+                    actions.addWidget(quick_button)
+                manage_button = QPushButton("Správa serveru…", card)
+                manage_button.setFixedWidth(160)
+                manage_button.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.open_server_management(selected_id)
+                )
+                actions.addWidget(manage_button)
             if actions.count():
                 card_layout.addLayout(actions)
-            if details_open and server_id == getattr(self, "selected_minecraft_server_id", ""):
-                card_layout.addWidget(self.minecraft_details)
-                self.minecraft_details.setVisible(True)
             self.server_cards_layout.addWidget(card)
         self.server_cards_layout.addStretch()
+
+    def server_status_by_id(self, server_id):
+        for server in self.last_server_statuses:
+            if server.get("id") == server_id:
+                return server
+        return None
+
+    def server_connection_text(self, server):
+        connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
+        port = connection.get("direct_port")
+        if port is None:
+            return "Přímé připojení není zveřejněné"
+        if self.app_mode == "server":
+            host = "127.0.0.1"
+        else:
+            host, _api_port = self.split_server_address(
+                self.active_server_profile().get("address", "")
+            )
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"{host}:{port}"
+
+    def server_players_text(self, server):
+        if server.get("kind") != "minecraft":
+            return "Tento typ serveru neposkytuje Minecraft statistiky"
+        players = server.get("players") if isinstance(server.get("players"), dict) else {}
+        online = players.get("online")
+        maximum = players.get("max")
+        if online is not None and maximum is not None:
+            known = players.get("known")
+            known_text = f" · již viděno {known}" if known is not None else ""
+            return f"{online} / {maximum} online{known_text}"
+        if players.get("query_pending"):
+            return "Zjišťuji…"
+        return "Nezjištěno"
+
+    def quick_control_server(self, server_id):
+        server = self.server_status_by_id(server_id)
+        if not server:
+            return
+        action = "start" if server.get("status") in ("inactive", "failed") else "stop"
+        permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+        self.control_local_server(
+            action, server_id, server.get("name", "Server"),
+            permissions.get(action, "disabled"),
+        )
+
+    def close_server_management_tab(self, index):
+        if index < getattr(self, "fixed_tab_count", self.tabs.count()):
+            return
+        page = self.tabs.widget(index)
+        server_id = page.property("server_id") if page else None
+        self.tabs.removeTab(index)
+        if server_id:
+            self.server_management_pages.pop(server_id, None)
+            self.server_mod_inventories.pop(server_id, None)
+        if page:
+            page.deleteLater()
+
+    def open_server_management(self, server_id):
+        existing = self.server_management_pages.get(server_id)
+        if existing:
+            self.tabs.setCurrentWidget(existing["page"])
+            return
+        server = self.server_status_by_id(server_id)
+        if not server:
+            QMessageBox.warning(self, "Správa serveru", "Server už není v registru dostupný.")
+            return
+
+        page = QWidget(self.tabs)
+        page.setProperty("server_id", server_id)
+        outer = QVBoxLayout(page)
+        title = QLabel(page)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        outer.addWidget(title)
+        subtitle = QLabel(
+            "Provozní příkazy se provedou okamžitě. Budoucí formulářové změny "
+            "budou před uložením jasně oddělené.", page,
+        )
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet("color: #aab7c0;")
+        outer.addWidget(subtitle)
+
+        sections = QTabWidget(page)
+        outer.addWidget(sections)
+        overview = QWidget(sections)
+        overview_layout = QVBoxLayout(overview)
+        overview_form = QFormLayout()
+        status_label = QLabel(overview)
+        connection_label = QLabel(overview)
+        connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        players_label = QLabel(overview)
+        runtime_label = QLabel(overview)
+        runtime_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        permissions_label = QLabel(overview)
+        permissions_label.setWordWrap(True)
+        overview_form.addRow("Stav:", status_label)
+        overview_form.addRow("Připojení:", connection_label)
+        overview_form.addRow("Hráči:", players_label)
+        overview_form.addRow("Runtime:", runtime_label)
+        overview_form.addRow("Oprávnění:", permissions_label)
+        overview_layout.addLayout(overview_form)
+        lifecycle = QHBoxLayout()
+        lifecycle_buttons = {}
+        for action, label in (("start", "Spustit"), ("stop", "Vypnout"), ("restart", "Restartovat")):
+            button = QPushButton(label, overview)
+            button.clicked.connect(
+                lambda _checked=False, selected_action=action, selected_id=server_id:
+                self.control_management_server(selected_action, selected_id)
+            )
+            lifecycle.addWidget(button)
+            lifecycle_buttons[action] = button
+        lifecycle.addStretch()
+        overview_layout.addLayout(lifecycle)
+        overview_layout.addStretch()
+        sections.addTab(overview, "Přehled")
+
+        entry = {
+            "page": page,
+            "title": title,
+            "sections": sections,
+            "status": status_label,
+            "connection": connection_label,
+            "players": players_label,
+            "runtime": runtime_label,
+            "permissions": permissions_label,
+            "lifecycle": lifecycle_buttons,
+        }
+
+        if server.get("backup_supported"):
+            backups_page = QWidget(sections)
+            backups_layout = QVBoxLayout(backups_page)
+            backups_help = QLabel(
+                "Zálohy jsou ověřené úplné archivy persistentních dat. Obnova do nového "
+                "izolovaného serveru je dostupná v instalátoru Minecraftu; bezpečnou obnovu "
+                "do tohoto existujícího serveru doplníme jako samostatnou operaci.",
+                backups_page,
+            )
+            backups_help.setWordWrap(True)
+            backups_layout.addWidget(backups_help)
+            backups_status = QLabel("Katalog záloh zatím nebyl načten.", backups_page)
+            backups_status.setStyleSheet("color: #aab7c0;")
+            backups_layout.addWidget(backups_status)
+            backups_table = QTableWidget(backups_page)
+            backups_table.setColumnCount(4)
+            backups_table.setHorizontalHeaderLabels(["Vytvořeno", "Velikost", "Zdroj", "ID zálohy"])
+            backups_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            backups_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            backups_table.setAlternatingRowColors(True)
+            backups_table.verticalHeader().setVisible(False)
+            backups_header = backups_table.horizontalHeader()
+            backups_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            backups_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            backups_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            backups_header.setSectionResizeMode(3, QHeaderView.Stretch)
+            backups_layout.addWidget(backups_table)
+            backups_actions = QHBoxLayout()
+            create_backup = QPushButton("Vytvořit zálohu", backups_page)
+            create_backup.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.backup_management_server(selected_id)
+            )
+            backups_actions.addWidget(create_backup)
+            reload_backups = QPushButton("Obnovit seznam", backups_page)
+            reload_backups.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.load_server_backups(selected_id)
+            )
+            backups_actions.addWidget(reload_backups)
+            backups_actions.addStretch()
+            backups_layout.addLayout(backups_actions)
+            sections.addTab(backups_page, "Zálohy")
+            entry.update({
+                "backups_status": backups_status,
+                "backups_table": backups_table,
+                "create_backup": create_backup,
+                "reload_backups": reload_backups,
+            })
+
+        if server.get("kind") == "minecraft" and server.get("has_mods", True):
+            mods_page = QWidget(sections)
+            mods_layout = QVBoxLayout(mods_page)
+            mods_summary = QLabel("Inventář modů zatím nebyl načten.", mods_page)
+            mods_layout.addWidget(mods_summary)
+            mods_table = QTableWidget(mods_page)
+            mods_table.setColumnCount(3)
+            mods_table.setHorizontalHeaderLabels(["Název", "Verze", "JAR soubor"])
+            mods_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            mods_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            mods_table.setAlternatingRowColors(True)
+            mods_table.setSortingEnabled(True)
+            mods_table.verticalHeader().setVisible(False)
+            mods_header = mods_table.horizontalHeader()
+            mods_header.setSectionResizeMode(0, QHeaderView.Interactive)
+            mods_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            mods_header.setSectionResizeMode(2, QHeaderView.Stretch)
+            mods_table.setColumnWidth(0, 260)
+            mods_layout.addWidget(mods_table)
+            mods_actions = QHBoxLayout()
+            reload_mods = QPushButton("Načíst mody", mods_page)
+            reload_mods.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.load_server_mods(selected_id)
+            )
+            mods_actions.addWidget(reload_mods)
+            compare_mods = QPushButton("Porovnat klientské mody…", mods_page)
+            compare_mods.setEnabled(False)
+            compare_mods.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.choose_client_mods(selected_id)
+            )
+            mods_actions.addWidget(compare_mods)
+            mods_actions.addStretch()
+            mods_layout.addLayout(mods_actions)
+            mods_diff = QPlainTextEdit(mods_page)
+            mods_diff.setReadOnly(True)
+            mods_diff.setPlaceholderText("Výsledek porovnání se zobrazí zde.")
+            mods_diff.setFixedHeight(140)
+            mods_layout.addWidget(mods_diff)
+            sections.addTab(mods_page, "Mody")
+            entry.update({
+                "mods_summary": mods_summary,
+                "mods_table": mods_table,
+                "reload_mods": reload_mods,
+                "compare_mods": compare_mods,
+                "mods_diff": mods_diff,
+            })
+
+        self.server_management_pages[server_id] = entry
+        index = self.tabs.addTab(page, f"Správa: {server.get('name', server_id)}")
+        self.tabs.setCurrentIndex(index)
+        self.update_server_management_page(server)
+        if "mods_table" in entry:
+            self.load_server_mods(server_id)
+        if "backups_table" in entry and self.local_operation_headers("backup.catalog"):
+            self.load_server_backups(server_id)
+
+    def control_management_server(self, action, server_id):
+        server = self.server_status_by_id(server_id)
+        if not server:
+            return
+        permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+        self.control_local_server(
+            action, server_id, server.get("name", "Server"),
+            permissions.get(action, "disabled"),
+        )
+
+    def backup_management_server(self, server_id):
+        server = self.server_status_by_id(server_id)
+        if not server:
+            return
+        permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+        self.backup_local_server(
+            server_id, server.get("name", "Server"),
+            permissions.get("backup", "disabled"),
+        )
+
+    def update_server_management_page(self, server):
+        entry = self.server_management_pages.get(server.get("id"))
+        if not entry:
+            return
+        name = server.get("name", server.get("id", "Server"))
+        status = server.get("status", "unknown")
+        entry["title"].setText(f"Správa serveru: {name}")
+        tab_index = self.tabs.indexOf(entry["page"])
+        if tab_index >= 0:
+            self.tabs.setTabText(tab_index, f"Správa: {name}")
+        entry["status"].setText(server.get("message", "Neznámý stav"))
+        entry["connection"].setText(self.server_connection_text(server))
+        entry["players"].setText(self.server_players_text(server))
+        entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
+        permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
+        summary = " · ".join(
+            f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"
+            for action in SERVER_ACTIONS
+            if action != "backup" or server.get("backup_supported")
+        )
+        entry["permissions"].setText(summary or "Pro tento server nejsou definované provozní akce")
+        management = is_host_management_mode(self.app_mode)
+        enabled_states = {
+            "start": ("inactive", "failed"),
+            "stop": ("active", "activating"),
+            "restart": ("active", "activating"),
+        }
+        for action, button in entry["lifecycle"].items():
+            policy = permissions.get(action, "disabled")
+            button.setEnabled(
+                management
+                and status in enabled_states[action]
+                and bool(self.local_server_action_headers(policy))
+            )
+        if "create_backup" in entry:
+            backup_policy = permissions.get("backup", "disabled")
+            entry["create_backup"].setEnabled(
+                management and bool(self.local_server_action_headers(backup_policy))
+            )
+            entry["reload_backups"].setEnabled(
+                management and bool(self.local_operation_headers("backup.catalog"))
+            )
+
+    def update_open_server_management_pages(self):
+        current = {server.get("id"): server for server in self.last_server_statuses}
+        for server_id, entry in list(self.server_management_pages.items()):
+            server = current.get(server_id)
+            if server:
+                self.update_server_management_page(server)
+            else:
+                entry["status"].setText("Server už není v registru dostupný")
+                for button in entry["lifecycle"].values():
+                    button.setEnabled(False)
+                for key in ("create_backup", "reload_backups", "reload_mods", "compare_mods"):
+                    if key in entry:
+                        entry[key].setEnabled(False)
+
+    def load_server_backups(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "backups_table" not in entry:
+            return
+        if not is_host_management_mode(self.app_mode):
+            entry["backups_status"].setText("Katalog záloh je dostupný pouze ve správě hostitele.")
+            return
+        headers = self.local_operation_headers("backup.catalog")
+        if not headers:
+            entry["backups_status"].setText("Pro katalog záloh chybí oprávnění podle zásady.")
+            return
+        running = self.server_backups_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["backups_status"].setText("Načítám katalog záloh…")
+        entry["reload_backups"].setEnabled(False)
+        thread = ServerBackupsThread(
+            self.host_management_api_url(), server_id, headers,
+        )
+        self.server_backups_threads[server_id] = thread
+        thread.loaded.connect(self.on_server_backups_loaded)
+        thread.start()
+
+    def on_server_backups_loaded(self, payload):
+        server_id = payload.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "backups_table" not in entry:
+            return
+        entry["reload_backups"].setEnabled(
+            is_host_management_mode(self.app_mode)
+            and bool(self.local_operation_headers("backup.catalog"))
+        )
+        error = payload.get("error")
+        if error:
+            entry["backups_status"].setText(f"Načtení katalogu selhalo: {error}")
+            return
+        backups = payload.get("backups", [])
+        table = entry["backups_table"]
+        table.setRowCount(0)
+        for backup in backups:
+            row = table.rowCount()
+            table.insertRow(row)
+            size_mib = int(backup.get("size_bytes") or 0) / (1024 * 1024)
+            values = (
+                backup.get("created_at") or "—",
+                f"{size_mib:.1f} MiB",
+                backup.get("source_backend") or "—",
+                backup.get("id") or "—",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                table.setItem(row, column, item)
+        entry["backups_status"].setText(
+            f"Nalezeno záloh: {len(backups)}" if backups else "Pro tento server zatím není žádná záloha."
+        )
 
     def refresh_server_statuses(self):
         if self.server_status_thread is not None and self.server_status_thread.isRunning():
@@ -2129,6 +2462,7 @@ class GameMover(QWidget):
         ):
             self.operation_refresh_timer.stop()
         self.render_server_cards(servers)
+        self.update_open_server_management_pages()
         updated_at = data.get("updated_at", "")
         if updated_at:
             updated_at = updated_at.replace("T", " ").split("+")[0]
@@ -2617,7 +2951,11 @@ class GameMover(QWidget):
         self.server_backup_thread = ServerBackupThread(
             self.host_management_api_url(), server_id, headers,
         )
-        self.server_backup_thread.completed.connect(self.on_server_backup_completed)
+        self.server_backup_server_id = server_id
+        self.server_backup_thread.completed.connect(
+            lambda payload, selected_id=server_id:
+            self.on_server_backup_completed(payload, selected_id)
+        )
         self.server_backup_thread.start()
         QMessageBox.information(
             self,
@@ -2625,7 +2963,7 @@ class GameMover(QWidget):
             "Záloha byla spuštěna. Okno zůstává použitelné; výsledek se zobrazí po dokončení.",
         )
 
-    def on_server_backup_completed(self, payload):
+    def on_server_backup_completed(self, payload, server_id=""):
         error = payload.get("error")
         if error:
             QMessageBox.critical(self, "Záloha serveru", f"Záloha selhala: {error}")
@@ -2639,75 +2977,83 @@ class GameMover(QWidget):
                 f"Velikost: {size_mib:.1f} MiB\n"
                 f"Archiv: {backup.get('archive', '—')}",
             )
+        if server_id in self.server_management_pages:
+            self.load_server_backups(server_id)
         self.refresh_server_statuses()
 
-    def reload_selected_server_mods(self):
-        if getattr(self, "selected_minecraft_server_id", ""):
-            self.load_server_mods(self.selected_minecraft_server_id, self.selected_minecraft_server_name)
-
-    def toggle_server_mods(self, server_id, server_name):
-        if server_id == getattr(self, "selected_minecraft_server_id", "") and not self.minecraft_details.isHidden():
-            self.minecraft_details.setVisible(False)
+    def load_server_mods(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "mods_table" not in entry:
             return
-        self.load_server_mods(server_id, server_name)
-
-    def load_server_mods(self, server_id, server_name):
-        self.selected_minecraft_server_id = server_id
-        self.selected_minecraft_server_name = server_name
-        card_layout = self.server_card_layouts.get(server_id)
-        if card_layout:
-            self.minecraft_details.setParent(self.server_cards_widget)
-            card_layout.addWidget(self.minecraft_details)
-        self.minecraft_details.setVisible(True)
-        self.load_server_mods_button.setEnabled(False)
-        self.compare_mods_button.setEnabled(False)
-        self.minecraft_mods_summary.setText(f"{server_name}: načítám inventář modů…")
+        running = self.server_mod_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["reload_mods"].setEnabled(False)
+        entry["compare_mods"].setEnabled(False)
+        entry["mods_summary"].setText("Načítám inventář modů…")
         base_url, headers = self.server_request_target()
-        self.server_mods_thread = ServerModsThread(base_url, headers, server_id)
-        self.server_mods_thread.loaded.connect(self.on_server_mods_loaded)
-        self.server_mods_thread.start()
+        thread = ServerModsThread(base_url, headers, server_id)
+        self.server_mod_threads[server_id] = thread
+        thread.loaded.connect(self.on_server_mods_loaded)
+        thread.start()
 
     def on_server_mods_loaded(self, payload):
-        self.load_server_mods_button.setEnabled(True)
+        server_id = payload.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "mods_table" not in entry:
+            return
+        entry["reload_mods"].setEnabled(True)
         error = payload.get("error")
         if error:
-            self.minecraft_mods_summary.setText(f"Mody: chyba ({error})")
-            self.compare_mods_button.setEnabled(False)
+            entry["mods_summary"].setText(f"Mody: chyba ({error})")
+            entry["compare_mods"].setEnabled(False)
             return
         inventory = payload["inventory"]
-        self.minecraft_mod_inventory = inventory
-        self.minecraft_mods_table.setSortingEnabled(False)
-        self.minecraft_mods_table.setRowCount(0)
+        self.server_mod_inventories[server_id] = inventory
+        table = entry["mods_table"]
+        table.setSortingEnabled(False)
+        table.setRowCount(0)
         for jar in inventory.get("jars", []):
             for mod in jar.get("mods", []):
-                row = self.minecraft_mods_table.rowCount()
-                self.minecraft_mods_table.insertRow(row)
+                row = table.rowCount()
+                table.insertRow(row)
                 values = (mod.get("name", ""), mod.get("version", ""), jar.get("filename", "?"))
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(str(value))
                     item.setToolTip(str(value))
-                    self.minecraft_mods_table.setItem(row, column, item)
-        self.minecraft_mods_table.setSortingEnabled(True)
-        self.minecraft_mods_table.sortItems(0, Qt.AscendingOrder)
+                    table.setItem(row, column, item)
+        table.setSortingEnabled(True)
+        table.sortItems(0, Qt.AscendingOrder)
         count = inventory.get("jar_count", len(inventory.get("jars", [])))
-        self.minecraft_mods_summary.setText(f"{self.selected_minecraft_server_name}: {count} JAR souborů")
-        self.compare_mods_button.setEnabled(True)
+        entry["mods_summary"].setText(f"Server obsahuje {count} JAR souborů")
+        entry["compare_mods"].setEnabled(True)
 
-    def choose_client_mods(self):
+    def choose_client_mods(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        inventory = self.server_mod_inventories.get(server_id)
+        if not entry or not inventory:
+            return
         path = QFileDialog.getExistingDirectory(self, "Vyber klientský adresář mods", os.path.expanduser("~"))
         if not path:
             return
-        self.compare_mods_button.setEnabled(False)
-        self.minecraft_diff_output.setPlainText(f"Prohledávám {path}…")
-        self.compare_mods_thread = CompareModsThread(self.minecraft_mod_inventory, path)
-        self.compare_mods_thread.compared.connect(self.on_mods_compared)
-        self.compare_mods_thread.start()
+        entry["compare_mods"].setEnabled(False)
+        entry["mods_diff"].setPlainText(f"Prohledávám {path}…")
+        thread = CompareModsThread(inventory, path)
+        self.compare_mod_threads[server_id] = thread
+        thread.compared.connect(
+            lambda payload, selected_id=server_id:
+            self.on_mods_compared(selected_id, payload)
+        )
+        thread.start()
 
-    def on_mods_compared(self, payload):
-        self.compare_mods_button.setEnabled(self.minecraft_mod_inventory is not None)
+    def on_mods_compared(self, server_id, payload):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "mods_diff" not in entry:
+            return
+        entry["compare_mods"].setEnabled(server_id in self.server_mod_inventories)
         error = payload.get("error")
         if error:
-            self.minecraft_diff_output.setPlainText(f"Porovnání selhalo: {error}")
+            entry["mods_diff"].setPlainText(f"Porovnání selhalo: {error}")
             return
         result = payload["result"]
         lines = [f"Server: {result['server_jar_count']} JAR, klient: {result['client_jar_count']} JAR", ""]
@@ -2733,7 +3079,7 @@ class GameMover(QWidget):
             lines.append("")
         prefix = "Nenalezen žádný chybějící mod ani rozdíl verze/obsahu." if problem_count == 0 else f"Nalezeno {problem_count} potenciálních problémů."
         lines.insert(0, prefix + "\n")
-        self.minecraft_diff_output.setPlainText("\n".join(lines))
+        entry["mods_diff"].setPlainText("\n".join(lines))
 
     def update_disk_bars(self):
         for path, bar in [("/var/Games", self.var_bar), (f"/home/{self.user}", self.home_bar)]:

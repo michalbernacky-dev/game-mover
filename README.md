@@ -118,6 +118,23 @@ them requires PAM against the notebook's local Game Mover service; opening the
 tunnel does not reuse that token for the host. A second host PAM login is always
 required for administrative API operations.
 
+### Per-server management tabs
+
+The **Servers** tab remains a compact daily overview. A server card keeps one
+context-sensitive start/stop button in host-management mode and opens a single
+closable **Management: name** tab. Reopening the same server activates its
+existing tab instead of creating duplicates. The management overview contains
+status, connection, players, runtime, effective authorization, and all lifecycle
+commands. Servers with persistent data also expose the verified backup catalog
+and backup creation; Minecraft servers additionally expose mod inventory and
+client comparison. Remote Client mode may inspect safe read-only content but
+cannot run host operations.
+
+Restore into an existing workload is intentionally not presented as an active
+button yet. Current verified restore creates a new isolated Minecraft workload
+through the installer. In-place restore will be added later as a separate
+destructive, policy-controlled operation.
+
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
 returned to its previous running state afterward. The manifest records the
@@ -426,6 +443,23 @@ Ve stejné záložce jsou jinak skryté ovládací prvky spravovaného tunelu. J
 zobrazení vyžaduje PAM proti místní službě Game Mover na laptopu; otevření tunelu
 tuto relaci nepřenáší na hostitele. Pro administrativní operace je vždy nutné
 druhé PAM přihlášení vůči hostiteli.
+
+### Správa jednotlivých serverů
+
+Záložka **Servery** zůstává stručným denním přehledem. Karta serveru v režimu
+správy hostitele ponechává jedno kontextové tlačítko Spustit/Vypnout a otevírá
+jedinou zavíratelnou kartu **Správa: název**. Opakované otevření stejného serveru
+aktivuje existující kartu a nevytváří duplicitu. Přehled správy obsahuje stav,
+připojení, hráče, runtime, účinná oprávnění a všechny lifecycle příkazy. Servery
+s persistentními daty navíc ukazují ověřený katalog záloh a vytvoření zálohy;
+Minecraft servery obsahují také inventář modů a porovnání s klientem. Vzdálený
+režim Klient může zobrazit bezpečný read-only obsah, ale nemůže provádět operace
+hostitele.
+
+Obnova do existujícího workloadu zatím záměrně není nabízena jako funkční
+tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft
+workload. In-place obnova přibude později jako samostatná destruktivní operace s
+vlastní bezpečnostní zásadou.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se
