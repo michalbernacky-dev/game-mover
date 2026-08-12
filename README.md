@@ -127,8 +127,10 @@ existing tab instead of creating duplicates. The management overview contains
 status, connection, players, runtime, effective authorization, and all lifecycle
 commands. Servers with persistent data also expose the verified backup catalog
 and backup creation; Minecraft servers additionally expose mod inventory and
-client comparison. Remote Client mode may inspect safe read-only content but
-cannot run host operations.
+client comparison. The **Logs** section reads a bounded tail from the registered
+systemd unit or Podman container and can optionally refresh every five seconds.
+Remote Client mode may inspect safe read-only content but cannot run host
+operations.
 
 Restore into an existing workload is intentionally not presented as an active
 button yet. Current verified restore creates a new isolated Minecraft workload
@@ -459,6 +461,9 @@ s persistentními daty navíc ukazují ověřený katalog záloh a vytvoření z
 Minecraft servery obsahují také inventář modů a porovnání s klientem. Vzdálený
 režim Klient může zobrazit bezpečný read-only obsah, ale nemůže provádět operace
 hostitele.
+
+Sekce **Logy** čte omezený konec výpisu z registrované systemd jednotky nebo
+Podman containeru a volitelně jej obnovuje každých pět sekund.
 
 Obnova do existujícího workloadu zatím záměrně není nabízena jako funkční
 tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft

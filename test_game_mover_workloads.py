@@ -20,6 +20,29 @@ class RecordingRunner:
 
 
 class WorkloadBackendTest(unittest.TestCase):
+    def test_systemd_logs_use_validated_unit_and_bounded_tail(self):
+        runner = RecordingRunner([BackendResult(0, "line")])
+        backend = SystemdBackend(runner)
+
+        result = backend.logs({"service": "forge-srv.service"}, 100)
+
+        self.assertEqual(result.output, "line")
+        self.assertEqual(runner.calls[0][0], [
+            "journalctl", "--unit", "forge-srv.service", "--no-pager",
+            "--output=short-iso", "--lines", "100",
+        ])
+
+    def test_podman_logs_use_validated_container_and_bounded_tail(self):
+        runner = RecordingRunner([BackendResult(0, "line")])
+        backend = PodmanBackend("gameplatform", runner, "/run/user/955/podman/podman.sock")
+
+        result = backend.logs({"runtime": {"container_name": "mc-test"}}, 500)
+
+        self.assertEqual(result.output, "line")
+        self.assertEqual(runner.calls[0][0][-5:], [
+            "logs", "--timestamps", "--tail", "500", "mc-test",
+        ])
+
     def test_legacy_systemd_workload_uses_only_registered_unit(self):
         runner = RecordingRunner([
             BackendResult(0),

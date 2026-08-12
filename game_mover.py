@@ -385,6 +385,31 @@ class ServerPropertiesThread(QThread):
             self.completed.emit({"server_id": self.server_id, "error": str(error)})
 
 
+class ServerLogsThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, tail, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.tail = tail
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{self.base_url}/servers/logs",
+                params={"server_id": self.server_id, "tail": self.tail},
+                headers=self.headers, timeout=35,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit({"server_id": self.server_id, "payload": data})
+        except Exception as error:
+            self.loaded.emit({"server_id": self.server_id, "error": str(error)})
+
+
 class GateDeployThread(QThread):
     completed = pyqtSignal(dict)
 
@@ -537,6 +562,7 @@ class GameMover(QWidget):
         self.compare_mod_threads = {}
         self.server_backups_threads = {}
         self.server_properties_threads = {}
+        self.server_log_threads = {}
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
@@ -2125,6 +2151,10 @@ class GameMover(QWidget):
         server_id = page.property("server_id") if page else None
         self.tabs.removeTab(index)
         if server_id:
+            entry = self.server_management_pages.get(server_id, {})
+            timer = entry.get("logs_timer")
+            if timer:
+                timer.stop()
             self.server_management_pages.pop(server_id, None)
             self.server_mod_inventories.pop(server_id, None)
         if page:
@@ -2199,6 +2229,56 @@ class GameMover(QWidget):
             "permissions": permissions_label,
             "lifecycle": lifecycle_buttons,
         }
+
+        logs_page = QWidget(sections)
+        logs_layout = QVBoxLayout(logs_page)
+        logs_help = QLabel(
+            "Read-only výpis posledních řádků logu: systemd journal nebo Podman container. "
+            "Výpis je omezený počtem řádků i velikostí odpovědi.", logs_page,
+        )
+        logs_help.setWordWrap(True)
+        logs_layout.addWidget(logs_help)
+        logs_status = QLabel("Log zatím nebyl načten.", logs_page)
+        logs_status.setStyleSheet("color: #aab7c0;")
+        logs_layout.addWidget(logs_status)
+        logs_output = QPlainTextEdit(logs_page)
+        logs_output.setReadOnly(True)
+        logs_output.setLineWrapMode(QPlainTextEdit.NoWrap)
+        logs_output.setPlaceholderText("Výpis logu se zobrazí zde.")
+        logs_layout.addWidget(logs_output)
+        logs_actions = QHBoxLayout()
+        logs_tail = QComboBox(logs_page)
+        for value in (50, 100, 250, 500):
+            logs_tail.addItem(f"Posledních {value} řádků", value)
+        logs_tail.setCurrentIndex(1)
+        logs_actions.addWidget(logs_tail)
+        logs_reload = QPushButton("Načíst log", logs_page)
+        logs_reload.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.load_server_logs(selected_id)
+        )
+        logs_actions.addWidget(logs_reload)
+        logs_auto = QCheckBox("Obnovovat každých 5 s", logs_page)
+        logs_actions.addWidget(logs_auto)
+        logs_actions.addStretch()
+        logs_layout.addLayout(logs_actions)
+        logs_timer = QTimer(logs_page)
+        logs_timer.setInterval(5_000)
+        logs_timer.timeout.connect(
+            lambda selected_id=server_id: self.load_server_logs(selected_id)
+        )
+        logs_auto.toggled.connect(
+            lambda checked, selected_id=server_id: self.set_server_logs_auto(selected_id, checked)
+        )
+        sections.addTab(logs_page, "Logy")
+        entry.update({
+            "logs_status": logs_status,
+            "logs_output": logs_output,
+            "logs_tail": logs_tail,
+            "logs_reload": logs_reload,
+            "logs_auto": logs_auto,
+            "logs_timer": logs_timer,
+        })
 
         if server.get("kind") == "minecraft":
             properties_page = QWidget(sections)
@@ -2392,6 +2472,8 @@ class GameMover(QWidget):
         index = self.tabs.addTab(page, f"Správa: {server.get('name', server_id)}")
         self.tabs.setCurrentIndex(index)
         self.update_server_management_page(server)
+        if "logs_output" in entry:
+            self.load_server_logs(server_id)
         if "properties_fields" in entry:
             self.load_server_properties(server_id)
         if "mods_table" in entry:
@@ -2473,6 +2555,16 @@ class GameMover(QWidget):
                 entry["properties_status"].setText(
                     "Nastavení vyžaduje správu hostitele a oprávnění podle zásady „Nastavení Minecraft serveru“."
                 )
+        if "logs_output" in entry:
+            logs_allowed = management and bool(self.local_operation_headers("server.logs"))
+            entry["logs_tail"].setEnabled(logs_allowed)
+            entry["logs_reload"].setEnabled(logs_allowed)
+            entry["logs_auto"].setEnabled(logs_allowed)
+            if not logs_allowed:
+                entry["logs_auto"].setChecked(False)
+                entry["logs_status"].setText(
+                    "Logy vyžadují správu hostitele a oprávnění podle zásady „Logy serverů“."
+                )
 
     def update_open_server_management_pages(self):
         current = {server.get("id"): server for server in self.last_server_statuses}
@@ -2484,9 +2576,71 @@ class GameMover(QWidget):
                 entry["status"].setText("Server už není v registru dostupný")
                 for button in entry["lifecycle"].values():
                     button.setEnabled(False)
-                for key in ("create_backup", "reload_backups", "reload_mods", "compare_mods"):
+                for key in (
+                    "create_backup", "reload_backups", "reload_mods", "compare_mods",
+                    "logs_tail", "logs_reload", "logs_auto",
+                ):
                     if key in entry:
                         entry[key].setEnabled(False)
+
+    def set_server_logs_auto(self, server_id, enabled):
+        entry = self.server_management_pages.get(server_id)
+        if not entry:
+            return
+        if enabled:
+            entry["logs_timer"].start()
+            self.load_server_logs(server_id)
+        else:
+            entry["logs_timer"].stop()
+
+    def load_server_logs(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "logs_output" not in entry:
+            return
+        if not is_host_management_mode(self.app_mode):
+            entry["logs_status"].setText("Logy jsou dostupné pouze ve správě hostitele.")
+            return
+        headers = self.local_operation_headers("server.logs")
+        if not headers:
+            entry["logs_status"].setText("Pro načtení logu chybí oprávnění podle zásady.")
+            return
+        running = self.server_log_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["logs_status"].setText("Načítám log…")
+        entry["logs_reload"].setEnabled(False)
+        thread = ServerLogsThread(
+            self.host_management_api_url(), server_id,
+            entry["logs_tail"].currentData(), headers,
+        )
+        self.server_log_threads[server_id] = thread
+        thread.loaded.connect(self.on_server_logs_loaded)
+        thread.start()
+
+    def on_server_logs_loaded(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "logs_output" not in entry:
+            return
+        server = self.server_status_by_id(server_id)
+        if server:
+            self.update_server_management_page(server)
+        error = result.get("error")
+        if error:
+            if "Unauthorized" in error or "403" in error:
+                entry["logs_status"].setText(self.host_pam_session_expired("Pak log načti znovu"))
+            else:
+                entry["logs_status"].setText(f"Načtení logu selhalo: {error}")
+            return
+        payload = result.get("payload", {})
+        output = payload.get("output", "")
+        entry["logs_output"].setPlainText(output or "Pro tento výběr nejsou žádné řádky logu.")
+        cursor = entry["logs_output"].textCursor()
+        cursor.movePosition(cursor.End)
+        entry["logs_output"].setTextCursor(cursor)
+        updated = str(payload.get("updated_at", "")).replace("T", " ").split("+")[0]
+        clipped = " Výpis byl zkrácen na bezpečnou maximální velikost." if payload.get("truncated") else ""
+        entry["logs_status"].setText(f"Log načten: {updated or 'nyní'}.{clipped}")
 
     def load_server_properties(self, server_id):
         entry = self.server_management_pages.get(server_id)

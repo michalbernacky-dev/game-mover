@@ -68,9 +68,10 @@ that server (for example, `Management: Forge`). It is not a separate desktop
 window.
 
 The first delivered management-tab slice contains the common workload overview,
-lifecycle, verified backup catalog and backup creation. Minecraft tabs also
-contain the existing mod inventory and client comparison. The Servers card keeps
-only the status, a context-sensitive quick start/stop action and **Management**.
+lifecycle, bounded live log viewing, verified backup catalog and backup creation.
+Minecraft tabs also contain the existing mod inventory and client comparison. The
+Servers card keeps only the status, a context-sensitive quick start/stop action
+and **Management**.
 
 The Minecraft management tab will progressively add:
 
@@ -125,8 +126,8 @@ tokens never leave the host API and must not appear in logs or responses.
 2. Extend the validated Minecraft workload installer with image discovery.
 3. Use the UI to back up and restore the current Forge server into Podman, verify it,
    and expose cut-over as a separate explicit user action.
-4. Extend the delivered per-server Management tab with logs, RCON, properties,
-   players and lists.
+4. Extend the delivered per-server Management tab with RCON, properties, players
+   and lists.
 5. Extend the delivered Security policy registry as new management operations
    are implemented.
 6. Continue with modpacks, worlds, quotas and broader Linux gaming features.

@@ -250,6 +250,30 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_server_logs_require_policy_and_use_registered_runtime(self):
+        self.save_servers()
+        response = self.client.get(
+            "/servers/logs?server_id=forge&tail=100", **self.local_options(),
+        )
+        self.assertEqual(response.status_code, 403)
+        fake_backend = Mock()
+        fake_backend.logs.return_value = BackendResult(0, "first\nlast")
+        with patch.object(backend, "backend_for", return_value=fake_backend):
+            response = self.client.get(
+                "/servers/logs?server_id=forge&tail=100",
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["output"], "first\nlast")
+        fake_backend.logs.assert_called_once()
+        self.assertEqual(fake_backend.logs.call_args.args[0]["id"], "forge")
+        self.assertEqual(fake_backend.logs.call_args.args[1], 100)
+        response = self.client.get(
+            "/servers/logs?server_id=forge&tail=9999",
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_gate_config_requires_pam_and_status_is_read_only(self):
         config = backend.default_gate_config()
         self.assertEqual(self.client.get(

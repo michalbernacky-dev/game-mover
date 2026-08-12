@@ -36,6 +36,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "server.logs",
+        "label": "Logy serverů",
+        "description": "Čtení omezeného výpisu systemd nebo Podman logu registrovaného serveru.",
+        "default": "pam",
+    },
+    {
         "id": "gate.config",
         "label": "Konfigurace Gate Lite",
         "description": "Změny základní konfigurace sdíleného ingressu.",

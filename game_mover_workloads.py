@@ -22,6 +22,9 @@ OCI_IMAGE_RE = re.compile(
 ENV_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*$")
 RESTART_POLICIES = {"no", "on-failure", "always", "unless-stopped"}
+LOG_TAIL_MINIMUM = 10
+LOG_TAIL_MAXIMUM = 500
+LOG_OUTPUT_MAXIMUM_BYTES = 256 * 1024
 
 
 @dataclass
@@ -117,6 +120,13 @@ class SystemdBackend:
     def runtime_metadata(self, workload: dict) -> dict:
         """Return the non-secret systemd identity needed to trace the backup."""
         return {"unit": self.reference(workload)}
+
+    def logs(self, workload: dict, tail: int = 100) -> BackendResult:
+        tail = normalize_log_tail(tail)
+        return self.runner([
+            "journalctl", "--unit", self.reference(workload), "--no-pager",
+            "--output=short-iso", "--lines", str(tail),
+        ], 20)
 
 
 class PodmanBackend:
@@ -324,6 +334,33 @@ class PodmanBackend:
             arguments.append("--force")
         arguments.append(self.reference(workload))
         return self._command(arguments, 180)
+
+    def logs(self, workload: dict, tail: int = 100) -> BackendResult:
+        return self._command([
+            "logs", "--timestamps", "--tail", str(normalize_log_tail(tail)),
+            self.reference(workload),
+        ], 30)
+
+
+def normalize_log_tail(value) -> int:
+    try:
+        tail = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Počet řádků logu musí být celé číslo") from error
+    if not LOG_TAIL_MINIMUM <= tail <= LOG_TAIL_MAXIMUM:
+        raise ValueError(
+            f"Počet řádků logu musí být mezi {LOG_TAIL_MINIMUM} a {LOG_TAIL_MAXIMUM}"
+        )
+    return tail
+
+
+def bounded_log_output(result: BackendResult) -> tuple[str, bool]:
+    output = result.output or result.error or ""
+    encoded = output.encode("utf-8", errors="replace")
+    if len(encoded) <= LOG_OUTPUT_MAXIMUM_BYTES:
+        return output, False
+    clipped = encoded[-LOG_OUTPUT_MAXIMUM_BYTES:].decode("utf-8", errors="replace")
+    return "[Starší část výpisu byla zkrácena]\n" + clipped, True
 
 
 def backend_for(

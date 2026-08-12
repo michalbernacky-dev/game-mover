@@ -63,7 +63,10 @@ from game_mover_installs import (
     normalize_install_request,
     restore_backup,
 )
-from game_mover_workloads import CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for
+from game_mover_workloads import (
+    CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for, bounded_log_output,
+    normalize_log_tail,
+)
 
 app = Flask(__name__)
 
@@ -2185,6 +2188,35 @@ def minecraft_properties():
         "server_id": server["id"],
         "settings": result["settings"],
         "changed": result["changed"],
+    })
+
+
+@app.route("/servers/logs", methods=["GET"])
+def server_logs():
+    if not require_local_operation(request, "server.logs"):
+        return jsonify({"message": "Unauthorized"}), 403
+    server = find_game_server(request.args.get("server_id", ""))
+    if not server:
+        return jsonify({"message": "Server not found"}), 404
+    try:
+        tail = normalize_log_tail(request.args.get("tail", 100))
+        backend = backend_for(
+            server, podman_user=PODMAN_USER, podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock(server["id"]):
+            result = backend.logs(server, tail)
+        output, truncated = bounded_log_output(result)
+    except (AttributeError, KeyError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+    if result.returncode != 0:
+        return jsonify({"message": output or "Načtení logu selhalo"}), 500
+    return jsonify({
+        "server_id": server["id"],
+        "backend": server.get("backend", "systemd"),
+        "tail": tail,
+        "output": output,
+        "truncated": truncated,
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 
 
