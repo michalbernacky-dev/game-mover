@@ -844,76 +844,85 @@ class GameMover(QWidget):
 
     def init_security_tab(self):
         tab = QWidget(self)
-        layout = QVBoxLayout(tab)
-        title = QLabel("Zabezpečení herní platformy", tab)
+        tab_layout = QVBoxLayout(tab)
+        scroll_area = QScrollArea(tab)
+        scroll_area.setWidgetResizable(True)
+        content = QWidget(scroll_area)
+        layout = QVBoxLayout(content)
+        title = QLabel("Zabezpečení herní platformy", content)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         help_label = QLabel(
             "Každá operace má samostatnou backendem vynucovanou zásadu. "
             "Tichá používá místní api.token, PAM vyžaduje wheel ověření a "
             "zakázaná operace není dostupná. Změny tohoto registru vždy vyžadují PAM.",
-            tab,
+            content,
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
-        self.security_status_label = QLabel("Zásady zatím nejsou načtené.", tab)
+        self.security_status_label = QLabel("Zásady zatím nejsou načtené.", content)
         self.security_status_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.security_status_label)
 
-        layout.addWidget(QLabel("Globální operace:", tab))
-        self.security_global_table = QTableWidget(tab)
+        layout.addWidget(QLabel("Globální operace:", content))
+        self.security_global_table = QTableWidget(content)
         self.security_global_table.setColumnCount(3)
         self.security_global_table.setHorizontalHeaderLabels([
             "Operace", "Popis", "Ověření",
         ])
         self.security_global_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.security_global_table.setWordWrap(False)
         self.security_global_table.verticalHeader().setVisible(False)
         self.security_global_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.security_global_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.security_global_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.security_global_table.setFixedHeight(230)
+        self.security_global_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.security_global_table)
 
-        layout.addWidget(QLabel("Akce jednotlivých serverů:", tab))
-        self.security_server_table = QTableWidget(tab)
+        layout.addWidget(QLabel("Akce jednotlivých serverů:", content))
+        self.security_server_table = QTableWidget(content)
         self.security_server_table.setColumnCount(1 + len(SERVER_ACTIONS))
         self.security_server_table.setHorizontalHeaderLabels([
             "Server", *[SERVER_ACTION_LABELS[action] for action in SERVER_ACTIONS],
         ])
         self.security_server_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.security_server_table.setWordWrap(False)
         self.security_server_table.verticalHeader().setVisible(False)
         self.security_server_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         for column in range(1, 1 + len(SERVER_ACTIONS)):
             self.security_server_table.horizontalHeader().setSectionResizeMode(
                 column, QHeaderView.ResizeToContents,
             )
-        self.security_server_table.setFixedHeight(220)
+        self.security_server_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.security_server_table)
 
-        layout.addWidget(QLabel("Pevně chráněné operace:", tab))
-        self.security_fixed_table = QTableWidget(tab)
+        layout.addWidget(QLabel("Pevně chráněné operace:", content))
+        self.security_fixed_table = QTableWidget(content)
         self.security_fixed_table.setColumnCount(3)
         self.security_fixed_table.setHorizontalHeaderLabels([
             "Operace", "Popis", "Ověření",
         ])
         self.security_fixed_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.security_fixed_table.setWordWrap(False)
         self.security_fixed_table.verticalHeader().setVisible(False)
         self.security_fixed_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.security_fixed_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.security_fixed_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.security_fixed_table.setFixedHeight(110)
+        self.security_fixed_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.security_fixed_table)
         self.populate_fixed_security_operations(FIXED_OPERATION_DEFINITIONS)
 
         actions = QHBoxLayout()
-        self.security_load_button = QPushButton("Načíst zásady", tab)
+        self.security_load_button = QPushButton("Načíst zásady", content)
         self.security_load_button.clicked.connect(self.load_security_policies)
         actions.addWidget(self.security_load_button)
-        self.security_save_button = QPushButton("Uložit zásady", tab)
+        self.security_save_button = QPushButton("Uložit zásady", content)
         self.security_save_button.clicked.connect(self.save_security_policies)
         actions.addWidget(self.security_save_button)
         layout.addLayout(actions)
         layout.addStretch()
+        scroll_area.setWidget(content)
+        tab_layout.addWidget(scroll_area)
         self.tabs.addTab(tab, "Zabezpečení")
         self.update_security_mode_ui()
 
@@ -924,6 +933,13 @@ class GameMover(QWidget):
         combo.addItem("Zakázaná", "disabled")
         combo.setCurrentIndex(max(0, combo.findData(policy)))
         return combo
+
+    def fit_security_table_height(self, table):
+        """Show every table row and let the enclosing page handle scrolling."""
+        table.resizeRowsToContents()
+        height = table.horizontalHeader().height() + (2 * table.frameWidth()) + 2
+        height += sum(table.rowHeight(row) for row in range(table.rowCount()))
+        table.setFixedHeight(height)
 
     def populate_fixed_security_operations(self, definitions):
         self.security_fixed_table.setRowCount(0)
@@ -940,6 +956,7 @@ class GameMover(QWidget):
             policy_combo.addItem("Vyžaduje PAM", "pam")
             policy_combo.setEnabled(False)
             self.security_fixed_table.setCellWidget(row, 2, policy_combo)
+        self.fit_security_table_height(self.security_fixed_table)
 
     def update_security_mode_ui(self):
         enabled = is_host_management_mode(self.app_mode) and bool(self.timekpr_token)
@@ -1019,6 +1036,9 @@ class GameMover(QWidget):
                         self.security_server_table, configured.get(action, "disabled"),
                     ),
                 )
+
+        self.fit_security_table_height(self.security_global_table)
+        self.fit_security_table_height(self.security_server_table)
 
         fixed_definitions = catalog.get("fixed") if isinstance(catalog.get("fixed"), list) else []
         self.populate_fixed_security_operations(

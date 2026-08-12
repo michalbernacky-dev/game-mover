@@ -1,6 +1,6 @@
 Name:           game-mover
 Version:        0.8.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
 License:        Proprietary
@@ -136,6 +136,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.8.0-2
+- Prevent Security policy tables from overlapping at constrained window heights
+- Scroll the complete Security page and size tables to their actual rows
+
 * Tue Aug 11 2026 Game Mover Packager <packager@example.invalid> - 0.8.0-1
 - Add a central backend-enforced Security policy registry and GUI tab
 - Move per-server authorization policies out of the Connection tab
