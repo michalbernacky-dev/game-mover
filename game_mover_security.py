@@ -36,6 +36,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "minecraft.operators",
+        "label": "Operátoři Minecraftu",
+        "description": "Načtení a změny seznamu OP hráčů přes interní RCON.",
+        "default": "pam",
+    },
+    {
         "id": "server.logs",
         "label": "Logy serverů",
         "description": "Čtení omezeného výpisu systemd nebo Podman logu registrovaného serveru.",

@@ -131,6 +131,11 @@ client comparison. The **Logs** section prefers the server's persistent
 `data/logs/latest.log` (including Forge/mod output), with the registered systemd
 unit or Podman container as a bounded fallback; it can optionally refresh every
 five seconds.
+The Minecraft **Players** section lists operators from the registered
+`ops.json`; adding and removing OP privileges uses only validated `op`/`deop`
+commands over host-internal RCON. Podman uses the image-local `rcon-cli`, so no
+RCON port or password is exposed outside the container. The independent
+`minecraft.operators` policy defaults to PAM.
 Remote Client mode may inspect safe read-only content but cannot run host
 operations.
 
@@ -468,6 +473,11 @@ Sekce **Logy** u Minecraftu přednostně čte omezený konec persistentního
 `data/logs/latest.log` (tedy i Forge/mod výstup); registrovaná systemd jednotka
 nebo Podman container zůstává bezpečným záložním zdrojem. Výpis lze volitelně
 obnovovat každých pět sekund.
+Minecraft sekce **Hráči** zobrazuje operátory z registrovaného `ops.json`.
+Přidání a odebrání OP používá pouze validované příkazy `op`/`deop` přes interní
+RCON. Podman používá `rcon-cli` uvnitř image, takže se RCON port ani heslo
+nezveřejňují mimo container. Samostatná zásada `minecraft.operators` má výchozí
+režim PAM.
 
 Obnova do existujícího workloadu zatím záměrně není nabízena jako funkční
 tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft

@@ -83,14 +83,15 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.assertEqual(entry["status"].text(), "Běží")
         self.assertEqual(entry["players"].text(), "1 / 20 online · již viděno 2")
-        self.assertEqual(entry["sections"].count(), 5)
+        self.assertEqual(entry["sections"].count(), 6)
         self.assertEqual(
-            [entry["sections"].tabText(index) for index in range(5)],
-            ["Přehled", "Logy", "Nastavení", "Zálohy", "Mody"],
+            [entry["sections"].tabText(index) for index in range(6)],
+            ["Přehled", "Logy", "Nastavení", "Hráči", "Zálohy", "Mody"],
         )
         self.assertEqual(set(entry["lifecycle"]), {"start", "stop", "restart"})
         self.assertIn("properties_fields", entry)
         self.assertIn("logs_output", entry)
+        self.assertIn("operators_table", entry)
 
     def test_properties_unauthorized_response_expires_host_pam_session(self):
         self.window.open_server_management("mc-test")

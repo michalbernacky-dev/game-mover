@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only Minecraft status and persisted-player helpers."""
+"""Minecraft status, RCON, and persisted-player helpers."""
 
 import json
 import os
@@ -128,8 +128,8 @@ def _read_rcon_packet(stream):
     return request_id, packet_type, packet[8:-2].decode("utf-8")
 
 
-def query_server_rcon(host, port, password, timeout=3.0):
-    """Return player counts through the authenticated, read-only RCON list command."""
+def execute_rcon_command(host, port, password, command, timeout=3.0):
+    """Execute one prevalidated command through authenticated Minecraft RCON."""
     request_id = 0x474D
     with socket.create_connection((host, int(port)), timeout=timeout) as stream:
         stream.settimeout(timeout)
@@ -137,10 +137,16 @@ def query_server_rcon(host, port, password, timeout=3.0):
         auth_id, _auth_type, _auth_payload = _read_rcon_packet(stream)
         if auth_id != request_id:
             raise PermissionError("Minecraft RCON authentication failed")
-        stream.sendall(_rcon_packet(request_id, 2, "list"))
+        stream.sendall(_rcon_packet(request_id, 2, command))
         response_id, _response_type, response = _read_rcon_packet(stream)
         if response_id != request_id:
             raise ValueError("Unexpected Minecraft RCON response")
+    return response
+
+
+def query_server_rcon(host, port, password, timeout=3.0):
+    """Return player counts through the authenticated, read-only RCON list command."""
+    response = execute_rcon_command(host, port, password, "list", timeout=timeout)
 
     match = re.search(
         r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online",

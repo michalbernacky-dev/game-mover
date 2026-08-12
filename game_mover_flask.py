@@ -37,6 +37,7 @@ from game_mover_minecraft import (
     configured_rcon,
     configured_server_port,
     count_known_players,
+    execute_rcon_command,
     local_server_addresses,
     query_server_rcon,
     query_server_status,
@@ -45,6 +46,11 @@ from game_mover_properties import (
     MinecraftPropertiesError,
     read_minecraft_properties,
     write_minecraft_properties,
+)
+from game_mover_operators import (
+    MinecraftOperatorsError,
+    operator_command,
+    read_operators,
 )
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_version import __version__
@@ -2190,6 +2196,58 @@ def minecraft_properties():
         "settings": result["settings"],
         "changed": result["changed"],
     })
+
+
+@app.route("/servers/minecraft/operators", methods=["GET", "POST"])
+def minecraft_operators():
+    if not require_local_operation(request, "minecraft.operators"):
+        return jsonify({"message": "Unauthorized"}), 403
+    payload = request.get_json(silent=True) or {}
+    server = find_game_server(
+        request.args.get("server_id") or payload.get("server_id", "")
+    )
+    if not server or server.get("kind") != "minecraft":
+        return jsonify({"message": "Minecraft server not found"}), 404
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    data_directory = data.get("directory")
+    try:
+        if request.method == "GET":
+            return jsonify({
+                "server_id": server["id"],
+                "operators": read_operators(data_directory),
+            })
+
+        command = operator_command(payload.get("action"), payload.get("player"))
+        with workload_lock(server["id"]):
+            if server.get("backend", "systemd") == "podman":
+                adapter = backend_for(
+                    server,
+                    podman_user=PODMAN_USER,
+                    podman_socket_path=PODMAN_SOCKET_PATH,
+                )
+                result = adapter.minecraft_rcon(server, command)
+                if result.returncode != 0:
+                    raise MinecraftOperatorsError(
+                        result.error or result.output or "RCON příkaz selhal"
+                    )
+                response = result.output
+            else:
+                rcon = configured_rcon(data_directory)
+                if not rcon:
+                    raise MinecraftOperatorsError(
+                        "RCON není na tomto serveru nakonfigurován"
+                    )
+                response = execute_rcon_command(
+                    "127.0.0.1", rcon["port"], rcon["password"], command,
+                    timeout=5.0,
+                )
+        return jsonify({
+            "server_id": server["id"],
+            "message": response or "RCON příkaz byl proveden",
+            "operators": read_operators(data_directory),
+        })
+    except (MinecraftOperatorsError, OSError, PermissionError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
 
 
 @app.route("/servers/logs", methods=["GET"])

@@ -274,6 +274,48 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_minecraft_operators_require_policy_and_execute_validated_rcon(self):
+        (self.forge_data / "ops.json").write_text(
+            '[{"uuid":"one","name":"Alex","level":4,"bypassesPlayerLimit":false}]',
+            encoding="utf-8",
+        )
+        (self.forge_data / "server.properties").write_text(
+            "enable-rcon=true\nrcon.port=25575\nrcon.password=secret\n",
+            encoding="utf-8",
+        )
+        self.save_servers()
+
+        denied = self.client.get(
+            "/servers/minecraft/operators?server_id=forge", **self.local_options(),
+        )
+        self.assertEqual(denied.status_code, 403)
+        catalog = self.client.get(
+            "/servers/minecraft/operators?server_id=forge",
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(catalog.status_code, 200)
+        self.assertEqual(catalog.json["operators"][0]["name"], "Alex")
+
+        with patch.object(
+            backend, "execute_rcon_command", return_value="Made Bernye a server operator",
+        ) as execute:
+            response = self.client.post(
+                "/servers/minecraft/operators",
+                json={"server_id": "forge", "action": "op", "player": "Bernye"},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        execute.assert_called_once_with(
+            "127.0.0.1", 25575, "secret", "op Bernye", timeout=5.0,
+        )
+
+        invalid = self.client.post(
+            "/servers/minecraft/operators",
+            json={"server_id": "forge", "action": "op", "player": "Alex; stop"},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(invalid.status_code, 400)
+
     def test_minecraft_logs_prefer_persistent_latest_log_for_podman_and_systemd(self):
         data_root = Path(self.temp_dir.name) / "managed-servers"
         data_directory = data_root / "forge" / "data"

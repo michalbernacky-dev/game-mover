@@ -43,6 +43,19 @@ class WorkloadBackendTest(unittest.TestCase):
             "logs", "--timestamps", "--tail", "500", "mc-test",
         ])
 
+    def test_podman_rcon_uses_image_local_client_without_shell(self):
+        runner = RecordingRunner([BackendResult(0, "Made Bernye a server operator")])
+        backend = PodmanBackend("gameplatform", runner, "/run/user/955/podman/podman.sock")
+
+        result = backend.minecraft_rcon(
+            {"runtime": {"container_name": "mc-test"}}, "op Bernye",
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(runner.calls[0][0][-4:], [
+            "exec", "mc-test", "rcon-cli", "op Bernye",
+        ])
+
     def test_legacy_systemd_workload_uses_only_registered_unit(self):
         runner = RecordingRunner([
             BackendResult(0),

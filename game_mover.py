@@ -385,6 +385,47 @@ class ServerPropertiesThread(QThread):
             self.completed.emit({"server_id": self.server_id, "error": str(error)})
 
 
+class ServerOperatorsThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, headers, action=None, player=None):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.headers = headers
+        self.action = action
+        self.player = player
+
+    def run(self):
+        try:
+            if self.action is None:
+                response = requests.get(
+                    f"{self.base_url}/servers/minecraft/operators",
+                    params={"server_id": self.server_id},
+                    headers=self.headers, timeout=20,
+                )
+                operation = "load"
+            else:
+                response = requests.post(
+                    f"{self.base_url}/servers/minecraft/operators",
+                    json={
+                        "server_id": self.server_id,
+                        "action": self.action,
+                        "player": self.player,
+                    },
+                    headers=self.headers, timeout=20,
+                )
+                operation = self.action
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({
+                "server_id": self.server_id, "action": operation, "payload": data,
+            })
+        except Exception as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+
+
 class ServerLogsThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -562,6 +603,7 @@ class GameMover(QWidget):
         self.compare_mod_threads = {}
         self.server_backups_threads = {}
         self.server_properties_threads = {}
+        self.server_operator_threads = {}
         self.server_log_threads = {}
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
@@ -2177,8 +2219,8 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         outer.addWidget(title)
         subtitle = QLabel(
-            "Provozní příkazy se provedou okamžitě. Budoucí formulářové změny "
-            "budou před uložením jasně oddělené.", page,
+            "Provozní příkazy se provedou okamžitě. Formulářové změny "
+            "jsou před uložením jasně oddělené.", page,
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet("color: #aab7c0;")
@@ -2308,7 +2350,7 @@ class GameMover(QWidget):
             properties_form.addRow("Název světa:", world)
             properties_fields["level-name"] = world
             for key, label, values in (
-                ("gamemode", "Herní režim:", ("survival", "creative", "adventure", "spectator")),
+                ("gamemode", "Výchozí herní režim:", ("survival", "creative", "adventure", "spectator")),
                 ("difficulty", "Obtížnost:", ("peaceful", "easy", "normal", "hard")),
             ):
                 combo = QComboBox(properties_page)
@@ -2367,6 +2409,70 @@ class GameMover(QWidget):
                 "properties_rcon": rcon_label,
                 "properties_reload": properties_reload,
                 "properties_save": properties_save,
+            })
+
+            players_page = QWidget(sections)
+            players_layout = QVBoxLayout(players_page)
+            operators_title = QLabel("Operátoři serveru (OP)", players_page)
+            operators_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+            players_layout.addWidget(operators_title)
+            operators_help = QLabel(
+                "Seznam se čte z ops.json. Přidání a odebrání se provede okamžitě "
+                "přes interní RCON; heslo neopouští hostitele.", players_page,
+            )
+            operators_help.setWordWrap(True)
+            players_layout.addWidget(operators_help)
+            operators_status = QLabel("Seznam operátorů zatím nebyl načten.", players_page)
+            operators_status.setStyleSheet("color: #aab7c0;")
+            operators_status.setWordWrap(True)
+            players_layout.addWidget(operators_status)
+            operators_table = QTableWidget(players_page)
+            operators_table.setColumnCount(3)
+            operators_table.setHorizontalHeaderLabels([
+                "Minecraft jméno", "Úroveň", "Mimo limit hráčů",
+            ])
+            operators_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            operators_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            operators_table.setSelectionMode(QAbstractItemView.SingleSelection)
+            operators_table.setAlternatingRowColors(True)
+            operators_table.verticalHeader().setVisible(False)
+            operators_header = operators_table.horizontalHeader()
+            operators_header.setSectionResizeMode(0, QHeaderView.Stretch)
+            operators_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            operators_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            players_layout.addWidget(operators_table)
+            operators_actions = QHBoxLayout()
+            operator_name = QLineEdit(players_page)
+            operator_name.setMaxLength(16)
+            operator_name.setPlaceholderText("Minecraft jméno hráče")
+            operators_actions.addWidget(operator_name)
+            operator_add = QPushButton("Přidat OP", players_page)
+            operator_add.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.change_server_operator(selected_id, "op")
+            )
+            operators_actions.addWidget(operator_add)
+            operator_remove = QPushButton("Odebrat vybraného", players_page)
+            operator_remove.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.remove_selected_server_operator(selected_id)
+            )
+            operators_actions.addWidget(operator_remove)
+            operators_reload = QPushButton("Načíst znovu", players_page)
+            operators_reload.clicked.connect(
+                lambda _checked=False, selected_id=server_id:
+                self.load_server_operators(selected_id)
+            )
+            operators_actions.addWidget(operators_reload)
+            players_layout.addLayout(operators_actions)
+            sections.addTab(players_page, "Hráči")
+            entry.update({
+                "operators_status": operators_status,
+                "operators_table": operators_table,
+                "operator_name": operator_name,
+                "operator_add": operator_add,
+                "operator_remove": operator_remove,
+                "operators_reload": operators_reload,
             })
 
         if server.get("backup_supported"):
@@ -2476,6 +2582,8 @@ class GameMover(QWidget):
             self.load_server_logs(server_id)
         if "properties_fields" in entry:
             self.load_server_properties(server_id)
+        if "operators_table" in entry:
+            self.load_server_operators(server_id)
         if "mods_table" in entry:
             self.load_server_mods(server_id)
         if "backups_table" in entry and self.local_operation_headers("backup.catalog"):
@@ -2565,6 +2673,22 @@ class GameMover(QWidget):
                 entry["logs_status"].setText(
                     "Logy vyžadují správu hostitele a oprávnění podle zásady „Logy serverů“."
                 )
+        if "operators_table" in entry:
+            operators_allowed = management and bool(
+                self.local_operation_headers("minecraft.operators")
+            )
+            entry["operators_reload"].setEnabled(operators_allowed)
+            entry["operator_name"].setEnabled(operators_allowed and status == "active")
+            entry["operator_add"].setEnabled(operators_allowed and status == "active")
+            entry["operator_remove"].setEnabled(operators_allowed and status == "active")
+            if not operators_allowed:
+                entry["operators_status"].setText(
+                    "Operátoři vyžadují správu hostitele a oprávnění podle zásady „Operátoři Minecraftu“."
+                )
+            elif status != "active":
+                entry["operators_status"].setText(
+                    "Seznam lze načíst, ale změny přes RCON vyžadují běžící server."
+                )
 
     def update_open_server_management_pages(self):
         current = {server.get("id"): server for server in self.last_server_statuses}
@@ -2578,7 +2702,8 @@ class GameMover(QWidget):
                     button.setEnabled(False)
                 for key in (
                     "create_backup", "reload_backups", "reload_mods", "compare_mods",
-                    "logs_tail", "logs_reload", "logs_auto",
+                    "logs_tail", "logs_reload", "logs_auto", "operator_name",
+                    "operator_add", "operator_remove", "operators_reload",
                 ):
                     if key in entry:
                         entry[key].setEnabled(False)
@@ -2775,6 +2900,138 @@ class GameMover(QWidget):
         )
         self.set_server_properties(server_id, payload.get("settings", {}))
         self.refresh_server_statuses()
+
+    def set_server_operators(self, server_id, operators):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "operators_table" not in entry:
+            return
+        table = entry["operators_table"]
+        table.setRowCount(0)
+        for operator in operators if isinstance(operators, list) else []:
+            row = table.rowCount()
+            table.insertRow(row)
+            values = (
+                operator.get("name", "—"),
+                operator.get("level", "—"),
+                "ano" if operator.get("bypasses_player_limit") else "ne",
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                table.setItem(row, column, item)
+
+    def load_server_operators(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "operators_table" not in entry:
+            return
+        if not is_host_management_mode(self.app_mode):
+            entry["operators_status"].setText(
+                "Operátoři jsou dostupní pouze ve správě hostitele."
+            )
+            return
+        headers = self.local_operation_headers("minecraft.operators")
+        if not headers:
+            entry["operators_status"].setText(
+                "Pro načtení operátorů chybí oprávnění podle zásady."
+            )
+            return
+        running = self.server_operator_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["operators_status"].setText("Načítám seznam operátorů…")
+        entry["operators_reload"].setEnabled(False)
+        thread = ServerOperatorsThread(
+            self.host_management_api_url(), server_id, headers,
+        )
+        self.server_operator_threads[server_id] = thread
+        thread.completed.connect(self.on_server_operators_completed)
+        thread.start()
+
+    def change_server_operator(self, server_id, action, player=None):
+        entry = self.server_management_pages.get(server_id)
+        server = self.server_status_by_id(server_id)
+        if not entry or not server or server.get("status") != "active":
+            return
+        player = str(player or entry["operator_name"].text()).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,16}", player):
+            QMessageBox.warning(
+                self, "Operátoři Minecraftu",
+                "Minecraft jméno musí mít 3–16 znaků: písmena, číslice nebo podtržítko.",
+            )
+            return
+        headers = self.local_operation_headers("minecraft.operators")
+        if not headers:
+            QMessageBox.warning(
+                self, "Operátoři Minecraftu",
+                "Pro změnu operátorů chybí oprávnění podle zásady.",
+            )
+            return
+        running = self.server_operator_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["operators_status"].setText(
+            f"Provádím {'op' if action == 'op' else 'deop'} pro hráče {player}…"
+        )
+        entry["operator_add"].setEnabled(False)
+        entry["operator_remove"].setEnabled(False)
+        thread = ServerOperatorsThread(
+            self.host_management_api_url(), server_id, headers,
+            action=action, player=player,
+        )
+        self.server_operator_threads[server_id] = thread
+        thread.completed.connect(self.on_server_operators_completed)
+        thread.start()
+
+    def remove_selected_server_operator(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry:
+            return
+        row = entry["operators_table"].currentRow()
+        item = entry["operators_table"].item(row, 0) if row >= 0 else None
+        if item is None:
+            QMessageBox.information(
+                self, "Operátoři Minecraftu", "Nejdřív vyber operátora v tabulce."
+            )
+            return
+        player = item.text()
+        answer = QMessageBox.question(
+            self, "Odebrat operátora",
+            f"Odebrat hráči {player} oprávnění OP?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.change_server_operator(server_id, "deop", player)
+
+    def on_server_operators_completed(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "operators_table" not in entry:
+            return
+        server = self.server_status_by_id(server_id)
+        if server:
+            self.update_server_management_page(server)
+        error = result.get("error")
+        if error:
+            if "Unauthorized" in error or "403" in error:
+                entry["operators_status"].setText(
+                    self.host_pam_session_expired("Pak seznam operátorů načti znovu")
+                )
+            else:
+                entry["operators_status"].setText(f"Operace s operátory selhala: {error}")
+            return
+        payload = result.get("payload", {})
+        operators = payload.get("operators", [])
+        self.set_server_operators(server_id, operators)
+        action = result.get("action")
+        if action == "load":
+            entry["operators_status"].setText(
+                f"Načteno operátorů: {len(operators)}."
+            )
+        else:
+            entry["operator_name"].clear()
+            entry["operators_status"].setText(
+                payload.get("message", "RCON změna byla provedena.")
+            )
 
     def load_server_backups(self, server_id):
         entry = self.server_management_pages.get(server_id)

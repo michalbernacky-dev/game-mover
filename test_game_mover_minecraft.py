@@ -80,6 +80,19 @@ class MinecraftStatusTest(unittest.TestCase):
         self.assertIn(b"list", fake_socket.sent)
         create_connection.assert_called_once_with(("127.0.0.1", 25575), timeout=3.0)
 
+    def test_execute_rcon_command_returns_server_response(self):
+        request_id = 0x474D
+        fake_socket = FakeSocket(
+            minecraft._rcon_packet(request_id, 2, "")
+            + minecraft._rcon_packet(request_id, 0, "Made Bernye a server operator")
+        )
+        with patch.object(minecraft.socket, "create_connection", return_value=fake_socket):
+            response = minecraft.execute_rcon_command(
+                "127.0.0.1", 25575, "secret", "op Bernye",
+            )
+        self.assertEqual(response, "Made Bernye a server operator")
+        self.assertIn(b"op Bernye", fake_socket.sent)
+
     def test_known_players_uses_configured_world_and_uuid_files(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             data = Path(temporary_directory)

@@ -71,6 +71,10 @@ The first delivered management-tab slice contains the common workload overview,
 lifecycle, bounded log viewing, verified backup catalog and backup creation.
 Minecraft prefers its persistent `data/logs/latest.log`, preserving Forge and
 mod output, and falls back to the systemd journal or Podman runtime output.
+The first player-management slice reads `ops.json` as a bounded, symlink-safe
+catalog and maps form actions only to validated `op`/`deop` commands. Podman
+executes its image-local `rcon-cli`; systemd uses host-local configured RCON.
+RCON credentials are never returned to the GUI or published for this feature.
 Minecraft tabs also contain the existing mod inventory and client comparison. The
 Servers card keeps only the status, a context-sensitive quick start/stop action
 and **Management**.

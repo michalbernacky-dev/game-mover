@@ -328,6 +328,12 @@ class PodmanBackend:
     def restart(self, workload: dict) -> BackendResult:
         return self._command(["restart", "--time", "120", self.reference(workload)], 180)
 
+    def minecraft_rcon(self, workload: dict, command: str) -> BackendResult:
+        """Run one validated command through the image-local RCON client."""
+        return self._command([
+            "exec", self.reference(workload), "rcon-cli", command,
+        ], 20)
+
     def remove_container(self, workload: dict, *, force=False) -> BackendResult:
         arguments = ["rm"]
         if force:
