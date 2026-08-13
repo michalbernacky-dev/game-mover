@@ -37,7 +37,10 @@ class MinecraftStatusTest(unittest.TestCase):
         self.assertIn("::1", addresses)
 
     def test_status_query_reads_online_and_max_players(self):
-        payload = json.dumps({"players": {"online": 3, "max": 20}}).encode("utf-8")
+        payload = json.dumps({
+            "players": {"online": 3, "max": 20},
+            "version": {"name": "1.21.8", "protocol": 772},
+        }).encode("utf-8")
         body = b"\x00" + minecraft._encode_varint(len(payload)) + payload
         response = minecraft._encode_varint(len(body)) + body
         fake_socket = FakeSocket(response)
@@ -45,7 +48,10 @@ class MinecraftStatusTest(unittest.TestCase):
             minecraft.socket, "create_connection", return_value=fake_socket,
         ) as create_connection:
             result = minecraft.query_server_status("127.0.0.1", 25570)
-        self.assertEqual(result, {"online": 3, "max": 20})
+        self.assertEqual(result, {
+            "online": 3, "max": 20,
+            "version": {"name": "1.21.8", "protocol": 772},
+        })
         self.assertIn(minecraft._encode_varint(763), fake_socket.sent)
         create_connection.assert_called_once_with(("127.0.0.1", 25570), timeout=8.0)
 

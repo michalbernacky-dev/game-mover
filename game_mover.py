@@ -2066,20 +2066,21 @@ class GameMover(QWidget):
             status_label = QLabel(f"● {server.get('message', 'Neznámý stav')}")
             status_label.setStyleSheet(f"color: {colors.get(status, '#ff6666')}; font-weight: bold;")
             card_layout.addWidget(status_label)
-            connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
-            direct_port = connection.get("direct_port")
-            if direct_port is not None:
-                if self.app_mode == "server":
-                    connection_host = "127.0.0.1"
-                else:
-                    connection_host, _api_port = self.split_server_address(
-                        self.active_server_profile().get("address", "")
-                    )
-                if ":" in connection_host and not connection_host.startswith("["):
-                    connection_host = f"[{connection_host}]"
-                connection_label = QLabel(f"Připojení: {connection_host}:{direct_port}")
+            recommended_connection = self.server_recommended_connection_text(server)
+            if recommended_connection:
+                connection_label = QLabel(f"Připojení: {recommended_connection}")
                 connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 card_layout.addWidget(connection_label)
+            if server.get("kind") == "minecraft":
+                version_label = QLabel(
+                    f"Verze Minecraftu: {self.server_minecraft_version_text(server)}"
+                )
+                version = server.get("minecraft_version")
+                if isinstance(version, dict) and version.get("protocol") is not None:
+                    version_label.setToolTip(
+                        f"Minecraft protokol: {version['protocol']}"
+                    )
+                card_layout.addWidget(version_label)
             players = server.get("players") if isinstance(server.get("players"), dict) else {}
             online = players.get("online")
             maximum = players.get("max")
@@ -2188,20 +2189,41 @@ class GameMover(QWidget):
                 return server
         return None
 
-    def server_connection_text(self, server):
+    def active_game_host(self):
+        if self.app_mode == "server":
+            return "127.0.0.1"
+        host, _api_port = self.split_server_address(
+            self.active_server_profile().get("address", "")
+        )
+        return host
+
+    @staticmethod
+    def formatted_game_endpoint(host, port):
+        host = str(host or "")
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        return f"{host}:{port}"
+
+    def server_direct_connection_text(self, server):
         connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
         port = connection.get("direct_port")
         if port is None:
             return "Přímé připojení není zveřejněné"
-        if self.app_mode == "server":
-            host = "127.0.0.1"
-        else:
-            host, _api_port = self.split_server_address(
-                self.active_server_profile().get("address", "")
-            )
-        if ":" in host and not host.startswith("["):
-            host = f"[{host}]"
-        return f"{host}:{port}"
+        return self.formatted_game_endpoint(self.active_game_host(), port)
+
+    def server_gate_connection_text(self, server):
+        gate = server.get("gate_connection")
+        if not isinstance(gate, dict) or gate.get("port") is None:
+            return ""
+        host = gate.get("host") or self.active_game_host()
+        return f"{self.formatted_game_endpoint(host, gate['port'])} (Gate Lite)"
+
+    def server_recommended_connection_text(self, server):
+        gate = self.server_gate_connection_text(server)
+        if gate:
+            return gate
+        direct = self.server_direct_connection_text(server)
+        return "" if direct == "Přímé připojení není zveřejněné" else direct
 
     def server_players_text(self, server):
         if server.get("kind") != "minecraft":
@@ -2216,6 +2238,15 @@ class GameMover(QWidget):
         if players.get("query_pending"):
             return "Zjišťuji…"
         return "Nezjištěno"
+
+    def server_minecraft_version_text(self, server):
+        version = server.get("minecraft_version")
+        if isinstance(version, dict) and version.get("name"):
+            return str(version["name"])
+        players = server.get("players") if isinstance(server.get("players"), dict) else {}
+        if players.get("query_pending"):
+            return "zjišťuji…"
+        return "nezjištěna"
 
     def quick_control_server(self, server_id):
         server = self.server_status_by_id(server_id)
@@ -2276,6 +2307,9 @@ class GameMover(QWidget):
         status_label = QLabel(overview)
         connection_label = QLabel(overview)
         connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        direct_connection_caption = QLabel("Přímý backend:", overview)
+        direct_connection_label = QLabel(overview)
+        direct_connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         players_label = QLabel(overview)
         runtime_label = QLabel(overview)
         runtime_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -2283,6 +2317,12 @@ class GameMover(QWidget):
         permissions_label.setWordWrap(True)
         overview_form.addRow("Stav:", status_label)
         overview_form.addRow("Připojení:", connection_label)
+        overview_form.addRow(direct_connection_caption, direct_connection_label)
+        minecraft_version_label = None
+        if server.get("kind") == "minecraft":
+            minecraft_version_label = QLabel(overview)
+            minecraft_version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            overview_form.addRow("Verze Minecraftu:", minecraft_version_label)
         overview_form.addRow("Hráči:", players_label)
         overview_form.addRow("Runtime:", runtime_label)
         overview_form.addRow("Oprávnění:", permissions_label)
@@ -2308,6 +2348,9 @@ class GameMover(QWidget):
             "sections": sections,
             "status": status_label,
             "connection": connection_label,
+            "direct_connection_caption": direct_connection_caption,
+            "direct_connection": direct_connection_label,
+            "minecraft_version": minecraft_version_label,
             "players": players_label,
             "runtime": runtime_label,
             "permissions": permissions_label,
@@ -2745,7 +2788,29 @@ class GameMover(QWidget):
         if tab_index >= 0:
             self.tabs.setTabText(tab_index, f"Správa: {name}")
         entry["status"].setText(server.get("message", "Neznámý stav"))
-        entry["connection"].setText(self.server_connection_text(server))
+        gate_connection = self.server_gate_connection_text(server)
+        if gate_connection:
+            entry["connection"].setText(gate_connection)
+            entry["direct_connection"].setText(
+                self.server_direct_connection_text(server)
+            )
+            entry["direct_connection_caption"].setVisible(True)
+            entry["direct_connection"].setVisible(True)
+        else:
+            entry["connection"].setText(
+                self.server_direct_connection_text(server)
+            )
+            entry["direct_connection_caption"].setVisible(False)
+            entry["direct_connection"].setVisible(False)
+        if entry.get("minecraft_version") is not None:
+            entry["minecraft_version"].setText(
+                self.server_minecraft_version_text(server)
+            )
+            version = server.get("minecraft_version")
+            protocol = version.get("protocol") if isinstance(version, dict) else None
+            entry["minecraft_version"].setToolTip(
+                f"Minecraft protokol: {protocol}" if protocol is not None else ""
+            )
         entry["players"].setText(self.server_players_text(server))
         entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
         permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}

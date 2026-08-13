@@ -74,7 +74,7 @@ def _read_varint(stream):
 
 
 def query_server_status(host, port, timeout=8.0, protocol_version=763):
-    """Return online/max player counts using the Minecraft status protocol."""
+    """Return player counts and server version using the Minecraft status protocol."""
     encoded_host = host.encode("utf-8")
     if len(encoded_host) > 255:
         raise ValueError("Minecraft host name is too long")
@@ -105,10 +105,21 @@ def query_server_status(host, port, timeout=8.0, protocol_version=763):
     players = payload.get("players") if isinstance(payload, dict) else None
     if not isinstance(players, dict):
         raise ValueError("Minecraft status does not contain player counts")
-    return {
+    result = {
         "online": int(players.get("online", 0)),
         "max": int(players.get("max", 0)),
     }
+    version = payload.get("version") if isinstance(payload, dict) else None
+    if isinstance(version, dict):
+        name = re.sub(r"[\x00-\x1f\x7f]", " ", str(version.get("name", "")))
+        name = " ".join(name.split()).strip()
+        protocol = version.get("protocol")
+        if name:
+            result["version"] = {
+                "name": name[:120],
+                "protocol": protocol if isinstance(protocol, int) else None,
+            }
+    return result
 
 
 def _rcon_packet(request_id, packet_type, payload):

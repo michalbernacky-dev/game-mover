@@ -201,12 +201,18 @@ class ServerRegistryTest(unittest.TestCase):
             ),
             patch.object(
                 backend, "cached_minecraft_player_status",
-                return_value=({"online": 1, "max": 20}, False, None),
+                return_value=({
+                    "online": 1, "max": 20,
+                    "version": {"name": "1.21.8", "protocol": 772},
+                }, False, None),
             ) as status_query,
         ):
             status = backend.game_server_status(server)
         self.assertEqual(status["connection"], {"direct_port": 25570, "source": "podman"})
         self.assertEqual(status["players"], {"online": 1, "max": 20, "known": 1})
+        self.assertEqual(
+            status["minecraft_version"], {"name": "1.21.8", "protocol": 772},
+        )
         status_query.assert_called_once_with(
             "mc-test", ["192.0.2.66", "127.0.0.1", "::1"], 25570, rcon=None,
         )
@@ -466,6 +472,39 @@ class ServerRegistryTest(unittest.TestCase):
         ])
         fake_backend.restart.assert_called_once()
 
+    def test_gate_connection_catalog_prefers_named_route_and_supports_default(self):
+        servers = [{"id": "forge"}, {"id": "mc-test"}]
+        config = backend.default_gate_config()
+        config["listen"]["port"] = 25581
+        config["routes"] = [
+            {"host": "*", "backend": {"host": "forge", "port": 25565}},
+            {"host": "*", "backend": {"host": "vanilla", "port": 25565}},
+            {"host": "forge.mc.example", "backend": {"host": "forge", "port": 25565}},
+        ]
+        targets = [
+            {"id": "forge", "backend": "podman", "container_name": "forge",
+             "endpoint": {"host": "forge", "port": 25565}},
+            {"id": "mc-test", "backend": "podman", "container_name": "vanilla",
+             "endpoint": {"host": "vanilla", "port": 25565}},
+        ]
+        with (
+            patch.object(backend.os.path, "isfile", return_value=True),
+            patch.object(backend, "load_gate_config", return_value=config),
+            patch.object(backend, "minecraft_route_targets", return_value=targets),
+        ):
+            connections = backend.gate_connections_by_server(servers)
+
+        self.assertEqual(connections["forge"], {
+            "host": "forge.mc.example", "port": 25581, "route_host": "forge.mc.example",
+        })
+        self.assertEqual(connections["mc-test"], {
+            "port": 25581, "route_host": "*",
+        })
+
+    def test_gate_connection_catalog_is_empty_without_persisted_config(self):
+        with patch.object(backend.os.path, "isfile", return_value=False):
+            self.assertEqual(backend.gate_connections_by_server(self.servers), {})
+
     def test_gate_routes_reject_unknown_target_and_missing_default(self):
         targets = [{
             "id": "forge", "name": "Forge", "backend": "systemd",
@@ -665,7 +704,13 @@ class ServerRegistryTest(unittest.TestCase):
         cache_key = ("forge", 25565)
         with patch.object(
             backend, "query_server_rcon", return_value={"online": 2, "max": 20},
-        ) as rcon_query, patch.object(backend, "query_server_status") as status_query:
+        ) as rcon_query, patch.object(
+            backend, "query_server_status",
+            return_value={
+                "online": 1, "max": 10,
+                "version": {"name": "1.20.1", "protocol": 763},
+            },
+        ) as status_query:
             backend._refresh_minecraft_player_status(
                 cache_key, ["127.0.0.1"], 25565,
                 {"port": 25575, "password": "secret"},
@@ -677,7 +722,11 @@ class ServerRegistryTest(unittest.TestCase):
         rcon_query.assert_called_once_with(
             "127.0.0.1", 25575, "secret", timeout=3.0,
         )
-        status_query.assert_not_called()
+        status_query.assert_called_once_with("127.0.0.1", 25565, timeout=3.0)
+        self.assertEqual(
+            backend.MINECRAFT_STATUS_CACHE[cache_key]["version"],
+            {"name": "1.20.1", "protocol": 763},
+        )
 
     def test_minecraft_status_refresh_is_non_blocking_and_deduplicated(self):
         fake_executor = Mock()

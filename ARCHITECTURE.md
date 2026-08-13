@@ -58,6 +58,12 @@ assuming one runtime:
   its validated `server.properties` port;
 - runtime-specific discovery stays behind the adapter, while RCON, properties,
   players, logs, backup and UI management use common workload capabilities.
+- the standard Minecraft status response is the authority for the client version
+  name and protocol displayed by the UI; image tags are not a substitute, while
+  RCON may independently remain the player-count authority.
+- a persisted Gate route becomes the recommended player endpoint on overview
+  cards. Per-server management retains both that ingress endpoint and the direct
+  backend endpoint; an unresolved or absent route leaves direct access unchanged.
 
 ## User interface
 

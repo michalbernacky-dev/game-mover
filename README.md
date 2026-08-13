@@ -212,6 +212,16 @@ For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
 resolved port is used for a standard read-only Minecraft status ping and is
 combined with the remote client's configured host to display the game address.
+The same response supplies the exact Minecraft version advertised to clients
+and its protocol number. The GUI displays that version on the server card and
+in the management overview, so users can select a compatible launcher before
+connecting. A failed version probe remains non-blocking and is never replaced
+by a guess based on an image tag.
+When a persisted Gate route resolves to a registered Minecraft workload, the
+Servers card presents that route as the recommended player address. The
+management overview then displays both the Gate route and the direct backend
+address. Without a usable Gate route, the direct address remains the only one
+shown everywhere.
 For local systemd servers with RCON enabled, player counts prefer the
 authenticated read-only `list` command; the RCON password never leaves the
 backend. The standard status protocol remains the fallback, so RCON is optional.
@@ -556,7 +566,15 @@ také vyžaduje výslovný souhlas s Minecraft EULA.
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní
 read-only Minecraft status ping a vzdálený klient jej spojí s hostitelem ze svého
-profilu. U lokálních systemd serverů se zapnutým RCON se počet hráčů přednostně
+profilu. Ze stejné odpovědi se načte přesná verze Minecraftu oznamovaná klientům
+a číslo protokolu. GUI ji ukazuje na kartě serveru i v přehledu správy, aby bylo
+před připojením jasné, jakou verzi launcheru použít. Selhání dotazu nic neblokuje
+a verze se nikdy neodhaduje z tagu container image.
+Pokud se persistentní Gate trasa bezpečně spáruje s registrovaným Minecraft
+workloadem, karta Servery ji ukáže jako doporučenou adresu pro hráče. Přehled
+správy pak zobrazí adresu přes Gate i přímou adresu backendu. Bez použitelné Gate
+trasy se všude nadále ukazuje pouze přímá adresa.
+U lokálních systemd serverů se zapnutým RCON se počet hráčů přednostně
 načítá autentizovaným read-only příkazem `list`; RCON heslo backend nikdy
 neposílá do API. Standardní status protokol zůstává fallbackem, takže RCON je
 volitelný. Celkový počet známých hráčů se počítá ze UUID v persistentních datech

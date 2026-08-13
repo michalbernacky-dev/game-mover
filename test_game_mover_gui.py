@@ -17,6 +17,8 @@ SAMPLE_SERVER = {
     "message": "Běží",
     "runtime_label": "podman: mc-test",
     "connection": {"direct_port": 25570},
+    "gate_connection": {"host": "vanilla.mc.example", "port": 25581, "route_host": "vanilla.mc.example"},
+    "minecraft_version": {"name": "1.21.8", "protocol": 772},
     "players": {"online": 1, "max": 20, "known": 2},
     "permissions": {
         "start": "silent",
@@ -83,6 +85,10 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.assertEqual(entry["status"].text(), "Běží")
         self.assertEqual(entry["players"].text(), "1 / 20 online · již viděno 2")
+        self.assertEqual(entry["minecraft_version"].text(), "1.21.8")
+        self.assertEqual(entry["connection"].text(), "vanilla.mc.example:25581 (Gate Lite)")
+        self.assertEqual(entry["direct_connection"].text(), "127.0.0.1:25570")
+        self.assertTrue(entry["direct_connection"].isVisibleTo(entry["page"]))
         self.assertEqual(entry["sections"].count(), 7)
         self.assertEqual(
             [entry["sections"].tabText(index) for index in range(7)],
@@ -93,6 +99,30 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("logs_output", entry)
         self.assertIn("operators_table", entry)
         self.assertIn("whitelist_table", entry)
+
+    def test_direct_connection_is_recommended_when_gate_route_is_absent(self):
+        server = dict(SAMPLE_SERVER)
+        server.pop("gate_connection", None)
+        self.window.last_server_statuses = [server]
+        self.window.open_server_management("mc-test")
+        entry = self.window.server_management_pages["mc-test"]
+
+        self.assertEqual(entry["connection"].text(), "127.0.0.1:25570")
+        self.assertFalse(entry["direct_connection"].isVisibleTo(entry["page"]))
+        self.assertEqual(
+            self.window.server_recommended_connection_text(server), "127.0.0.1:25570",
+        )
+
+    def test_server_card_prefers_gate_and_does_not_show_direct_backend(self):
+        layout = self.window.server_card_layouts["mc-test"]
+        labels = [
+            layout.itemAt(index).widget().text()
+            for index in range(layout.count())
+            if layout.itemAt(index).widget() is not None
+        ]
+
+        self.assertIn("Připojení: vanilla.mc.example:25581 (Gate Lite)", labels)
+        self.assertNotIn("Připojení: 127.0.0.1:25570", labels)
 
     def test_properties_unauthorized_response_expires_host_pam_session(self):
         self.window.open_server_management("mc-test")

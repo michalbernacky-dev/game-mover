@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.13.0
+Version:        0.14.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -145,6 +145,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Thu Aug 13 2026 Game Mover Packager <packager@example.invalid> - 0.14.0-1
+- Display the Minecraft version advertised by each server in cards and management
+- Keep RCON player counts while independently discovering version and protocol
+- Prefer a configured Gate address on server cards and retain both paths in management
+
 * Wed Aug 12 2026 Game Mover Packager <packager@example.invalid> - 0.13.0-1
 - Add policy-protected Minecraft whitelist state and player management through RCON
 - Read whitelist.json safely and support explicit server reload without exposing RCON

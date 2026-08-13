@@ -365,6 +365,38 @@ def abstract_gate_routes(config, targets):
     return routes
 
 
+def gate_connections_by_server(servers):
+    """Return usable public Gate routes keyed by registered Minecraft server ID."""
+    if not os.path.isfile(GATE_CONFIG_PATH):
+        return {}
+    try:
+        config = load_gate_config()
+        routes = abstract_gate_routes(config, minecraft_route_targets(servers))
+    except (GateConfigError, KeyError, OSError, TypeError, ValueError):
+        return {}
+    connections = {}
+    for route in routes:
+        target_id = route.get("target_id")
+        route_host = str(route.get("host", ""))
+        if not target_id or not route_host:
+            continue
+        if route_host != "*" and any(marker in route_host for marker in ("*", "?")):
+            continue
+        connection = {
+            "port": config["listen"]["port"],
+            "route_host": route_host,
+        }
+        if route_host != "*":
+            connection["host"] = route_host
+        existing = connections.get(target_id)
+        if existing and existing.get("route_host") != "*":
+            continue
+        # A concrete hostname is the useful, user-facing address and therefore
+        # always replaces a wildcard route, regardless of config ordering.
+        connections[target_id] = connection
+    return connections
+
+
 def find_game_server(server_id):
     for server in load_game_servers():
         if server.get("id") == server_id:
@@ -669,6 +701,7 @@ def _minecraft_probe_hosts(hosts, preferred_host=None):
 
 def _refresh_minecraft_player_status(cache_key, hosts, port, rcon=None):
     counts = None
+    version = None
     errors = []
     selected_host = None
     with MINECRAFT_STATUS_LOCK:
@@ -686,14 +719,21 @@ def _refresh_minecraft_player_status(cache_key, hosts, port, rcon=None):
                     f"RCON: {type(caught_error).__name__}: {caught_error}"
                 )
         candidates = _minecraft_probe_hosts(hosts, preferred_host)
-        for host in candidates if counts is None else ():
+        for host in candidates:
             timeout = (
                 MINECRAFT_STATUS_TIMEOUT
                 if host == preferred_host
                 else MINECRAFT_STATUS_DISCOVERY_TIMEOUT
             )
             try:
-                counts = query_server_status(host, port, timeout=timeout)
+                status = query_server_status(host, port, timeout=timeout)
+                if counts is None:
+                    counts = {
+                        "online": status["online"],
+                        "max": status["max"],
+                    }
+                if isinstance(status.get("version"), dict):
+                    version = dict(status["version"])
                 selected_host = host
                 break
             except Exception as caught_error:
@@ -708,8 +748,13 @@ def _refresh_minecraft_player_status(cache_key, hosts, port, rcon=None):
             entry["error"] = error
             if counts is not None:
                 entry["counts"] = dict(counts)
+                if version is not None:
+                    entry["version"] = dict(version)
+                else:
+                    entry.pop("version", None)
                 entry["last_success"] = entry["last_attempt"]
-                entry["preferred_host"] = selected_host
+                if selected_host:
+                    entry["preferred_host"] = selected_host
             MINECRAFT_STATUS_INFLIGHT.discard(cache_key)
 
 
@@ -722,6 +767,7 @@ def cached_minecraft_player_status(server_id, hosts, port, rcon=None):
     with MINECRAFT_STATUS_LOCK:
         entry = MINECRAFT_STATUS_CACHE.get(cache_key, {})
         counts = entry.get("counts")
+        version = entry.get("version")
         error = entry.get("error")
         last_attempt = entry.get("last_attempt", 0.0)
         refresh_after = (
@@ -735,6 +781,8 @@ def cached_minecraft_player_status(server_id, hosts, port, rcon=None):
             pending = True
             should_refresh = True
         snapshot = dict(counts) if isinstance(counts, dict) else None
+        if snapshot is not None and isinstance(version, dict):
+            snapshot["version"] = dict(version)
     if should_refresh:
         try:
             MINECRAFT_STATUS_EXECUTOR.submit(
@@ -828,7 +876,10 @@ def game_server_status(server, security_config=None):
                     server.get("id", ""), probe_hosts, direct_port, rcon=rcon,
                 )
                 if counts is not None:
+                    version = counts.pop("version", None)
                     players.update(counts)
+                    if isinstance(version, dict):
+                        result["minecraft_version"] = version
                 if pending:
                     players["query_pending"] = True
                 if probe_error:
@@ -1384,6 +1435,11 @@ def servers_status():
             ))
     else:
         statuses = []
+    gate_connections = gate_connections_by_server(servers)
+    for status in statuses:
+        gate_connection = gate_connections.get(status.get("id"))
+        if gate_connection and status.get("kind") == "minecraft":
+            status["gate_connection"] = gate_connection
     known_ids = {server.get("id") for server in statuses}
     for operation in OPERATIONS.snapshots(kind="minecraft-install"):
         if operation.get("running") and operation.get("target_id") not in known_ids:
