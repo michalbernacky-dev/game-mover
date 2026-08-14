@@ -327,6 +327,31 @@ class ServerBackupThread(QThread):
             self.completed.emit({"error": str(error)})
 
 
+class ServerDeleteThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, payload, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.payload = payload
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.delete(
+                f"{self.base_url}/servers/minecraft/delete",
+                json=self.payload,
+                headers=self.headers,
+                timeout=900,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit(data)
+        except Exception as error:
+            self.completed.emit({"error": str(error), "id": self.payload.get("id", "")})
+
+
 class ServerBackupsThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -638,6 +663,7 @@ class GameMover(QWidget):
         self.compare_mods_thread = None
         self.server_backup_thread = None
         self.server_backup_server_id = ""
+        self.server_delete_thread = None
         self.server_management_pages = {}
         self.server_mod_inventories = {}
         self.server_mod_threads = {}
@@ -2339,6 +2365,25 @@ class GameMover(QWidget):
             lifecycle_buttons[action] = button
         lifecycle.addStretch()
         overview_layout.addLayout(lifecycle)
+        delete_row = QHBoxLayout()
+        delete_help = QLabel(
+            "Úplné odstranění je dostupné jen pro platformou spravovaný Podman Minecraft.",
+            overview,
+        )
+        delete_help.setStyleSheet("color: #d9a0a0;")
+        delete_help.setWordWrap(True)
+        delete_row.addWidget(delete_help, 1)
+        delete_server = QPushButton("Odstranit server…", overview)
+        delete_server.setStyleSheet(
+            "QPushButton { color: #ffb3b3; border-color: #a84a4a; }"
+            "QPushButton:hover { background-color: #633333; }"
+        )
+        delete_server.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.delete_management_server(selected_id)
+        )
+        delete_row.addWidget(delete_server)
+        overview_layout.addLayout(delete_row)
         overview_layout.addStretch()
         sections.addTab(overview, "Přehled")
 
@@ -2355,6 +2400,8 @@ class GameMover(QWidget):
             "runtime": runtime_label,
             "permissions": permissions_label,
             "lifecycle": lifecycle_buttons,
+            "delete_help": delete_help,
+            "delete_server": delete_server,
         }
 
         logs_page = QWidget(sections)
@@ -2777,6 +2824,104 @@ class GameMover(QWidget):
             permissions.get("backup", "disabled"),
         )
 
+    def delete_management_server(self, server_id):
+        server = self.server_status_by_id(server_id)
+        if not server or not server.get("deletion_supported"):
+            QMessageBox.warning(
+                self, "Odstranit server",
+                "Úplné odstranění je dostupné jen pro platformou spravovaný Podman Minecraft.",
+            )
+            return
+        if self.server_delete_thread and self.server_delete_thread.isRunning():
+            QMessageBox.information(
+                self, "Odstranit server", "Jiné odstranění serveru právě probíhá.",
+            )
+            return
+        headers = self.local_operation_headers("minecraft.delete")
+        if not is_host_management_mode(self.app_mode) or not headers:
+            QMessageBox.warning(
+                self, "Odstranit server",
+                "Odstranění serveru není podle bezpečnostní zásady povolené.",
+            )
+            return
+
+        name = server.get("name", server_id)
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Odstranit server {name}")
+        dialog.setMinimumWidth(620)
+        layout = QVBoxLayout(dialog)
+        warning = QLabel(
+            "Tato operace nevratně odstraní Podman container a registraci serveru. "
+            "Příslušné hostname trasy budou odebrány z Gate Lite.",
+            dialog,
+        )
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #ff9f9f; font-weight: bold;")
+        layout.addWidget(warning)
+        delete_data = QCheckBox("Smazat persistentní data serveru", dialog)
+        delete_data.setChecked(True)
+        layout.addWidget(delete_data)
+        delete_backups = QCheckBox("Smazat také všechny zálohy tohoto serveru", dialog)
+        layout.addWidget(delete_backups)
+        detail = QLabel(
+            "Bez smazání záloh lze server později obnovit pod novým ID. "
+            "Pro úplnou likvidaci zaškrtni obě volby.",
+            dialog,
+        )
+        detail.setWordWrap(True)
+        detail.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(detail)
+        layout.addWidget(QLabel(f"Pro potvrzení napiš přesné ID serveru: {server_id}", dialog))
+        confirmation = QLineEdit(dialog)
+        confirmation.setPlaceholderText(server_id)
+        layout.addWidget(confirmation)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        delete_button = buttons.button(QDialogButtonBox.Ok)
+        delete_button.setText("Nevratně odstranit")
+        delete_button.setEnabled(False)
+        confirmation.textChanged.connect(
+            lambda text: delete_button.setEnabled(text == server_id)
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        payload = {
+            "id": server_id,
+            "confirmation": confirmation.text(),
+            "delete_data": delete_data.isChecked(),
+            "delete_backups": delete_backups.isChecked(),
+        }
+        self.server_delete_thread = ServerDeleteThread(
+            self.host_management_api_url(), payload, headers,
+        )
+        self.server_delete_thread.completed.connect(self.on_server_delete_completed)
+        self.server_delete_thread.start()
+        self.update_open_server_management_pages()
+
+    def on_server_delete_completed(self, payload):
+        error = payload.get("error")
+        if error:
+            if error == "Unauthorized":
+                error = self.host_pam_session_expired()
+            QMessageBox.critical(self, "Odstranit server", f"Odstranění selhalo: {error}")
+            self.update_open_server_management_pages()
+            return
+        server_id = payload.get("id", "")
+        entry = self.server_management_pages.get(server_id)
+        if entry:
+            index = self.tabs.indexOf(entry["page"])
+            if index >= 0:
+                self.close_server_management_tab(index)
+        QMessageBox.information(
+            self, "Odstranit server", payload.get("message", "Server byl odstraněn."),
+        )
+        self.refresh_server_statuses()
+        if is_host_management_mode(self.app_mode) and self.timekpr_token:
+            self.load_security_policies()
+
     def update_server_management_page(self, server):
         entry = self.server_management_pages.get(server.get("id"))
         if not entry:
@@ -2841,6 +2986,18 @@ class GameMover(QWidget):
             entry["reload_backups"].setEnabled(
                 management and bool(self.local_operation_headers("backup.catalog"))
             )
+        deletion_supported = bool(server.get("deletion_supported"))
+        entry["delete_help"].setVisible(deletion_supported)
+        entry["delete_server"].setVisible(deletion_supported)
+        entry["delete_server"].setEnabled(
+            deletion_supported
+            and management
+            and bool(self.local_operation_headers("minecraft.delete"))
+            and not (
+                self.server_delete_thread is not None
+                and self.server_delete_thread.isRunning()
+            )
+        )
         if "properties_fields" in entry:
             properties_allowed = management and bool(
                 self.local_operation_headers("minecraft.properties")

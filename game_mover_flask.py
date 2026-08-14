@@ -836,6 +836,11 @@ def game_server_status(server, security_config=None):
         "message": state.message,
         "error": state.error,
     }
+    result["deletion_supported"] = (
+        server.get("kind") == "minecraft"
+        and backend_name == "podman"
+        and server.get("management_mode") == "managed"
+    )
     connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
     configured_port = connection.get("direct_port")
     direct_port = None
@@ -2132,6 +2137,186 @@ def minecraft_install():
         "players": player_status,
         "hostname": config["hostname"] or None,
         "route_warning": route_warning,
+    })
+
+
+def _managed_server_deletion_paths(server, *, delete_data, delete_backups):
+    server_id = str(server.get("id", ""))
+    server_root = os.path.join(PODMAN_DATA_ROOT, server_id)
+    expected_data = os.path.join(server_root, "data")
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    configured_data = os.path.realpath(str(data.get("directory", "")))
+    if (
+        not server_id
+        or server_root == PODMAN_DATA_ROOT
+        or os.path.dirname(server_root) != PODMAN_DATA_ROOT
+        or configured_data != expected_data
+        or os.path.islink(server_root)
+    ):
+        raise ValueError("Datový adresář serveru neodpovídá bezpečnému spravovanému umístění")
+    backup_root = os.path.join(BACKUP_ROOT, server_id)
+    if (
+        backup_root == BACKUP_ROOT
+        or os.path.dirname(backup_root) != BACKUP_ROOT
+        or os.path.islink(backup_root)
+    ):
+        raise ValueError("Adresář záloh serveru neodpovídá bezpečnému spravovanému umístění")
+    return {
+        "server_root": server_root if delete_data else None,
+        "backup_root": backup_root if delete_backups else None,
+    }
+
+
+def _publish_gate_config(config, gate_backend):
+    layout = write_gate_layout(config, GATE_DATA_DIRECTORY)
+    chown_gate_layout(layout, PODMAN_USER)
+    save_gate_config(config)
+    gate_workload = {
+        "backend": "podman",
+        "runtime": {"container_name": config["container_name"]},
+    }
+    deployed = gate_backend.container_exists(gate_workload)
+    if deployed:
+        result = gate_backend.restart(gate_workload)
+        if result.returncode != 0:
+            raise RuntimeError(
+                result.error or result.output or "Gate Lite se nepodařilo restartovat"
+            )
+    return deployed
+
+
+@app.route("/servers/minecraft/delete", methods=["DELETE"])
+def minecraft_delete():
+    if not require_local_operation(request, "minecraft.delete"):
+        return jsonify({"message": "Unauthorized"}), 403
+    payload = request.json or {}
+    server_id = str(payload.get("id", "")).strip()
+    if str(payload.get("confirmation", "")) != server_id:
+        return jsonify({"message": "Potvrzení neodpovídá ID serveru"}), 400
+    server = find_game_server(server_id)
+    if not server:
+        return jsonify({"message": "Server nebyl nalezen"}), 404
+    if not (
+        server.get("kind") == "minecraft"
+        and server.get("backend") == "podman"
+        and server.get("management_mode") == "managed"
+    ):
+        return jsonify({
+            "message": "Úplné odstranění je povolené jen pro platformou spravovaný Podman Minecraft",
+        }), 400
+    runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+    if runtime.get("container_name") != server_id:
+        return jsonify({"message": "Jméno spravovaného containeru neodpovídá ID serveru"}), 400
+    try:
+        paths = _managed_server_deletion_paths(
+            server,
+            delete_data=payload.get("delete_data") is True,
+            delete_backups=payload.get("delete_backups") is True,
+        )
+    except ValueError as error:
+        return jsonify({"message": str(error)}), 400
+
+    servers = load_game_servers()
+    remaining_servers = [item for item in servers if item.get("id") != server_id]
+    old_gate_config = None
+    new_gate_config = None
+    removed_routes = []
+    if os.path.isfile(GATE_CONFIG_PATH):
+        try:
+            old_gate_config = load_gate_config()
+            abstract_routes = abstract_gate_routes(
+                old_gate_config, minecraft_route_targets(servers),
+            )
+            removed_routes = [
+                route for route in abstract_routes if route.get("target_id") == server_id
+            ]
+            if any(route.get("host") == "*" for route in removed_routes):
+                return jsonify({
+                    "message": (
+                        "Server je cílem výchozí Gate trasy *. "
+                        "Nejdřív ji ve směrování přesuň na jiný server."
+                    ),
+                }), 409
+            if removed_routes:
+                removed_hosts = {route["host"] for route in removed_routes}
+                remaining_routes = [
+                    route for route in old_gate_config["routes"]
+                    if route["host"] not in removed_hosts
+                ]
+                if not remaining_routes:
+                    return jsonify({
+                        "message": "Smazáním serveru by Gate Lite zůstal bez jediné trasy",
+                    }), 409
+                new_gate_config = normalize_gate_config({
+                    **old_gate_config, "routes": remaining_routes,
+                })
+        except (GateConfigError, KeyError, OSError, TypeError, ValueError) as error:
+            return jsonify({"message": f"Gate trasy nelze bezpečně ověřit: {error}"}), 500
+
+    workload_backend = None
+    gate_backend = None
+    gate_changed = False
+    runtime_absent = False
+    try:
+        workload_backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        gate_backend = backend_for(
+            {
+                "backend": "podman",
+                "runtime": {
+                    "container_name": (
+                        old_gate_config or default_gate_config()
+                    )["container_name"],
+                },
+            },
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock(server_id):
+            if new_gate_config is not None:
+                gate_changed = True
+                _publish_gate_config(new_gate_config, gate_backend)
+            if workload_backend.container_exists(server):
+                result = workload_backend.remove_container(server, force=True)
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        result.error or result.output or "Odstranění containeru selhalo"
+                    )
+            runtime_absent = True
+            for path in (paths["server_root"], paths["backup_root"]):
+                if path and os.path.lexists(path):
+                    shutil.rmtree(path)
+            current_security = load_security_config(servers)
+            save_security_config(normalize_security_config(
+                current_security, remaining_servers,
+            ))
+            save_game_servers(remaining_servers)
+            with MINECRAFT_STATUS_LOCK:
+                for key in list(MINECRAFT_STATUS_CACHE):
+                    if key and key[0] == server_id:
+                        MINECRAFT_STATUS_CACHE.pop(key, None)
+                        MINECRAFT_STATUS_INFLIGHT.discard(key)
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
+        if (
+            gate_changed and not runtime_absent
+            and old_gate_config is not None and gate_backend is not None
+        ):
+            try:
+                _publish_gate_config(old_gate_config, gate_backend)
+            except (KeyError, OSError, RuntimeError, ValueError):
+                pass
+        return jsonify({"message": f"Odstranění serveru selhalo: {error}"}), 500
+
+    return jsonify({
+        "message": f"Server {server.get('name', server_id)} byl odstraněn",
+        "id": server_id,
+        "container_deleted": True,
+        "data_deleted": paths["server_root"] is not None,
+        "backups_deleted": paths["backup_root"] is not None,
+        "gate_routes_deleted": [route["host"] for route in removed_routes],
     })
 
 

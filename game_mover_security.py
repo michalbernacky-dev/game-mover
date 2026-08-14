@@ -30,6 +30,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "minecraft.delete",
+        "label": "Odstranění Minecraft serveru",
+        "description": "Zničení spravovaného containeru, registrace a zvolených persistentních dat.",
+        "default": "pam",
+    },
+    {
         "id": "minecraft.properties",
         "label": "Nastavení Minecraft serveru",
         "description": "Čtení a validovaný zápis server.properties registrovaného Minecraft serveru.",

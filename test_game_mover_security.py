@@ -63,6 +63,8 @@ class SecurityPolicyTest(unittest.TestCase):
     def test_public_catalog_contains_fixed_timekpr_pam_policy(self):
         config = normalize_security_config(None, self.servers)
         payload = public_security_payload(config, self.servers)
+        global_catalog = {item["id"]: item for item in payload["catalog"]["global"]}
+        self.assertEqual(global_catalog["minecraft.delete"]["default"], "pam")
         fixed = {item["id"]: item for item in payload["catalog"]["fixed"]}
         self.assertEqual(fixed["timekpr.manage"]["policy"], "pam")
         self.assertEqual(fixed["security.manage"]["policy"], "pam")

@@ -208,6 +208,15 @@ server and its data are never modified by restore. The UI validates the workload
 ID, Minecraft and loader versions, Java image, memory, unique direct port and an
 optional Gate hostname, and requires explicit acceptance of the Minecraft EULA.
 
+The management overview can permanently remove only Minecraft instances created
+and owned by the platform (`podman` plus `management_mode=managed`). Deletion has
+its own Security policy, requires the exact workload ID to be typed, always
+removes the container and registry entry, and offers separate choices for the
+persistent data and backup catalog. Named Gate routes are removed with the
+server. If the server still owns the wildcard `*` route, deletion is rejected
+until an administrator explicitly assigns that fallback to another server.
+Systemd and adopted Podman workloads cannot be destroyed through this endpoint.
+
 For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
 resolved port is used for a standard read-only Minecraft status ping and is
@@ -562,6 +571,15 @@ adresáře obnovit jednu z těchto ověřených záloh. Zdrojový server ani jeh
 se obnovou nemění. Rozhraní ověřuje ID workloadu, verze Minecraftu a loaderu,
 Java image, paměť, unikátní přímý port a volitelný Gate hostname; před instalací
 také vyžaduje výslovný souhlas s Minecraft EULA.
+
+V přehledu správy lze nevratně odstranit pouze Minecraft instance vytvořené a
+vlastněné platformou (`podman` a `management_mode=managed`). Mazání má vlastní
+zásadu v Zabezpečení, vyžaduje opsání přesného ID workloadu, vždy odstraní
+container a registraci a nabízí oddělenou volbu pro persistentní data a katalog
+záloh. Pojmenované Gate trasy se odstraní spolu se serverem. Pokud server stále
+vlastní výchozí trasu `*`, mazání se odmítne, dokud správce fallback výslovně
+nepřesměruje jinam. Systemd ani adoptovaný Podman workload tímto rozhraním
+zničit nelze.
 
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní

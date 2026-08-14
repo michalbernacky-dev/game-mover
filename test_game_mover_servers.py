@@ -1092,5 +1092,156 @@ class ServerRegistryTest(unittest.TestCase):
             headers=self.pam_headers, environ_base={"REMOTE_ADDR": "192.0.2.10"},
         ).status_code, 403)
 
+    def test_managed_minecraft_delete_removes_runtime_routes_data_and_backups(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        backup_root = Path(self.temp_dir.name) / "backups"
+        kcd_root = data_root / "kcd"
+        kcd_data = kcd_root / "data"
+        kcd_data.mkdir(parents=True)
+        (kcd_data / "server.properties").write_text("server-port=25565\n")
+        kcd_backups = backup_root / "kcd"
+        kcd_backups.mkdir(parents=True)
+        (kcd_backups / "old.tar.gz").write_bytes(b"backup")
+        servers = [
+            {
+                "id": "kcd", "name": "KCD", "backend": "podman",
+                "kind": "minecraft", "management_mode": "managed",
+                "runtime": {"container_name": "kcd"},
+                "data": {"directory": str(kcd_data)},
+                "mods_dir": str(kcd_data / "mods"),
+            },
+            {
+                "id": "vanilla", "name": "Vanilla", "backend": "podman",
+                "kind": "minecraft", "management_mode": "managed",
+                "runtime": {"container_name": "vanilla"},
+                "data": {"directory": str(data_root / "vanilla" / "data")},
+                "mods_dir": str(data_root / "vanilla" / "data" / "mods"),
+            },
+        ]
+        backend.save_game_servers(servers)
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [
+            {"host": "kcd.mc.loc", "backend": {"host": "kcd", "port": 25565}},
+            {"host": "*", "backend": {"host": "vanilla", "port": 25565}},
+        ]
+        backend.save_gate_config(gate_config)
+        fake_backend = Mock()
+        fake_backend.container_exists.side_effect = [True, True]
+        fake_backend.restart.return_value = BackendResult(0)
+        fake_backend.remove_container.return_value = BackendResult(0)
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root.resolve())),
+            patch.object(backend, "BACKUP_ROOT", str(backup_root.resolve())),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "write_gate_layout", return_value={
+                "data_directory": "/managed/gate", "config_path": "/managed/gate/config.yml",
+            }),
+            patch.object(backend, "chown_gate_layout"),
+        ):
+            response = self.client.delete(
+                "/servers/minecraft/delete",
+                json={
+                    "id": "kcd", "confirmation": "kcd",
+                    "delete_data": True, "delete_backups": True,
+                },
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        fake_backend.remove_container.assert_called_once()
+        removed_server = fake_backend.remove_container.call_args.args[0]
+        self.assertEqual(removed_server["id"], "kcd")
+        self.assertEqual(removed_server["runtime"]["container_name"], "kcd")
+        self.assertTrue(fake_backend.remove_container.call_args.kwargs["force"])
+        self.assertFalse(kcd_root.exists())
+        self.assertFalse(kcd_backups.exists())
+        self.assertEqual([item["id"] for item in backend.load_game_servers()], ["vanilla"])
+        self.assertEqual(
+            [route["host"] for route in backend.load_gate_config()["routes"]], ["*"],
+        )
+
+    def test_managed_minecraft_delete_refuses_default_gate_target(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        data_directory = data_root / "kcd" / "data"
+        data_directory.mkdir(parents=True)
+        server = {
+            "id": "kcd", "name": "KCD", "backend": "podman",
+            "kind": "minecraft", "management_mode": "managed",
+            "runtime": {"container_name": "kcd"},
+            "data": {"directory": str(data_directory)},
+            "mods_dir": str(data_directory / "mods"),
+        }
+        backend.save_game_servers([server])
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [{
+            "host": "*", "backend": {"host": "kcd", "port": 25565},
+        }]
+        backend.save_gate_config(gate_config)
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root.resolve())),
+            patch.object(backend, "backend_for") as backend_factory,
+        ):
+            response = self.client.delete(
+                "/servers/minecraft/delete",
+                json={"id": "kcd", "confirmation": "kcd", "delete_data": True},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("výchozí Gate trasy", response.json["message"])
+        backend_factory.assert_not_called()
+        self.assertTrue(data_directory.exists())
+
+    def test_managed_minecraft_delete_rolls_back_gate_if_container_removal_fails(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        data_directory = data_root / "kcd" / "data"
+        data_directory.mkdir(parents=True)
+        servers = [
+            {
+                "id": "kcd", "name": "KCD", "backend": "podman",
+                "kind": "minecraft", "management_mode": "managed",
+                "runtime": {"container_name": "kcd"},
+                "data": {"directory": str(data_directory)},
+                "mods_dir": str(data_directory / "mods"),
+            },
+            {
+                "id": "vanilla", "name": "Vanilla", "backend": "podman",
+                "kind": "minecraft", "management_mode": "managed",
+                "runtime": {"container_name": "vanilla"},
+                "data": {"directory": str(data_root / "vanilla" / "data")},
+                "mods_dir": str(data_root / "vanilla" / "data" / "mods"),
+            },
+        ]
+        backend.save_game_servers(servers)
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [
+            {"host": "kcd.mc.loc", "backend": {"host": "kcd", "port": 25565}},
+            {"host": "*", "backend": {"host": "vanilla", "port": 25565}},
+        ]
+        backend.save_gate_config(gate_config)
+        fake_backend = Mock()
+        fake_backend.container_exists.side_effect = [True, True, True]
+        fake_backend.restart.return_value = BackendResult(0)
+        fake_backend.remove_container.return_value = BackendResult(1, error="rm failed")
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root.resolve())),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "write_gate_layout", return_value={
+                "data_directory": "/managed/gate", "config_path": "/managed/gate/config.yml",
+            }),
+            patch.object(backend, "chown_gate_layout"),
+        ):
+            response = self.client.delete(
+                "/servers/minecraft/delete",
+                json={"id": "kcd", "confirmation": "kcd", "delete_data": True},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            [route["host"] for route in backend.load_gate_config()["routes"]],
+            ["kcd.mc.loc", "*"],
+        )
+        self.assertTrue(data_directory.exists())
+        self.assertEqual([item["id"] for item in backend.load_game_servers()], ["kcd", "vanilla"])
+
 if __name__ == "__main__":
     unittest.main()

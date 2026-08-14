@@ -89,6 +89,13 @@ Minecraft tabs also contain the existing mod inventory and client comparison. Th
 Servers card keeps only the status, a context-sensitive quick start/stop action
 and **Management**.
 
+The management overview exposes destructive deletion only for platform-created
+managed Podman Minecraft workloads. The backend enforces an independent policy,
+exact workload-ID confirmation, canonical managed paths, and optional deletion
+of persistent data and backups. Named Gate routes are removed automatically; a
+workload that still owns the wildcard fallback must be rerouted before deletion.
+Systemd and adopted Podman workloads remain outside this destructive operation.
+
 The Minecraft management tab will progressively add:
 
 - overview, lifecycle and resource use;

@@ -27,6 +27,7 @@ SAMPLE_SERVER = {
         "backup": "pam",
     },
     "backup_supported": True,
+    "deletion_supported": True,
     "has_mods": True,
 }
 
@@ -99,6 +100,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("logs_output", entry)
         self.assertIn("operators_table", entry)
         self.assertIn("whitelist_table", entry)
+        self.assertTrue(entry["delete_server"].isVisibleTo(entry["page"]))
 
     def test_direct_connection_is_recommended_when_gate_route_is_absent(self):
         server = dict(SAMPLE_SERVER)
