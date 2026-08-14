@@ -1159,6 +1159,10 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(
             [route["host"] for route in backend.load_gate_config()["routes"]], ["*"],
         )
+        operation = backend.OPERATIONS.snapshot("minecraft-delete-kcd")
+        self.assertFalse(operation["running"])
+        self.assertEqual(operation["phase"], "complete")
+        self.assertEqual(operation["progress"], 100)
 
     def test_managed_minecraft_delete_refuses_default_gate_target(self):
         data_root = Path(self.temp_dir.name) / "managed-servers"
@@ -1242,6 +1246,9 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertTrue(data_directory.exists())
         self.assertEqual([item["id"] for item in backend.load_game_servers()], ["kcd", "vanilla"])
+        operation = backend.OPERATIONS.snapshot("minecraft-delete-kcd")
+        self.assertFalse(operation["running"])
+        self.assertEqual(operation["phase"], "failed")
 
 if __name__ == "__main__":
     unittest.main()

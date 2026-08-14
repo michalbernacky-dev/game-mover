@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.15.0
+Version:        0.15.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -145,6 +145,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Fri Aug 14 2026 Game Mover Packager <packager@example.invalid> - 0.15.1-1
+- Show managed-server deletion phases and progress inline in cards and management
+- Stop displaying a delayed modal success dialog after the user changes tabs
+- Keep deletion failures visible in the originating management overview
+
 * Fri Aug 14 2026 Game Mover Packager <packager@example.invalid> - 0.15.0-1
 - Add PAM-policy-controlled deletion for managed Podman Minecraft servers
 - Remove selected persistent data, backups, registry state, and named Gate routes safely

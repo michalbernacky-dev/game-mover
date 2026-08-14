@@ -1445,6 +1445,9 @@ def servers_status():
         gate_connection = gate_connections.get(status.get("id"))
         if gate_connection and status.get("kind") == "minecraft":
             status["gate_connection"] = gate_connection
+        deletion = OPERATIONS.snapshot(f"minecraft-delete-{status.get('id', '')}")
+        if deletion and deletion.get("running"):
+            status["operation"] = deletion
     known_ids = {server.get("id") for server in statuses}
     for operation in OPERATIONS.snapshots(kind="minecraft-install"):
         if operation.get("running") and operation.get("target_id") not in known_ids:
@@ -2257,7 +2260,21 @@ def minecraft_delete():
     gate_backend = None
     gate_changed = False
     runtime_absent = False
+    operation_id = f"minecraft-delete-{server_id}"
     try:
+        OPERATIONS.begin(
+            operation_id,
+            kind="minecraft-delete",
+            target_id=server_id,
+            message=f"Připravuji odstranění serveru {server.get('name', server_id)}",
+        )
+    except OperationAlreadyRunning:
+        return jsonify({"message": "Odstranění tohoto serveru už probíhá"}), 409
+    try:
+        OPERATIONS.update(
+            operation_id, phase="routing",
+            message="Odpojuji server od Gate Lite", progress=15,
+        )
         workload_backend = backend_for(
             server,
             podman_user=PODMAN_USER,
@@ -2279,6 +2296,10 @@ def minecraft_delete():
             if new_gate_config is not None:
                 gate_changed = True
                 _publish_gate_config(new_gate_config, gate_backend)
+            OPERATIONS.update(
+                operation_id, phase="container",
+                message="Odstraňuji Podman container", progress=40,
+            )
             if workload_backend.container_exists(server):
                 result = workload_backend.remove_container(server, force=True)
                 if result.returncode != 0:
@@ -2286,9 +2307,17 @@ def minecraft_delete():
                         result.error or result.output or "Odstranění containeru selhalo"
                     )
             runtime_absent = True
+            OPERATIONS.update(
+                operation_id, phase="data",
+                message="Mažu vybraná persistentní data", progress=65,
+            )
             for path in (paths["server_root"], paths["backup_root"]):
                 if path and os.path.lexists(path):
                     shutil.rmtree(path)
+            OPERATIONS.update(
+                operation_id, phase="registry",
+                message="Uklízím registr serverů a oprávnění", progress=88,
+            )
             current_security = load_security_config(servers)
             save_security_config(normalize_security_config(
                 current_security, remaining_servers,
@@ -2308,8 +2337,12 @@ def minecraft_delete():
                 _publish_gate_config(old_gate_config, gate_backend)
             except (KeyError, OSError, RuntimeError, ValueError):
                 pass
+        OPERATIONS.fail(operation_id, message=f"Odstranění selhalo: {error}")
         return jsonify({"message": f"Odstranění serveru selhalo: {error}"}), 500
 
+    OPERATIONS.finish(
+        operation_id, message=f"Server {server.get('name', server_id)} byl odstraněn",
+    )
     return jsonify({
         "message": f"Server {server.get('name', server_id)} byl odstraněn",
         "id": server_id,

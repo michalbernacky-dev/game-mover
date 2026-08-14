@@ -126,6 +126,26 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("Připojení: vanilla.mc.example:25581 (Gate Lite)", labels)
         self.assertNotIn("Připojení: 127.0.0.1:25570", labels)
 
+    def test_delete_progress_is_inline_and_success_has_no_modal_popup(self):
+        self.window.open_server_management("mc-test")
+        entry = self.window.server_management_pages["mc-test"]
+        server = {
+            **SAMPLE_SERVER,
+            "operation": {
+                "kind": "minecraft-delete", "running": True,
+                "message": "Odstraňuji Podman container", "progress": 40,
+            },
+        }
+        self.window.update_server_management_page(server)
+        self.assertEqual(entry["delete_status"].text(), "Odstraňuji Podman container")
+        self.assertEqual(entry["delete_progress"].value(), 40)
+        self.assertTrue(entry["delete_progress"].isVisibleTo(entry["page"]))
+
+        with patch.object(game_mover.QMessageBox, "information") as information:
+            self.window.on_server_delete_completed({"id": "mc-test", "message": "Hotovo"})
+        information.assert_not_called()
+        self.assertNotIn("mc-test", self.window.server_management_pages)
+
     def test_properties_unauthorized_response_expires_host_pam_session(self):
         self.window.open_server_management("mc-test")
         self.window.timekpr_token = "temporary-host-token"

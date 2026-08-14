@@ -216,6 +216,10 @@ persistent data and backup catalog. Named Gate routes are removed with the
 server. If the server still owns the wildcard `*` route, deletion is rejected
 until an administrator explicitly assigns that fallback to another server.
 Systemd and adopted Podman workloads cannot be destroyed through this endpoint.
+Deletion progress is reported by backend phases on the server card and in its
+management overview. Completion closes the removed server's management tab
+without displaying a delayed modal dialog over unrelated work; failures remain
+visible inline for diagnosis and retry.
 
 For Minecraft entries, the systemd port is read from `server.properties` and the
 Podman host port is read from the container's published `25565/tcp` mapping. The
@@ -580,6 +584,10 @@ záloh. Pojmenované Gate trasy se odstraní spolu se serverem. Pokud server st�
 vlastní výchozí trasu `*`, mazání se odmítne, dokud správce fallback výslovně
 nepřesměruje jinam. Systemd ani adoptovaný Podman workload tímto rozhraním
 zničit nelze.
+Průběh mazání backend hlásí po jednotlivých fázích na kartě serveru i v jeho
+přehledu správy. Dokončení zavře správu odstraněného serveru bez opožděného
+modálního dialogu nad jinou prací; chyba zůstane viditelná přímo v přehledu pro
+diagnostiku a opakování.
 
 U systemd Minecraftu se port čte ze `server.properties`, u Podmanu z publikovaného
 mapování containerového portu `25565/tcp`. Zjištěný port slouží pro standardní

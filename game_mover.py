@@ -2384,6 +2384,14 @@ class GameMover(QWidget):
         )
         delete_row.addWidget(delete_server)
         overview_layout.addLayout(delete_row)
+        delete_status = QLabel("", overview)
+        delete_status.setWordWrap(True)
+        delete_status.setStyleSheet("color: #74c0fc;")
+        delete_status.setVisible(False)
+        overview_layout.addWidget(delete_status)
+        delete_progress = QProgressBar(overview)
+        delete_progress.setVisible(False)
+        overview_layout.addWidget(delete_progress)
         overview_layout.addStretch()
         sections.addTab(overview, "Přehled")
 
@@ -2402,6 +2410,8 @@ class GameMover(QWidget):
             "lifecycle": lifecycle_buttons,
             "delete_help": delete_help,
             "delete_server": delete_server,
+            "delete_status": delete_status,
+            "delete_progress": delete_progress,
         }
 
         logs_page = QWidget(sections)
@@ -2899,6 +2909,17 @@ class GameMover(QWidget):
         )
         self.server_delete_thread.completed.connect(self.on_server_delete_completed)
         self.server_delete_thread.start()
+        entry = self.server_management_pages.get(server_id)
+        if entry:
+            entry["delete_server"].setEnabled(False)
+            entry["delete_server"].setText("Odstraňuji…")
+            entry["delete_status"].setText("Zahajuji bezpečné odstranění serveru…")
+            entry["delete_status"].setStyleSheet("color: #74c0fc;")
+            entry["delete_status"].setVisible(True)
+            entry["delete_progress"].setRange(0, 0)
+            entry["delete_progress"].setVisible(True)
+        self.operation_refresh_timer.start(1_000)
+        QTimer.singleShot(150, self.refresh_server_statuses)
         self.update_open_server_management_pages()
 
     def on_server_delete_completed(self, payload):
@@ -2906,7 +2927,14 @@ class GameMover(QWidget):
         if error:
             if error == "Unauthorized":
                 error = self.host_pam_session_expired()
-            QMessageBox.critical(self, "Odstranit server", f"Odstranění selhalo: {error}")
+            server_id = payload.get("id", "")
+            entry = self.server_management_pages.get(server_id)
+            if entry:
+                entry["delete_status"].setText(f"Odstranění selhalo: {error}")
+                entry["delete_status"].setStyleSheet("color: #ff8f8f;")
+                entry["delete_status"].setVisible(True)
+                entry["delete_progress"].setVisible(False)
+                entry["delete_server"].setText("Odstranit server…")
             self.update_open_server_management_pages()
             return
         server_id = payload.get("id", "")
@@ -2915,9 +2943,6 @@ class GameMover(QWidget):
             index = self.tabs.indexOf(entry["page"])
             if index >= 0:
                 self.close_server_management_tab(index)
-        QMessageBox.information(
-            self, "Odstranit server", payload.get("message", "Server byl odstraněn."),
-        )
         self.refresh_server_statuses()
         if is_host_management_mode(self.app_mode) and self.timekpr_token:
             self.load_security_policies()
@@ -2998,6 +3023,27 @@ class GameMover(QWidget):
                 and self.server_delete_thread.isRunning()
             )
         )
+        deletion = server.get("operation")
+        deletion = deletion if isinstance(deletion, dict) else {}
+        deletion_running = (
+            deletion.get("kind") == "minecraft-delete" and deletion.get("running")
+        )
+        if deletion_running:
+            entry["delete_server"].setText("Odstraňuji…")
+            entry["delete_server"].setEnabled(False)
+            entry["delete_status"].setText(
+                deletion.get("message") or "Odstraňuji server…"
+            )
+            entry["delete_status"].setStyleSheet("color: #74c0fc;")
+            entry["delete_status"].setVisible(True)
+            entry["delete_progress"].setRange(0, 100)
+            entry["delete_progress"].setValue(int(deletion.get("progress", 0)))
+            entry["delete_progress"].setVisible(True)
+        elif not (
+            self.server_delete_thread is not None
+            and self.server_delete_thread.isRunning()
+        ):
+            entry["delete_server"].setText("Odstranit server…")
         if "properties_fields" in entry:
             properties_allowed = management and bool(
                 self.local_operation_headers("minecraft.properties")
@@ -3658,7 +3704,10 @@ class GameMover(QWidget):
         )
         local_worker_running = any(
             worker is not None and worker.isRunning()
-            for worker in (self.gate_deploy_thread, self.minecraft_install_thread)
+            for worker in (
+                self.gate_deploy_thread, self.minecraft_install_thread,
+                self.server_delete_thread,
+            )
         )
         if (
             (has_running_operation or local_worker_running)
