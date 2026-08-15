@@ -178,6 +178,18 @@ party API terms, Game Mover does not persist or cache catalog responses and
 marks its catalog API responses `Cache-Control: no-store`. Remote catalog
 browsing is read-only and requires the existing server read token.
 
+### Private game DNS
+
+The fixed **Network** tab exposes a provider-neutral private DNS registry. Exact
+Gate hostnames inside the configured zone are its only source of records;
+wildcard fallback routes and unrelated names are never published. The optional
+built-in provider is an authoritative-only UDP/TCP service, binds only explicit
+addresses, performs no recursive resolution and is disabled by default. DNS
+configuration is local/PAM protected. A LAN router can conditionally forward the
+private zone to it, while Tailscale can use the same zone as a restricted
+nameserver without requiring players to select an exit node. Pi-hole is not a
+dependency and can be added later as an adapter to the same registry.
+
 ### Rootless Podman workloads
 
 The Podman backend adopts existing containers and exposes status/start/stop/restart.
@@ -566,6 +578,17 @@ nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
 Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
 `Cache-Control: no-store`. Vzdálené procházení je pouze pro čtení a vyžaduje
 stávající serverový read token.
+
+### Privátní herní DNS
+
+Pevná záložka **Síť** zpřístupňuje providerově nezávislý registr privátního DNS.
+Jediným zdrojem záznamů jsou konkrétní hostname Gate tras uvnitř nastavené zóny;
+výchozí wildcard ani cizí jména se nepublikují. Volitelný vestavěný provider je
+autoritativní UDP/TCP služba, poslouchá pouze na výslovně zadaných adresách,
+neprovádí rekurzivní dotazy a ve výchozím stavu je vypnutý. Konfigurace vyžaduje
+místní/PAM oprávnění. LAN router na ni může podmíněně směrovat privátní zónu a
+Tailscale může tutéž zónu použít jako Restricted nameserver bez zapnutí exit
+node u hráčů. Pi-hole není závislost; později může být adaptérem stejného registru.
 
 ### Rootless Podman workloady
 

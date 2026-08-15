@@ -758,6 +758,7 @@ class GameMover(QWidget):
         self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
         self.init_servers_tab()
+        self.init_network_tab()
         self.init_server_registry_tab()
         self.init_security_tab()
         self.init_timekpr_tab()
@@ -776,6 +777,7 @@ class GameMover(QWidget):
         self.resize(960, 720)
         self.refresh_cache_status()
         self.refresh_dnsmasq_status()
+        self.refresh_managed_dns_status()
         self.operation_refresh_timer = QTimer(self)
         self.operation_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.refresh_server_statuses()
@@ -1768,6 +1770,172 @@ class GameMover(QWidget):
         scroll_area.setWidget(content)
         tab_layout.addWidget(scroll_area)
         self.tabs.addTab(tab, "Servery")
+
+    def init_network_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        title = QLabel("Síťové služby", tab)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        description = QLabel(
+            "Privátní autoritativní DNS převádí konkrétní hostname Gate tras na adresu "
+            "herního ingressu. Vestavěný provider je samostatný; Pi-hole a jiné integrace "
+            "mohou být později přidány jako volitelné adaptéry.",
+            tab,
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        form = QFormLayout()
+        self.managed_dns_provider_label = QLabel("—", tab)
+        self.managed_dns_zone_label = QLabel("—", tab)
+        self.managed_dns_service_label = QLabel("—", tab)
+        self.managed_dns_listen_label = QLabel("—", tab)
+        self.managed_dns_answer_label = QLabel("—", tab)
+        form.addRow("Provider:", self.managed_dns_provider_label)
+        form.addRow("Privátní zóna:", self.managed_dns_zone_label)
+        form.addRow("Služba:", self.managed_dns_service_label)
+        form.addRow("Poslechové adresy:", self.managed_dns_listen_label)
+        form.addRow("Adresa Gate v DNS:", self.managed_dns_answer_label)
+        layout.addLayout(form)
+
+        self.managed_dns_records = QTableWidget(tab)
+        self.managed_dns_records.setColumnCount(2)
+        self.managed_dns_records.setHorizontalHeaderLabels(["Hostname Gate", "DNS adresa"])
+        self.managed_dns_records.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.managed_dns_records.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.managed_dns_records.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.managed_dns_records.setSelectionBehavior(QAbstractItemView.SelectRows)
+        layout.addWidget(self.managed_dns_records)
+
+        hint = QLabel(
+            "LAN router může tuto zónu podmíněně směrovat na poslechovou LAN adresu. "
+            "Tailscale použije stejnou zónu jako Restricted nameserver; exit node není nutný. "
+            "Pokud port 53 už obsluhuje Pi-hole, nech vestavěný provider vypnutý.",
+            tab,
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(hint)
+        actions = QHBoxLayout()
+        self.managed_dns_config_button = QPushButton("Nastavit DNS…", tab)
+        self.managed_dns_config_button.clicked.connect(self.open_managed_dns_config)
+        actions.addWidget(self.managed_dns_config_button)
+        refresh = QPushButton("Obnovit stav", tab)
+        refresh.clicked.connect(self.refresh_managed_dns_status)
+        actions.addWidget(refresh)
+        layout.addLayout(actions)
+        self.tabs.addTab(tab, "Síť")
+
+    def refresh_managed_dns_status(self):
+        try:
+            base_url, headers = self.server_request_target()
+            response = requests.get(f"{base_url}/dns/status", headers=headers, timeout=10)
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            dns = payload.get("dns", {})
+            provider_names = {
+                item.get("id"): item.get("name") for item in dns.get("provider_catalog", [])
+            }
+            self.managed_dns_provider_label.setText(
+                provider_names.get(dns.get("provider"), dns.get("provider", "—"))
+            )
+            self.managed_dns_zone_label.setText(dns.get("zone", "—"))
+            self.managed_dns_service_label.setText(
+                "Běží" if dns.get("active") else f"Neběží ({dns.get('service_status', '—')})"
+            )
+            self.managed_dns_listen_label.setText(
+                ", ".join(dns.get("listen_addresses") or []) or "nenastavené"
+            )
+            self.managed_dns_answer_label.setText(
+                ", ".join(dns.get("answer_addresses") or []) or "nenastavená"
+            )
+            records = dns.get("records") if isinstance(dns.get("records"), list) else []
+            self.managed_dns_records.setRowCount(len(records))
+            for row, record in enumerate(records):
+                self.managed_dns_records.setItem(row, 0, QTableWidgetItem(record.get("name", "")))
+                self.managed_dns_records.setItem(row, 1, QTableWidgetItem(record.get("address", "")))
+        except Exception as error:
+            self.managed_dns_service_label.setText(f"Stav nelze načíst: {error}")
+        self.managed_dns_config_button.setEnabled(is_host_management_mode(self.app_mode))
+
+    def open_managed_dns_config(self):
+        if not is_host_management_mode(self.app_mode):
+            return
+        headers = self.local_operation_headers("dns.config")
+        if not headers:
+            QMessageBox.warning(self, "Herní DNS", "Změna DNS není podle zásady povolená.")
+            return
+        try:
+            response = requests.get(
+                f"{self.host_management_api_url()}/dns/config", headers=headers, timeout=10,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            current = payload.get("dns", {})
+        except Exception as error:
+            QMessageBox.critical(self, "Herní DNS", f"Konfiguraci nelze načíst: {error}")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Privátní herní DNS")
+        dialog.setMinimumWidth(560)
+        layout = QVBoxLayout(dialog)
+        help_label = QLabel(
+            "DNS záznamy vznikají automaticky z konkrétních Gate hostname. "
+            "Poslechové adresy určují, kde služba přijímá dotazy; cílové adresy "
+            "jsou IP adresy Gate vracené hráčům.", dialog,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        form = QFormLayout()
+        provider = QComboBox(dialog)
+        provider.addItem("Vypnuto", "disabled")
+        provider.addItem("Vestavěný autoritativní DNS", "builtin")
+        provider.setCurrentIndex(max(0, provider.findData(current.get("provider", "disabled"))))
+        zone = QLineEdit(current.get("zone", "mc.home.arpa"), dialog)
+        listen = QLineEdit(", ".join(current.get("listen_addresses") or []), dialog)
+        listen.setPlaceholderText("např. 192.0.2.66, 100.x.y.z")
+        answers = QLineEdit(", ".join(current.get("answer_addresses") or []), dialog)
+        answers.setPlaceholderText("např. 192.0.2.66")
+        ttl = QSpinBox(dialog)
+        ttl.setRange(5, 86400)
+        ttl.setValue(int(current.get("ttl", 60)))
+        ttl.setSuffix(" s")
+        form.addRow("Provider:", provider)
+        form.addRow("Zóna:", zone)
+        form.addRow("Poslouchat na:", listen)
+        form.addRow("Vrácené adresy Gate:", answers)
+        form.addRow("TTL:", ttl)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog)
+        buttons.button(QDialogButtonBox.Save).setText("Uložit")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+        dns = {
+            "provider": provider.currentData(),
+            "zone": zone.text().strip(),
+            "listen_addresses": [item.strip() for item in listen.text().split(",") if item.strip()],
+            "answer_addresses": [item.strip() for item in answers.text().split(",") if item.strip()],
+            "ttl": ttl.value(),
+        }
+        try:
+            response = requests.put(
+                f"{self.host_management_api_url()}/dns/config",
+                json={"dns": dns}, headers=headers, timeout=20,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            QMessageBox.information(self, "Herní DNS", payload.get("message", "Uloženo"))
+        except Exception as error:
+            QMessageBox.critical(self, "Herní DNS", f"Uložení selhalo: {error}")
+        self.refresh_managed_dns_status()
 
     def open_modpack_catalog(self, *, version="", loader=""):
         if self.modpacks_tab is not None and self.tabs.indexOf(self.modpacks_tab) >= 0:

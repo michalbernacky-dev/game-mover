@@ -128,6 +128,14 @@ initial UI contains no download or installation action. The provider boundary
 must allow a future source to be added without coupling the GUI to CurseForge
 response schemas.
 
+Private game DNS is a platform-level provider boundary shown in the fixed
+**Network** tab. Its registry is derived from exact, in-zone Gate routes so DNS
+and proxy routing cannot become independent sources of truth. The optional
+built-in provider is an authoritative-only UDP/TCP service with explicit bind
+and answer addresses, no recursion, and PAM-protected configuration. It remains
+disabled by default and does not require Pi-hole; external DNS products belong
+behind optional adapters.
+
 ## Security model
 
 Authorization is a backend-enforced policy per operation, not merely GUI button

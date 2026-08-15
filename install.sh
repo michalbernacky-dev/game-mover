@@ -81,6 +81,7 @@ rsync -a --delete \
   --include='/game_mover.py' \
   --include='/game_mover_mods.py' \
   --include='/game_mover_catalog.py' \
+  --include='/game_mover_dns.py' \
   --include='/game_mover_minecraft.py' \
   --include='/game_mover_gate.py' \
   --include='/game_mover_backups.py' \
@@ -152,6 +153,8 @@ WantedBy=multi-user.target
 EOF
 copy_if_changed "${service_tmp}" "${SERVICE_PATH}" 644
 rm -f "${service_tmp}"
+copy_if_changed "${SCRIPT_DIR}/game-mover-dns.service" \
+  "/etc/systemd/system/game-mover-dns.service" 644
 
 echo "[5/8] Desktop launcher (${APP_DESKTOP})"
 desktop_tmp="$(mktemp)"
@@ -201,6 +204,7 @@ chmod +x /usr/local/bin/game-mover
 
 echo "[8/8] systemd daemon-reload"
 systemctl daemon-reload
+systemctl try-restart game-mover-dns.service >/dev/null 2>&1 || true
 if [[ "${RESTART_SERVICE}" -eq 1 ]]; then
   echo "    enable + restart ${SERVICE_NAME}"
   systemctl enable --now "${SERVICE_NAME}"

@@ -83,6 +83,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "description": "Spuštění, vypnutí a restart proxy containeru.",
         "default": "pam",
     },
+    {
+        "id": "dns.config",
+        "label": "Konfigurace herního DNS",
+        "description": "Změny privátní DNS zóny, adres a vestavěného DNS provideru.",
+        "default": "pam",
+    },
 )
 
 FIXED_OPERATION_DEFINITIONS = (

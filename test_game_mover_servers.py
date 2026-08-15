@@ -16,11 +16,15 @@ class ServerRegistryTest(unittest.TestCase):
         self.original_config_path = backend.GAME_SERVERS_CONFIG_PATH
         self.original_gate_config_path = backend.GATE_CONFIG_PATH
         self.original_security_config_path = backend.SECURITY_CONFIG_PATH
+        self.original_dns_config_path = backend.DNS_CONFIG_PATH
+        self.original_dns_runtime_config_path = backend.DNS_RUNTIME_CONFIG_PATH
         self.original_operations = backend.OPERATIONS
         backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
         backend.GATE_CONFIG_PATH = str(Path(self.temp_dir.name) / "gate.json")
         backend.SECURITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "security.json")
+        backend.DNS_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns.json")
+        backend.DNS_RUNTIME_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns-runtime.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -53,6 +57,8 @@ class ServerRegistryTest(unittest.TestCase):
         backend.GAME_SERVERS_CONFIG_PATH = self.original_config_path
         backend.GATE_CONFIG_PATH = self.original_gate_config_path
         backend.SECURITY_CONFIG_PATH = self.original_security_config_path
+        backend.DNS_CONFIG_PATH = self.original_dns_config_path
+        backend.DNS_RUNTIME_CONFIG_PATH = self.original_dns_runtime_config_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
@@ -1294,6 +1300,36 @@ class ServerRegistryTest(unittest.TestCase):
         operation = backend.OPERATIONS.snapshot("minecraft-delete-kcd")
         self.assertFalse(operation["running"])
         self.assertEqual(operation["phase"], "failed")
+
+    def test_managed_dns_config_is_pam_protected_and_derived_from_gate(self):
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [
+            {"host": "forge.mc.home.arpa", "backend": {"host": "forge", "port": 25565}},
+            {"host": "*", "backend": {"host": "forge", "port": 25565}},
+        ]
+        backend.save_gate_config(gate_config)
+        dns = {
+            "provider": "builtin", "zone": "mc.home.arpa", "ttl": 60,
+            "listen_addresses": ["127.0.0.1"],
+            "answer_addresses": ["192.0.2.66"],
+        }
+        denied = self.client.put(
+            "/dns/config", json={"dns": dns}, **self.local_options(),
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        with patch.object(backend, "systemctl_enable_now", return_value=(0, "", "")):
+            saved = self.client.put(
+                "/dns/config", json={"dns": dns}, **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(saved.status_code, 200, saved.get_data(as_text=True))
+        with patch.object(backend, "systemctl_is_active", return_value=(0, "active", "")):
+            status = self.client.get("/dns/status", **self.local_options())
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json["dns"]["records"], [{
+            "name": "forge.mc.home.arpa", "address": "192.0.2.66",
+        }])
+
 
 if __name__ == "__main__":
     unittest.main()

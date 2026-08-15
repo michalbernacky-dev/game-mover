@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.16.0
+Version:        0.17.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -46,6 +46,7 @@ install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flas
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0644 game_mover_catalog.py %{buildroot}/opt/game_mover/game_mover_catalog.py
+install -Dpm0755 game_mover_dns.py %{buildroot}/opt/game_mover/game_mover_dns.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
 install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
@@ -65,6 +66,7 @@ install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo
 
 install -Dpm0755 game-mover %{buildroot}%{_bindir}/game-mover
 install -Dpm0644 game_mover.service %{buildroot}%{_unitdir}/game_mover.service
+install -Dpm0644 game-mover-dns.service %{buildroot}%{_unitdir}/game-mover-dns.service
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
 
 %pre
@@ -109,10 +111,10 @@ runuser -u gameplatform -- env XDG_RUNTIME_DIR="/run/user/${gameplatform_uid}" \
     systemctl --user enable --now podman.socket podman-restart.service >/dev/null 2>&1 || :
 
 %preun
-%systemd_preun game_mover.service
+%systemd_preun game_mover.service game-mover-dns.service
 
 %postun
-%systemd_postun_with_restart game_mover.service
+%systemd_postun_with_restart game_mover.service game-mover-dns.service
 if [ "$1" -eq 0 ]; then
     rm -f /etc/game_mover/api.token || :
     rm -f /etc/game_mover/read.token || :
@@ -126,6 +128,7 @@ fi
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
 /opt/game_mover/game_mover_catalog.py
+/opt/game_mover/game_mover_dns.py
 /opt/game_mover/game_mover_minecraft.py
 /opt/game_mover/game_mover_gate.py
 /opt/game_mover/game_mover_backups.py
@@ -144,9 +147,15 @@ fi
 /opt/game_mover/game_mover_logo.jpg
 %{_bindir}/game-mover
 %{_unitdir}/game_mover.service
+%{_unitdir}/game-mover-dns.service
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.17.0-1
+- Add provider-neutral private DNS derived from exact Gate routes
+- Ship an optional authoritative DNS service without a Pi-hole dependency
+- Add PAM-protected DNS configuration and LAN/Tailscale diagnostics
+
 * Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.16.0-1
 - Add a provider-backed read-only CurseForge modpack browser
 - Filter projects and files by Minecraft version and loader without downloads

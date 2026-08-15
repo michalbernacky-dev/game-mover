@@ -29,6 +29,13 @@ from game_mover_catalog import (
     load_curseforge_api_key,
 )
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
+from game_mover_dns import (
+    DnsConfigError,
+    default_dns_config,
+    normalize_dns_config,
+    runtime_dns_config,
+    write_runtime_config,
+)
 from game_mover_mods import scan_mod_directory
 from game_mover_security import (
     POLICY_MODES,
@@ -103,6 +110,9 @@ MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/
 GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
 GATE_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "gate.json")
 SECURITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "security.json")
+DNS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns.json")
+DNS_RUNTIME_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns-runtime.json")
+DNS_SERVICE_NAME = "game-mover-dns.service"
 GATE_DATA_DIRECTORY = os.path.realpath(
     os.getenv("GAME_PLATFORM_GATE_DATA", "/var/lib/game-platform/proxies/gate")
 )
@@ -258,6 +268,35 @@ def load_gate_config():
         return normalize_gate_config(default_gate_config())
 
 
+def load_dns_config():
+    try:
+        with open(DNS_CONFIG_PATH, "r", encoding="utf-8") as config_file:
+            return normalize_dns_config(json.load(config_file))
+    except FileNotFoundError:
+        return default_dns_config()
+    except (OSError, UnicodeError, json.JSONDecodeError, DnsConfigError):
+        return default_dns_config()
+
+
+def sync_dns_runtime_config(config=None, gate_config=None):
+    config = load_dns_config() if config is None else normalize_dns_config(config)
+    gate_config = load_gate_config() if gate_config is None else gate_config
+    return write_runtime_config(DNS_RUNTIME_CONFIG_PATH, config, gate_config)
+
+
+def save_dns_config(config):
+    config = normalize_dns_config(config)
+    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    temporary_path = f"{DNS_CONFIG_PATH}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as config_file:
+        json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
+        config_file.write("\n")
+    os.chmod(temporary_path, 0o644)
+    os.replace(temporary_path, DNS_CONFIG_PATH)
+    sync_dns_runtime_config(config=config)
+    return config
+
+
 def check_gate_tcp_ready(host, port, timeout=1.5):
     with socket.create_connection((host, int(port)), timeout=timeout):
         return True
@@ -365,6 +404,10 @@ def save_gate_config(config):
     except (KeyError, OSError):
         os.chmod(temporary_path, 0o600)
     os.replace(temporary_path, GATE_CONFIG_PATH)
+    try:
+        sync_dns_runtime_config(gate_config=config)
+    except (DnsConfigError, OSError):
+        pass
     return config
 
 
@@ -693,6 +736,7 @@ def restrict_remote_api():
         "/servers/status",
         "/servers/minecraft/mods",
         "/proxy/status",
+        "/dns/status",
         "/minecraft/modpacks/status",
         "/minecraft/modpacks/search",
     )
@@ -739,6 +783,36 @@ def systemctl_action(action: str, service_name: str):
 
 def systemctl_stop(service_name: str):
     return systemctl_action("stop", service_name)
+
+
+def systemctl_enable_now(service_name: str):
+    try:
+        proc = subprocess.run(
+            ["systemctl", "enable", "--now", service_name],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", "systemctl nenalezen"
+    except Exception as error:
+        return 1, "", str(error)
+
+
+def systemctl_disable_now(service_name: str):
+    try:
+        proc = subprocess.run(
+            ["systemctl", "disable", "--now", service_name],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", "systemctl nenalezen"
+    except Exception as error:
+        return 1, "", str(error)
 
 
 def _minecraft_probe_hosts(hosts, preferred_host=None):
@@ -2800,6 +2874,52 @@ def dnsmasq_stop():
     if rc == 0:
         return jsonify({"message": "dnsmasq zastaven"})
     return jsonify({"message": err or out or "Nepodařilo se zastavit dnsmasq"}), 500
+
+
+@app.route("/dns/status", methods=["GET"])
+def managed_dns_status():
+    config = load_dns_config()
+    runtime = runtime_dns_config(config, load_gate_config())
+    rc, service_status, error = systemctl_is_active(DNS_SERVICE_NAME)
+    return jsonify({
+        "version": __version__,
+        "dns": {
+            **config,
+            "records": runtime["records"],
+            "records_count": len(runtime["records"]),
+            "service_status": service_status,
+            "active": service_status == "active",
+            "available": rc != 127,
+            "error": error,
+            "provider_catalog": [
+                {"id": "disabled", "name": "Vypnuto"},
+                {"id": "builtin", "name": "Vestavěný autoritativní DNS"},
+            ],
+        },
+    })
+
+
+@app.route("/dns/config", methods=["GET", "PUT"])
+def managed_dns_config():
+    if not require_local_operation(request, "dns.config"):
+        return jsonify({"message": "Unauthorized"}), 403
+    if request.method == "GET":
+        return jsonify({"dns": load_dns_config()})
+    try:
+        config = save_dns_config((request.json or {}).get("dns"))
+        if config["provider"] == "builtin":
+            rc, output, error = systemctl_enable_now(DNS_SERVICE_NAME)
+        else:
+            rc, output, error = systemctl_disable_now(DNS_SERVICE_NAME)
+        if rc != 0:
+            return jsonify({
+                "message": "DNS konfigurace byla uložena, ale službu se nepodařilo přepnout",
+                "dns": config,
+                "service_error": error or output,
+            }), 500
+    except (DnsConfigError, OSError, TypeError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({"message": "DNS konfigurace byla uložena", "dns": config})
 
 # ------------------------------------------------------------
 # Main
