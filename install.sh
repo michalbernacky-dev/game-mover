@@ -80,19 +80,26 @@ rsync -a --delete \
   --include='/game_mover_jobs.py' \
   --include='/game_mover.py' \
   --include='/game_mover_mods.py' \
+  --include='/game_mover_catalog.py' \
   --include='/game_mover_minecraft.py' \
   --include='/game_mover_gate.py' \
   --include='/game_mover_backups.py' \
   --include='/game_mover_installs.py' \
   --include='/game_mover_version.py' \
   --include='/game_mover_workloads.py' \
+  --include='/game_mover_connections.py' \
+  --include='/game_mover_security.py' \
+  --include='/game_mover_properties.py' \
+  --include='/game_mover_logs.py' \
+  --include='/game_mover_operators.py' \
+  --include='/game_mover_whitelist.py' \
   --include='/game-mover' \
   --include='/requirements.txt' \
   --include='/game_mover_logo.jpg' \
   --exclude='*' \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
+chmod 0644 "${INSTALL_DIR}"/game_mover_*.py
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
-chmod 0644 "${INSTALL_DIR}/game_mover_mods.py" "${INSTALL_DIR}/game_mover_minecraft.py" "${INSTALL_DIR}/game_mover_gate.py" "${INSTALL_DIR}/game_mover_backups.py" "${INSTALL_DIR}/game_mover_installs.py" "${INSTALL_DIR}/game_mover_jobs.py" "${INSTALL_DIR}/game_mover_version.py" "${INSTALL_DIR}/game_mover_workloads.py"
 find "${INSTALL_DIR}" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"

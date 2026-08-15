@@ -159,6 +159,23 @@ returned to its previous running state afterward. The manifest records the
 source backend and systemd unit or non-secret Podman runtime metadata, making a
 systemd Forge backup suitable as the input for a later container migration.
 
+### Read-only CurseForge modpack catalog
+
+The fixed **Modpacks** tab searches the live CurseForge Minecraft modpack
+catalog by text, Minecraft version and loader, with sorting and pagination. A
+selected project exposes its public summary and compatible file metadata,
+including whether CurseForge advertises a related server pack. This first slice
+has no download, installation or mutation action.
+
+CurseForge requires an approved third-party API key. Store it only on the host
+as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
+`game_mover.service`. The key is read only by the backend and is never returned
+to the GUI, remote clients or logs. The path can be overridden with
+`GAME_MOVER_CURSEFORGE_API_KEY_PATH`. In accordance with the CurseForge third-
+party API terms, Game Mover does not persist or cache catalog responses and
+marks its catalog API responses `Cache-Control: no-store`. Remote catalog
+browsing is read-only and requires the existing server read token.
+
 ### Rootless Podman workloads
 
 The Podman backend adopts existing containers and exposes status/start/stop/restart.
@@ -529,6 +546,23 @@ Registrované systemd i Podman workloady s datovým adresářem podporují ově�
 vrátí do původního stavu. Manifest zaznamená zdrojový backend a systemd jednotku
 nebo nesekretní Podman metadata, takže záloha systemd Forge může přímo posloužit
 jako vstup pro pozdější migraci do containeru.
+
+### Read-only katalog CurseForge modpacků
+
+Pevná záložka **Modpacky** prohledává živý katalog Minecraft modpacků na
+CurseForge podle textu, verze Minecraftu a loaderu, včetně řazení a stránkování.
+Po výběru projektu ukáže jeho veřejný popis a metadata kompatibilních souborů,
+včetně informace o dostupném server packu. Tato první část nic nestahuje,
+neinstaluje ani nemění.
+
+CurseForge vyžaduje schválený API klíč pro aplikaci třetí strany. Klíč patří
+pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim
+`0600`; poté je třeba restartovat `game_mover.service`. Backend jej nikdy
+nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
+`GAME_MOVER_CURSEFORGE_API_KEY_PATH`. V souladu s podmínkami CurseForge Game
+Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
+`Cache-Control: no-store`. Vzdálené procházení je pouze pro čtení a vyžaduje
+stávající serverový read token.
 
 ### Rootless Podman workloady
 

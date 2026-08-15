@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.15.2
+Version:        0.16.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -45,6 +45,7 @@ mkdir -p %{buildroot}/opt/game_mover
 install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flask.py
 install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
+install -Dpm0644 game_mover_catalog.py %{buildroot}/opt/game_mover/game_mover_catalog.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
 install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
@@ -124,6 +125,7 @@ fi
 /opt/game_mover/game_mover_flask.py
 /opt/game_mover/game_mover.py
 /opt/game_mover/game_mover_mods.py
+/opt/game_mover/game_mover_catalog.py
 /opt/game_mover/game_mover_minecraft.py
 /opt/game_mover/game_mover_gate.py
 /opt/game_mover/game_mover_backups.py
@@ -145,6 +147,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.16.0-1
+- Add a provider-backed read-only CurseForge modpack browser
+- Filter projects and files by Minecraft version and loader without downloads
+- Keep the API key host-only and prohibit persistence or caching of catalog data
+
 * Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.15.2-1
 - Suggest the first available direct Minecraft port in the server installer
 - Reserve configured ports of stopped workloads and the Gate Lite listener

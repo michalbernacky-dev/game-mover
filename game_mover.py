@@ -16,8 +16,8 @@ from PyQt5.QtWidgets import (
     QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
     QDialog, QDialogButtonBox, QTabBar
 )
-from PyQt5.QtGui import QPixmap
-from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QDesktopServices, QPixmap
+from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_connections import (
@@ -281,6 +281,38 @@ class ServerModsThread(QThread):
             self.loaded.emit({"inventory": data, "server_id": self.server_id})
         except Exception as e:
             self.loaded.emit({"error": str(e), "server_id": self.server_id})
+
+
+class ModpackCatalogThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url, headers, request_kind, *, project_id=None, params=None):
+        super().__init__()
+        self.base_url = base_url
+        self.headers = headers
+        self.request_kind = request_kind
+        self.project_id = project_id
+        self.params = params or {}
+
+    def run(self):
+        paths = {
+            "status": "/minecraft/modpacks/status",
+            "search": "/minecraft/modpacks/search",
+            "files": f"/minecraft/modpacks/{self.project_id}/files",
+        }
+        try:
+            response = requests.get(
+                f"{self.base_url}{paths[self.request_kind]}",
+                headers=self.headers,
+                params=self.params,
+                timeout=30,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit({**data, "request_kind": self.request_kind})
+        except Exception as error:
+            self.loaded.emit({"request_kind": self.request_kind, "error": str(error)})
 
 
 class CompareModsThread(QThread):
@@ -673,6 +705,9 @@ class GameMover(QWidget):
         self.server_operator_threads = {}
         self.server_whitelist_threads = {}
         self.server_log_threads = {}
+        self.modpack_catalog_thread = None
+        self.modpack_search_index = 0
+        self.selected_modpack = None
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
@@ -722,6 +757,7 @@ class GameMover(QWidget):
         self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
         self.init_servers_tab()
+        self.init_modpacks_tab()
         self.init_server_registry_tab()
         self.init_security_tab()
         self.init_timekpr_tab()
@@ -1732,6 +1768,258 @@ class GameMover(QWidget):
         scroll_area.setWidget(content)
         tab_layout.addWidget(scroll_area)
         self.tabs.addTab(tab, "Servery")
+
+    def init_modpacks_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        title = QLabel("CurseForge modpacky", tab)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        help_label = QLabel(
+            "Read-only katalog: Game Mover zobrazuje živá metadata CurseForge, "
+            "nic nestahuje, neinstaluje ani necachuje.",
+            tab,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+
+        status_row = QHBoxLayout()
+        self.modpack_status_label = QLabel("Stav API zatím nebyl ověřen.", tab)
+        status_row.addWidget(self.modpack_status_label, 1)
+        self.modpack_status_button = QPushButton("Ověřit API", tab)
+        self.modpack_status_button.clicked.connect(self.refresh_modpack_catalog_status)
+        status_row.addWidget(self.modpack_status_button)
+        layout.addLayout(status_row)
+
+        filters = QHBoxLayout()
+        self.modpack_query = QLineEdit(tab)
+        self.modpack_query.setPlaceholderText("Název nebo autor modpacku")
+        self.modpack_query.returnPressed.connect(lambda: self.search_modpacks(reset=True))
+        filters.addWidget(self.modpack_query, 2)
+        self.modpack_version = QLineEdit("1.20.1", tab)
+        self.modpack_version.setPlaceholderText("Minecraft verze")
+        self.modpack_version.setMaximumWidth(130)
+        filters.addWidget(self.modpack_version)
+        self.modpack_loader = QComboBox(tab)
+        for label, value in (
+            ("Všechny loadery", "any"), ("Forge", "forge"),
+            ("Fabric", "fabric"), ("NeoForge", "neoforge"), ("Quilt", "quilt"),
+        ):
+            self.modpack_loader.addItem(label, value)
+        filters.addWidget(self.modpack_loader)
+        self.modpack_sort = QComboBox(tab)
+        for label, value in (
+            ("Popularita", "popularity"), ("Naposledy změněné", "updated"),
+            ("Název", "name"), ("Stažení", "downloads"),
+            ("Datum vydání", "released"), ("Hodnocení", "rating"),
+        ):
+            self.modpack_sort.addItem(label, value)
+        filters.addWidget(self.modpack_sort)
+        self.modpack_search_button = QPushButton("Hledat", tab)
+        self.modpack_search_button.clicked.connect(lambda: self.search_modpacks(reset=True))
+        filters.addWidget(self.modpack_search_button)
+        layout.addLayout(filters)
+
+        self.modpack_results = QTableWidget(tab)
+        self.modpack_results.setColumnCount(4)
+        self.modpack_results.setHorizontalHeaderLabels([
+            "Modpack", "Autoři", "Stažení", "Aktualizováno",
+        ])
+        self.modpack_results.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.modpack_results.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.modpack_results.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        results_header = self.modpack_results.horizontalHeader()
+        results_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        results_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        results_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        results_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.modpack_results.itemSelectionChanged.connect(self.on_modpack_selected)
+        layout.addWidget(self.modpack_results, 2)
+
+        paging = QHBoxLayout()
+        self.modpack_previous = QPushButton("Předchozí", tab)
+        self.modpack_previous.clicked.connect(self.previous_modpack_page)
+        self.modpack_previous.setEnabled(False)
+        paging.addWidget(self.modpack_previous)
+        self.modpack_page_label = QLabel("Výsledky zatím nebyly načtené.", tab)
+        self.modpack_page_label.setAlignment(Qt.AlignCenter)
+        paging.addWidget(self.modpack_page_label, 1)
+        self.modpack_next = QPushButton("Další", tab)
+        self.modpack_next.clicked.connect(self.next_modpack_page)
+        self.modpack_next.setEnabled(False)
+        paging.addWidget(self.modpack_next)
+        layout.addLayout(paging)
+
+        detail_row = QHBoxLayout()
+        self.modpack_detail = QLabel("Vyber modpack pro zobrazení dostupných souborů.", tab)
+        self.modpack_detail.setWordWrap(True)
+        detail_row.addWidget(self.modpack_detail, 1)
+        self.modpack_website = QPushButton("Otevřít na CurseForge", tab)
+        self.modpack_website.setEnabled(False)
+        self.modpack_website.clicked.connect(self.open_selected_modpack_website)
+        detail_row.addWidget(self.modpack_website)
+        layout.addLayout(detail_row)
+
+        self.modpack_files = QTableWidget(tab)
+        self.modpack_files.setColumnCount(5)
+        self.modpack_files.setHorizontalHeaderLabels([
+            "Soubor", "Verze", "Vydání", "Velikost", "Server pack",
+        ])
+        self.modpack_files.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.modpack_files.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        files_header = self.modpack_files.horizontalHeader()
+        files_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        files_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        files_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        files_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        files_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        layout.addWidget(self.modpack_files, 1)
+        self.tabs.addTab(tab, "Modpacky")
+
+    def start_modpack_catalog_request(self, request_kind, *, project_id=None, params=None):
+        if self.modpack_catalog_thread and self.modpack_catalog_thread.isRunning():
+            return
+        base_url, headers = self.server_request_target()
+        self.modpack_catalog_thread = ModpackCatalogThread(
+            base_url, headers, request_kind, project_id=project_id, params=params,
+        )
+        self.modpack_catalog_thread.loaded.connect(self.on_modpack_catalog_loaded)
+        self.modpack_catalog_thread.start()
+
+    def refresh_modpack_catalog_status(self):
+        self.modpack_status_label.setText("Ověřuji konfiguraci CurseForge API…")
+        self.start_modpack_catalog_request("status")
+
+    def search_modpacks(self, *, reset):
+        if reset:
+            self.modpack_search_index = 0
+        if self.modpack_loader.currentData() != "any" and not self.modpack_version.text().strip():
+            QMessageBox.warning(
+                self, "CurseForge modpacky",
+                "Při filtrování podle loaderu zadej také verzi Minecraftu.",
+            )
+            return
+        self.modpack_status_label.setText("Načítám modpacky z CurseForge…")
+        self.modpack_search_button.setEnabled(False)
+        self.start_modpack_catalog_request("search", params={
+            "query": self.modpack_query.text().strip(),
+            "version": self.modpack_version.text().strip(),
+            "loader": self.modpack_loader.currentData(),
+            "sort": self.modpack_sort.currentData(),
+            "index": self.modpack_search_index,
+            "page_size": 20,
+        })
+
+    def previous_modpack_page(self):
+        self.modpack_search_index = max(0, self.modpack_search_index - 20)
+        self.search_modpacks(reset=False)
+
+    def next_modpack_page(self):
+        self.modpack_search_index += 20
+        self.search_modpacks(reset=False)
+
+    def on_modpack_catalog_loaded(self, payload):
+        request_kind = payload.get("request_kind")
+        self.modpack_search_button.setEnabled(True)
+        if payload.get("error"):
+            self.modpack_status_label.setText(f"Načtení selhalo: {payload['error']}")
+            return
+        if request_kind == "status":
+            self.modpack_status_label.setText(
+                "CurseForge API je připravené."
+                if payload.get("configured")
+                else "CurseForge API klíč zatím není nakonfigurovaný."
+            )
+        elif request_kind == "search":
+            self.render_modpack_results(payload)
+        elif request_kind == "files":
+            self.render_modpack_files(payload)
+
+    def render_modpack_results(self, payload):
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        self.modpack_results.blockSignals(True)
+        self.modpack_results.setRowCount(len(items))
+        for row, project in enumerate(items):
+            values = (
+                project.get("name", ""),
+                ", ".join(project.get("authors") or []),
+                f"{int(project.get('download_count') or 0):,}".replace(",", " "),
+                str(project.get("date_modified", "")).replace("T", " ").replace("Z", "")[:19],
+            )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(Qt.UserRole, project)
+                self.modpack_results.setItem(row, column, item)
+        self.modpack_results.blockSignals(False)
+        self.selected_modpack = None
+        self.modpack_files.setRowCount(0)
+        self.modpack_detail.setText("Vyber modpack pro zobrazení dostupných souborů.")
+        self.modpack_website.setEnabled(False)
+        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        index = int(pagination.get("index") or self.modpack_search_index)
+        count = int(pagination.get("resultCount") or len(items))
+        total = int(pagination.get("totalCount") or 0)
+        first = index + 1 if count else 0
+        last = index + count
+        self.modpack_page_label.setText(f"{first}–{last} z {total}")
+        self.modpack_previous.setEnabled(index > 0)
+        self.modpack_next.setEnabled(last < total and last < 10_000)
+        self.modpack_status_label.setText(f"Načteno {count} modpacků z CurseForge.")
+
+    def on_modpack_selected(self):
+        selected = self.modpack_results.selectedItems()
+        if not selected:
+            return
+        row = selected[0].row()
+        name_item = self.modpack_results.item(row, 0)
+        project = name_item.data(Qt.UserRole) if name_item else None
+        if not isinstance(project, dict) or not project.get("id"):
+            return
+        self.selected_modpack = project
+        authors = ", ".join(project.get("authors") or []) or "neznámý autor"
+        summary = project.get("summary") or "Bez popisu."
+        self.modpack_detail.setText(f"{project.get('name')} · {authors}\n{summary}")
+        website = str(project.get("website_url", ""))
+        self.modpack_website.setEnabled(website.startswith("https://www.curseforge.com/"))
+        self.modpack_files.setRowCount(0)
+        self.modpack_status_label.setText("Načítám dostupné soubory modpacku…")
+        self.start_modpack_catalog_request(
+            "files", project_id=project["id"], params={
+                "version": self.modpack_version.text().strip(),
+                "loader": self.modpack_loader.currentData(),
+                "index": 0,
+                "page_size": 50,
+            },
+        )
+
+    def render_modpack_files(self, payload):
+        if not self.selected_modpack or payload.get("project_id") != self.selected_modpack.get("id"):
+            return
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        release_labels = {1: "Release", 2: "Beta", 3: "Alpha"}
+        self.modpack_files.setRowCount(len(items))
+        for row, item in enumerate(items):
+            size_mib = int(item.get("file_length") or 0) / (1024 ** 2)
+            values = (
+                item.get("display_name") or item.get("file_name", ""),
+                ", ".join(item.get("game_versions") or []),
+                release_labels.get(item.get("release_type"), "—"),
+                f"{size_mib:.1f} MiB",
+                "Ano" if item.get("is_server_pack") or item.get("server_pack_file_id") else "Ne",
+            )
+            for column, value in enumerate(values):
+                self.modpack_files.setItem(row, column, QTableWidgetItem(str(value)))
+        self.modpack_status_label.setText(
+            f"Modpack nabízí {len(items)} odpovídajících souborů."
+        )
+
+    def open_selected_modpack_website(self):
+        if not self.selected_modpack:
+            return
+        website = str(self.selected_modpack.get("website_url", ""))
+        if website.startswith("https://www.curseforge.com/"):
+            QDesktopServices.openUrl(QUrl(website))
 
     # ----------------- registr serverů -----------------
     def on_app_mode_changed(self, index):

@@ -160,6 +160,56 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         update_ui.assert_called_once()
 
+    def test_read_only_modpack_catalog_renders_projects_and_files(self):
+        payload = {
+            "request_kind": "search",
+            "items": [{
+                "id": 123,
+                "name": "Fabric Family Pack",
+                "summary": "A friendly Fabric modpack.",
+                "authors": ["Builder"],
+                "download_count": 12345,
+                "date_modified": "2026-08-15T10:00:00Z",
+                "website_url": "https://www.curseforge.com/minecraft/modpacks/family",
+            }],
+            "pagination": {
+                "index": 0, "pageSize": 20, "resultCount": 1, "totalCount": 1,
+            },
+        }
+        self.window.on_modpack_catalog_loaded(payload)
+
+        self.assertEqual(self.window.modpack_results.rowCount(), 1)
+        self.assertEqual(self.window.modpack_results.item(0, 0).text(), "Fabric Family Pack")
+        self.assertEqual(self.window.modpack_page_label.text(), "1–1 z 1")
+        with patch.object(self.window, "start_modpack_catalog_request") as load_files:
+            self.window.modpack_results.selectRow(0)
+            QApplication.processEvents()
+        self.assertIn("A friendly Fabric modpack", self.window.modpack_detail.text())
+        self.assertTrue(self.window.modpack_website.isEnabled())
+        load_files.assert_called_once()
+
+        self.window.render_modpack_files({
+            "project_id": 123,
+            "items": [{
+                "display_name": "Fabric Family Pack 1.0",
+                "game_versions": ["1.20.1", "Fabric"],
+                "release_type": 1,
+                "file_length": 1048576,
+                "is_server_pack": False,
+                "server_pack_file_id": 456,
+            }],
+        })
+        self.assertEqual(self.window.modpack_files.rowCount(), 1)
+        self.assertEqual(self.window.modpack_files.item(0, 4).text(), "Ano")
+
+    def test_modpack_catalog_shows_missing_api_key_without_install_actions(self):
+        self.window.on_modpack_catalog_loaded({
+            "request_kind": "status", "provider": "curseforge",
+            "configured": False, "read_only": True, "cached": False,
+        })
+        self.assertIn("není nakonfigurovaný", self.window.modpack_status_label.text())
+        self.assertFalse(hasattr(self.window, "modpack_install_button"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,13 @@ import socket
 from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
+from game_mover_catalog import (
+    CatalogNotConfigured,
+    CatalogUpstreamError,
+    CatalogValidationError,
+    CurseForgeCatalogProvider,
+    load_curseforge_api_key,
+)
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
 from game_mover_mods import scan_mod_directory
 from game_mover_security import (
@@ -107,6 +114,10 @@ PODMAN_DATA_ROOT = os.path.realpath(
 BACKUP_ROOT = os.path.realpath(
     os.getenv("GAME_PLATFORM_BACKUP_ROOT", "/var/lib/game-platform/backups")
 )
+CURSEFORGE_API_KEY_PATH = os.getenv(
+    "GAME_MOVER_CURSEFORGE_API_KEY_PATH",
+    os.path.join(LOCAL_ADMIN_TOKEN_DIR, "curseforge.key"),
+)
 WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
 OPERATIONS = OperationRegistry()
@@ -130,6 +141,10 @@ MINECRAFT_INSTALL_PORT_END = 65535
 def workload_lock(workload_id):
     with WORKLOAD_LOCKS_GUARD:
         return WORKLOAD_LOCKS.setdefault(workload_id, threading.Lock())
+
+
+def curseforge_catalog_provider():
+    return CurseForgeCatalogProvider(load_curseforge_api_key(CURSEFORGE_API_KEY_PATH))
 
 
 def default_game_servers():
@@ -674,7 +689,15 @@ def restrict_remote_api():
     """A remotely bound instance exposes only authenticated read-only server data."""
     if request.remote_addr in ("127.0.0.1", "::1"):
         return None
-    if request.path not in ("/servers/status", "/servers/minecraft/mods", "/proxy/status"):
+    read_only_paths = (
+        "/servers/status",
+        "/servers/minecraft/mods",
+        "/proxy/status",
+        "/minecraft/modpacks/status",
+        "/minecraft/modpacks/search",
+    )
+    read_only_prefixes = ("/minecraft/modpacks/",)
+    if request.path not in read_only_paths and not request.path.startswith(read_only_prefixes):
         return jsonify({"message": "Remote access is limited to server status endpoints"}), 403
     if not require_read_access(request):
         return jsonify({"message": "Unauthorized"}), 403
@@ -1992,6 +2015,65 @@ def servers_backups():
     except (InstallError, OSError, ValueError) as error:
         return jsonify({"message": str(error)}), 400
     return jsonify({"source_id": source_id, "backups": backups})
+
+
+def no_store_json(payload, status=200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/minecraft/modpacks/status", methods=["GET"])
+def minecraft_modpack_catalog_status():
+    provider = curseforge_catalog_provider()
+    return no_store_json({
+        "provider": "curseforge",
+        "configured": provider.configured,
+        "read_only": True,
+        "cached": False,
+    })
+
+
+@app.route("/minecraft/modpacks/search", methods=["GET"])
+def minecraft_modpack_search():
+    provider = curseforge_catalog_provider()
+    try:
+        result = provider.search(
+            query=request.args.get("query", ""),
+            version=request.args.get("version", ""),
+            loader=request.args.get("loader", "any"),
+            sort=request.args.get("sort", "popularity"),
+            index=request.args.get("index", 0),
+            page_size=request.args.get("page_size", 20),
+        )
+    except CatalogNotConfigured as error:
+        return no_store_json({"message": str(error)}, 503)
+    except CatalogValidationError as error:
+        return no_store_json({"message": str(error)}, 400)
+    except CatalogUpstreamError as error:
+        return no_store_json({"message": str(error)}, 502)
+    return no_store_json(result)
+
+
+@app.route("/minecraft/modpacks/<int:project_id>/files", methods=["GET"])
+def minecraft_modpack_files(project_id):
+    provider = curseforge_catalog_provider()
+    try:
+        result = provider.files(
+            project_id,
+            version=request.args.get("version", ""),
+            loader=request.args.get("loader", "any"),
+            index=request.args.get("index", 0),
+            page_size=request.args.get("page_size", 50),
+        )
+    except CatalogNotConfigured as error:
+        return no_store_json({"message": str(error)}, 503)
+    except CatalogValidationError as error:
+        return no_store_json({"message": str(error)}, 400)
+    except CatalogUpstreamError as error:
+        return no_store_json({"message": str(error)}, 502)
+    return no_store_json(result)
 
 
 @app.route("/servers/minecraft/install", methods=["GET", "POST"])

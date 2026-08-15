@@ -117,6 +117,15 @@ the same model without allowing those protections to be weakened. Remote SSH
 administration is absent from Connections and remains hidden in Security until
 local PAM authentication.
 
+The fixed **Modpacks** tab is a provider-backed, read-only discovery surface.
+Its first provider is CurseForge and supports text, Minecraft-version and
+loader filters, sorting, pagination, project summaries and compatible file or
+server-pack metadata. Provider credentials remain host-only. Catalog responses
+are not persisted or cached, download URLs are not relayed, and the initial UI
+contains no download or installation action. The provider boundary must allow a
+future source to be added without coupling the GUI to CurseForge response
+schemas.
+
 ## Security model
 
 Authorization is a backend-enforced policy per operation, not merely GUI button
@@ -146,7 +155,9 @@ tokens never leave the host API and must not appear in logs or responses.
 ## Implementation sequence
 
 1. Extend the existing persistent Gate Lite lifecycle with editable route management.
-2. Extend the validated Minecraft workload installer with image discovery.
+2. Extend the validated Minecraft workload installer with image discovery; the
+   provider-backed read-only CurseForge modpack catalog is now delivered as the
+   discovery foundation.
 3. Use the UI to back up and restore the current Forge server into Podman, verify it,
    and expose cut-over as a separate explicit user action.
 4. Extend the delivered per-server Management tab with RCON, properties, players
