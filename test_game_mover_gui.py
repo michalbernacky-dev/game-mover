@@ -115,6 +115,29 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.server_recommended_connection_text(server), "127.0.0.1:25570",
         )
 
+    def test_generic_server_uses_and_displays_registered_endpoints(self):
+        server = {
+            "id": "satisfactory", "name": "Satisfactory", "kind": "generic",
+            "status": "inactive", "message": "Neběží",
+            "runtime_label": "systemd: satisfactory.service",
+            "permissions": {},
+            "endpoints": [
+                {"name": "Game/API", "protocol": "tcp", "port": 7778},
+                {"name": "Game/Query", "protocol": "udp", "port": 7778},
+                {"name": "Reliable", "protocol": "tcp", "port": 8888},
+            ],
+        }
+        self.window.last_server_statuses = [server]
+        self.window.render_server_cards([server])
+        self.window.open_server_management("satisfactory")
+        entry = self.window.server_management_pages["satisfactory"]
+
+        self.assertEqual(entry["connection"].text(), "127.0.0.1:7778")
+        self.assertEqual(
+            entry["endpoints"].text(),
+            "Game/API: TCP/7778 · Game/Query: UDP/7778 · Reliable: TCP/8888",
+        )
+
     def test_server_card_prefers_gate_and_does_not_show_direct_backend(self):
         layout = self.window.server_card_layouts["mc-test"]
         labels = [

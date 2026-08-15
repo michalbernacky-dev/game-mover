@@ -22,6 +22,14 @@ The platform has two complementary workload models:
   and remain supported for status, lifecycle, backups, management, and Gate Lite
   routing; self-service creation does not create new systemd units.
 
+Every workload can register an ordered set of host-facing network endpoints.
+An endpoint has a human-readable name, `tcp` or `udp` protocol, and a validated
+port. This common registry is the source for server cards, connection hints,
+host-port conflict checks and future firewall/Tailscale policy assistance.
+Game-specific protocols such as Minecraft status, RCON, Steam query ports or
+Satisfactory reliable messaging remain capabilities layered on this neutral
+network model.
+
 ## Minecraft self-service
 
 The intended experience is a small private alternative to a hosted Minecraft

@@ -227,6 +227,18 @@ Example entry in `/etc/game_mover/servers.json`:
 }
 ```
 
+Every workload type can register host-facing TCP/UDP endpoints. They are shown
+in server cards and management views and checked for host port conflicts when
+the registry is saved:
+
+```json
+"endpoints": [
+  {"name": "Game/API", "protocol": "tcp", "port": 7778},
+  {"name": "Game/Query", "protocol": "udp", "port": 7778},
+  {"name": "Reliable messaging", "protocol": "tcp", "port": 8888}
+]
+```
+
 The workload ID fixes the allowed data path to `<data root>/<id>/data`.
 Authorization for its actions lives in the central Security registry and never
 enables remote control. If a workload is running during backup, it is cleanly
@@ -625,6 +637,17 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
   },
   "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods"
 }
+```
+
+Každý typ workloadu může registrovat hostitelské TCP/UDP endpointy. Zobrazují se
+na kartách a ve správě serveru a při uložení registru se kontrolují kolize portů:
+
+```json
+"endpoints": [
+  {"name": "Game/API", "protocol": "tcp", "port": 7778},
+  {"name": "Game/Query", "protocol": "udp", "port": 7778},
+  {"name": "Reliable messaging", "protocol": "tcp", "port": 8888}
+]
 ```
 
 ID workloadu určuje povolenou datovou cestu `<data root>/<id>/data`.

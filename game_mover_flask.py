@@ -29,6 +29,7 @@ from game_mover_catalog import (
     load_curseforge_api_key,
 )
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
+from game_mover_endpoints import normalize_endpoints
 from game_mover_dns import (
     DnsConfigError,
     default_dns_config,
@@ -160,7 +161,7 @@ def curseforge_catalog_provider():
 def default_game_servers():
     return [
         {"id": "minecraft", "name": "Minecraft", "backend": "systemd", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
-        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
+        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "endpoints": [{"name": "Game/API", "protocol": "tcp", "port": 7778}, {"name": "Game/Query", "protocol": "udp", "port": 7778}, {"name": "Reliable messaging", "protocol": "tcp", "port": 8888}], "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
     ]
 
 
@@ -184,6 +185,14 @@ def normalize_game_server(server):
         for action in SERVER_ACTIONS
     }
     item.pop("control_auth", None)
+    try:
+        endpoints = normalize_endpoints(item.get("endpoints"))
+    except ValueError:
+        endpoints = []
+    if endpoints:
+        item["endpoints"] = endpoints
+    else:
+        item.pop("endpoints", None)
     runtime = item.get("runtime") if isinstance(item.get("runtime"), dict) else {}
     if backend == "systemd":
         unit = str(runtime.get("unit") or item.get("service") or "").strip()
@@ -334,6 +343,14 @@ def reserved_host_ports(servers=None, gate_config=None):
     servers = load_game_servers() if servers is None else servers
     reserved = set()
     for server in servers:
+        try:
+            endpoints = normalize_endpoints(server.get("endpoints"))
+        except ValueError:
+            endpoints = []
+        reserved.update(
+            endpoint["port"] for endpoint in endpoints
+            if endpoint["protocol"] == "tcp"
+        )
         connection = server.get("connection")
         if isinstance(connection, dict):
             direct_port = connection.get("direct_port")
@@ -1015,6 +1032,20 @@ def game_server_status(server, security_config=None):
         port_source = "registry"
     if direct_port is not None:
         result["connection"] = {"direct_port": direct_port, "source": port_source}
+    try:
+        endpoints = normalize_endpoints(server.get("endpoints"))
+    except ValueError:
+        endpoints = []
+    if direct_port is not None and not any(
+        endpoint["protocol"] == "tcp" and endpoint["port"] == direct_port
+        for endpoint in endpoints
+    ):
+        endpoints.insert(0, {
+            "name": "Minecraft" if server.get("kind") == "minecraft" else "Hra",
+            "protocol": "tcp",
+            "port": direct_port,
+        })
+    result["endpoints"] = endpoints
     if server.get("kind") == "minecraft":
         players = {
             "online": None,
@@ -1992,6 +2023,9 @@ def validate_game_server_entry(server, seen_ids):
         "backend": backend_name,
         "kind": kind,
     }
+    endpoints = normalize_endpoints(server.get("endpoints"))
+    if endpoints:
+        item["endpoints"] = endpoints
     raw_permissions = server.get("permissions")
     if raw_permissions is not None and not isinstance(raw_permissions, dict):
         raise ValueError("Invalid server permissions")
@@ -2075,6 +2109,25 @@ def servers_config():
             return jsonify({"message": str(error)}), 400
         validated.append(item)
         seen_ids.add(item["id"])
+    occupied_endpoints = {}
+    for item in validated:
+        candidates = list(item.get("endpoints", []))
+        connection = item.get("connection")
+        if isinstance(connection, dict) and connection.get("direct_port") is not None:
+            candidates.append({
+                "name": "Přímé připojení", "protocol": "tcp",
+                "port": connection["direct_port"],
+            })
+        for endpoint in candidates:
+            key = (endpoint["protocol"], endpoint["port"])
+            owner = occupied_endpoints.get(key)
+            if owner and owner != item["id"]:
+                return jsonify({
+                    "message": (
+                        f"Síťový endpoint {key[0]}:{key[1]} už používá server {owner}"
+                    ),
+                }), 400
+            occupied_endpoints[key] = item["id"]
     save_game_servers(validated)
     return jsonify({"servers": validated})
 
@@ -2314,6 +2367,10 @@ def minecraft_install():
                 "mods_dir": os.path.join(data_directory, "mods"),
                 "data": {"directory": data_directory},
                 "connection": {"direct_port": config["port"]},
+                "endpoints": [{
+                    "name": "Minecraft", "protocol": "tcp",
+                    "port": config["port"],
+                }],
                 "permissions": {
                     "start": "silent", "stop": "silent",
                     "restart": "silent", "backup": "pam",

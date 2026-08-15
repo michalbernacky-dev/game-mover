@@ -39,6 +39,11 @@ from game_mover_security import (
     SERVER_ACTION_IDS,
 )
 from game_mover_version import __version__
+from game_mover_endpoints import (
+    format_endpoint_config,
+    format_endpoint_summary,
+    parse_endpoint_config,
+)
 
 # ------------------------------------------------------------
 # KONFIGURACE
@@ -1054,10 +1059,10 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(7)
+        self.local_services_table.setColumnCount(8)
         self.local_services_table.setHorizontalHeaderLabels([
             "ID", "Název", "Backend", "Jednotka / container", "Typ",
-            "Datový adresář", "Adresář mods",
+            "Datový adresář", "Adresář mods", "Síťové endpointy",
         ])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
@@ -1069,7 +1074,16 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(5, QHeaderView.Stretch)
         services_header.setSectionResizeMode(6, QHeaderView.Stretch)
+        services_header.setSectionResizeMode(7, QHeaderView.Stretch)
         layout.addWidget(self.local_services_table)
+        endpoint_help = QLabel(
+            "Endpointy: Název=tcp:port; Další=udp:port — například "
+            "Game/API=tcp:7778; Game/Query=udp:7778; Reliable=tcp:8888",
+            self,
+        )
+        endpoint_help.setWordWrap(True)
+        endpoint_help.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(endpoint_help)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
         self.local_services_refresh.clicked.connect(self.load_local_services)
@@ -2348,6 +2362,7 @@ class GameMover(QWidget):
             3: reference,
             5: data.get("directory", ""),
             6: service.get("mods_dir", ""),
+            7: format_endpoint_config(service.get("endpoints")),
         }
         for column, value in values.items():
             item = QTableWidgetItem(str(value))
@@ -2392,6 +2407,12 @@ class GameMover(QWidget):
             runtime_reference = cell_text(3)
             data_directory = cell_text(5)
             mods_dir = cell_text(6)
+            try:
+                endpoints = parse_endpoint_config(cell_text(7))
+            except ValueError as error:
+                QMessageBox.warning(self, "Služby", str(error))
+                self.local_services_table.setCurrentCell(row, 7)
+                return
             if kind == "minecraft":
                 if not data_directory.startswith("/"):
                     QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní datový adresář.")
@@ -2408,6 +2429,10 @@ class GameMover(QWidget):
                 "id": cell_text(0), "name": cell_text(1), "backend": backend,
                 "kind": kind,
             })
+            if endpoints:
+                entry["endpoints"] = endpoints
+            else:
+                entry.pop("endpoints", None)
             entry.pop("control_auth", None)
             if backend == "systemd":
                 entry["service"] = runtime_reference
@@ -2570,6 +2595,12 @@ class GameMover(QWidget):
                 connection_label = QLabel(f"Připojení: {recommended_connection}")
                 connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 card_layout.addWidget(connection_label)
+            endpoints = server.get("endpoints")
+            if isinstance(endpoints, list) and endpoints:
+                endpoint_label = QLabel(f"Síť: {self.server_endpoints_text(server)}")
+                endpoint_label.setWordWrap(True)
+                endpoint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                card_layout.addWidget(endpoint_label)
             if server.get("kind") == "minecraft":
                 version_label = QLabel(
                     f"Verze Minecraftu: {self.server_minecraft_version_text(server)}"
@@ -2722,7 +2753,24 @@ class GameMover(QWidget):
         if gate:
             return gate
         direct = self.server_direct_connection_text(server)
-        return "" if direct == "Přímé připojení není zveřejněné" else direct
+        if direct != "Přímé připojení není zveřejněné":
+            return direct
+        endpoints = server.get("endpoints")
+        if isinstance(endpoints, list) and endpoints:
+            return self.formatted_game_endpoint(
+                self.active_game_host(), endpoints[0].get("port"),
+            )
+        return ""
+
+    @staticmethod
+    def server_endpoints_text(server):
+        endpoints = server.get("endpoints")
+        if not isinstance(endpoints, list) or not endpoints:
+            return "Nejsou registrované"
+        try:
+            return format_endpoint_summary(endpoints)
+        except ValueError:
+            return "Neplatná konfigurace"
 
     def server_players_text(self, server):
         if server.get("kind") != "minecraft":
@@ -2823,6 +2871,9 @@ class GameMover(QWidget):
         players_label = QLabel(overview)
         runtime_label = QLabel(overview)
         runtime_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        endpoints_label = QLabel(overview)
+        endpoints_label.setWordWrap(True)
+        endpoints_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         permissions_label = QLabel(overview)
         permissions_label.setWordWrap(True)
         overview_form.addRow("Stav:", status_label)
@@ -2835,6 +2886,7 @@ class GameMover(QWidget):
             overview_form.addRow("Verze Minecraftu:", minecraft_version_label)
         overview_form.addRow("Hráči:", players_label)
         overview_form.addRow("Runtime:", runtime_label)
+        overview_form.addRow("Síťové endpointy:", endpoints_label)
         overview_form.addRow("Oprávnění:", permissions_label)
         overview_layout.addLayout(overview_form)
         lifecycle = QHBoxLayout()
@@ -2890,6 +2942,7 @@ class GameMover(QWidget):
             "minecraft_version": minecraft_version_label,
             "players": players_label,
             "runtime": runtime_label,
+            "endpoints": endpoints_label,
             "permissions": permissions_label,
             "lifecycle": lifecycle_buttons,
             "delete_help": delete_help,
@@ -3452,7 +3505,8 @@ class GameMover(QWidget):
             entry["direct_connection"].setVisible(True)
         else:
             entry["connection"].setText(
-                self.server_direct_connection_text(server)
+                self.server_recommended_connection_text(server)
+                or "Připojení není zveřejněné"
             )
             entry["direct_connection_caption"].setVisible(False)
             entry["direct_connection"].setVisible(False)
@@ -3467,6 +3521,7 @@ class GameMover(QWidget):
             )
         entry["players"].setText(self.server_players_text(server))
         entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
+        entry["endpoints"].setText(self.server_endpoints_text(server))
         permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
         summary = " · ".join(
             f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"

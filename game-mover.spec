@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.17.0
+Version:        0.18.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -52,6 +52,7 @@ install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
 install -Dpm0644 game_mover_installs.py %{buildroot}/opt/game_mover/game_mover_installs.py
 install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
+install -Dpm0644 game_mover_endpoints.py %{buildroot}/opt/game_mover/game_mover_endpoints.py
 install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_mover_connections.py
 install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_security.py
 install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
@@ -134,6 +135,7 @@ fi
 /opt/game_mover/game_mover_backups.py
 /opt/game_mover/game_mover_installs.py
 /opt/game_mover/game_mover_jobs.py
+/opt/game_mover/game_mover_endpoints.py
 /opt/game_mover/game_mover_connections.py
 /opt/game_mover/game_mover_security.py
 /opt/game_mover/game_mover_properties.py
@@ -151,6 +153,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.18.0-1
+- Add generic TCP/UDP endpoint registration for every game server type
+- Display game endpoints in server cards and management views
+- Validate duplicate host ports independently of Minecraft
+
 * Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.17.0-1
 - Add provider-neutral private DNS derived from exact Gate routes
 - Ship an optional authoritative DNS service without a Pi-hole dependency

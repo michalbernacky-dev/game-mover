@@ -934,6 +934,52 @@ class ServerRegistryTest(unittest.TestCase):
             self.assertEqual(response.status_code, 403)
         fake_backend.restart.assert_called_once()
 
+    def test_generic_network_endpoints_are_persisted_and_conflicts_rejected(self):
+        satisfactory = {
+            "id": "satisfactory", "name": "Satisfactory",
+            "backend": "systemd", "kind": "generic",
+            "service": "satisfactory.service",
+            "endpoints": [
+                {"name": "Game/API", "protocol": "tcp", "port": 7778},
+                {"name": "Game/Query", "protocol": "udp", "port": 7778},
+                {"name": "Reliable", "protocol": "tcp", "port": 8888},
+            ],
+        }
+        response = self.client.put(
+            "/servers/config", json={"servers": [satisfactory]},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["servers"][0]["endpoints"], satisfactory["endpoints"])
+
+        conflicting = {
+            "id": "other", "name": "Other", "backend": "systemd",
+            "kind": "generic", "service": "other.service",
+            "endpoints": [{"name": "Game", "protocol": "tcp", "port": 7778}],
+        }
+        response = self.client.put(
+            "/servers/config", json={"servers": [satisfactory, conflicting]},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("tcp:7778", response.json["message"])
+
+    def test_minecraft_port_suggestion_reserves_generic_tcp_endpoints(self):
+        servers = [{
+            "id": "other", "kind": "generic", "backend": "systemd",
+            "endpoints": [
+                {"name": "TCP", "protocol": "tcp", "port": 25570},
+                {"name": "UDP", "protocol": "udp", "port": 25571},
+            ],
+        }]
+        gate_config = backend.default_gate_config()
+        gate_config["listen"]["port"] = 25572
+        with patch.object(backend, "host_port_available", return_value=True):
+            port = backend.next_available_minecraft_port(
+                servers=servers, gate_config=gate_config,
+            )
+        self.assertEqual(port, 25571)
+
     def test_systemd_and_podman_backups_require_local_pam(self):
         self.servers[0]["backend"] = "systemd"
         self.save_servers()
