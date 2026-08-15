@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
     QDialog, QDialogButtonBox, QTabBar
 )
-from PyQt5.QtGui import QDesktopServices, QPixmap
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
@@ -40,7 +40,6 @@ from game_mover_security import (
 )
 from game_mover_version import __version__
 from game_mover_endpoints import (
-    format_endpoint_summary,
     normalize_endpoints,
 )
 
@@ -3365,16 +3364,7 @@ class GameMover(QWidget):
             endpoint for endpoint in status_server.get("endpoints", [])
             if isinstance(endpoint, dict) and endpoint.get("source") != "registr"
         ]
-        if automatic_endpoints:
-            automatic_label = QLabel(
-                "Automaticky zjištěné (není třeba vyplňovat):\n"
-                f"{format_endpoint_summary(automatic_endpoints)}",
-                dialog,
-            )
-            automatic_label.setWordWrap(True)
-            automatic_label.setStyleSheet("color: #66cc99;")
-            layout.addWidget(automatic_label)
-        elif status_server.get("endpoint_discovery_error"):
+        if not automatic_endpoints and status_server.get("endpoint_discovery_error"):
             discovery_error = QLabel(
                 f"Automatické zjištění selhalo: "
                 f"{status_server['endpoint_discovery_error']}",
@@ -3393,11 +3383,26 @@ class GameMover(QWidget):
         table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         layout.addWidget(table)
 
-        def add_endpoint_row(endpoint=None):
+        def add_endpoint_row(endpoint=None, automatic=False):
             endpoint = endpoint if isinstance(endpoint, dict) else {}
             row = table.rowCount()
             table.insertRow(row)
-            table.setItem(row, 0, QTableWidgetItem(str(endpoint.get("name", "Hra"))))
+            name_item = QTableWidgetItem(str(endpoint.get("name", "Hra")))
+            name_item.setData(Qt.UserRole, bool(automatic))
+            table.setItem(row, 0, name_item)
+            if automatic:
+                source = str(endpoint.get("source", "automaticky zjištěno"))
+                protocol_item = QTableWidgetItem(
+                    str(endpoint.get("protocol", "")).upper()
+                )
+                port_item = QTableWidgetItem(str(endpoint.get("port", "")))
+                for item in (name_item, protocol_item, port_item):
+                    item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+                    item.setForeground(QBrush(QColor("#66cc99")))
+                    item.setToolTip(f"Automaticky zjištěno: {source}")
+                table.setItem(row, 1, protocol_item)
+                table.setItem(row, 2, port_item)
+                return
             protocol = QComboBox(table)
             protocol.addItem("TCP", "tcp")
             protocol.addItem("UDP", "udp")
@@ -3409,6 +3414,8 @@ class GameMover(QWidget):
             table.setCellWidget(row, 2, port)
             table.setCurrentCell(row, 0)
 
+        for endpoint in automatic_endpoints:
+            add_endpoint_row(endpoint, automatic=True)
         for endpoint in endpoints:
             add_endpoint_row(endpoint)
 
@@ -3420,10 +3427,23 @@ class GameMover(QWidget):
 
         def remove_selected_endpoint():
             row = table.currentRow()
-            if row >= 0:
+            item = table.item(row, 0) if row >= 0 else None
+            if item is not None and not item.data(Qt.UserRole):
                 table.removeRow(row)
 
+        def update_remove_button():
+            row = table.currentRow()
+            item = table.item(row, 0) if row >= 0 else None
+            remove_button.setEnabled(
+                item is not None and not bool(item.data(Qt.UserRole))
+            )
+
         remove_button.clicked.connect(remove_selected_endpoint)
+        table.currentCellChanged.connect(
+            lambda _row, _column, _previous_row, _previous_column:
+            update_remove_button()
+        )
+        update_remove_button()
         row_actions.addWidget(remove_button)
         row_actions.addStretch()
         layout.addLayout(row_actions)
@@ -3439,6 +3459,8 @@ class GameMover(QWidget):
             configured = []
             for row in range(table.rowCount()):
                 name_item = table.item(row, 0)
+                if name_item is not None and name_item.data(Qt.UserRole):
+                    continue
                 protocol = table.cellWidget(row, 1)
                 port = table.cellWidget(row, 2)
                 configured.append({

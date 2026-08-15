@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtWidgets import QApplication, QTabBar
+from PyQt5.QtWidgets import QApplication, QDialog, QTabBar
 
 import game_mover
 
@@ -134,6 +134,40 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.assertEqual(entry["connection"].text(), "127.0.0.1:7778")
         self.assertEqual(entry["edit_endpoints"].text(), "Technické síťové porty…")
+
+    def test_endpoint_editor_renders_discovered_rows_without_registry_values(self):
+        server = {
+            "id": "satisfactory", "name": "Satisfactory", "kind": "generic",
+            "status": "active", "message": "Běží",
+            "runtime_label": "systemd: satisfactory.service",
+            "permissions": {},
+            "endpoints": [
+                {
+                    "name": "Game/API", "protocol": "tcp", "port": 7778,
+                    "source": "systemd ExecStart",
+                },
+                {
+                    "name": "Game/Query", "protocol": "udp", "port": 7778,
+                    "source": "systemd ExecStart",
+                },
+            ],
+        }
+        response = type("Response", (), {
+            "status_code": 200,
+            "json": lambda self: {"servers": [{
+                "id": "satisfactory", "name": "Satisfactory",
+                "backend": "systemd", "kind": "generic",
+                "service": "satisfactory.service",
+            }]},
+        })()
+        self.window.last_server_statuses = [server]
+        self.window.app_mode = "server"
+        with (
+            patch.object(self.window, "local_operation_headers", return_value={"X": "ok"}),
+            patch.object(game_mover.requests, "get", return_value=response),
+            patch.object(game_mover.QDialog, "exec_", return_value=QDialog.Rejected),
+        ):
+            self.window.edit_server_endpoints("satisfactory")
 
     def test_server_card_prefers_gate_and_does_not_show_direct_backend(self):
         layout = self.window.server_card_layouts["mc-test"]
