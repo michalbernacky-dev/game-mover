@@ -20,6 +20,11 @@ class GameEndpointTest(unittest.TestCase):
             format_endpoint_summary(endpoints),
             "Game/API: TCP/7778 · Game/Query: UDP/7778 · Reliable: TCP/8888",
         )
+        sourced = [{**endpoints[0], "source": "systemd ExecStart"}]
+        self.assertEqual(
+            format_endpoint_summary(sourced),
+            "Game/API: TCP/7778 (systemd ExecStart)",
+        )
 
     def test_rejects_invalid_or_duplicate_endpoint(self):
         with self.assertRaises(ValueError):

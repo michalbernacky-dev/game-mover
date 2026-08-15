@@ -30,6 +30,14 @@ Game-specific protocols such as Minecraft status, RCON, Steam query ports or
 Satisfactory reliable messaging remain capabilities layered on this neutral
 network model.
 
+Adapters may discover endpoints from an authoritative game/runtime source and
+merge them with optional registry entries. Minecraft reads `server.properties`
+or Podman publication metadata. The Satisfactory systemd adapter reads the
+effective `ExecStart`, recognizes explicit game and reliable-messaging ports,
+and otherwise applies the documented Satisfactory defaults. The API and GUI
+retain the source of each effective endpoint so discovered state is not confused
+with a potentially stale manual value.
+
 ## Minecraft self-service
 
 The intended experience is a small private alternative to a hosted Minecraft

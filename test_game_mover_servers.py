@@ -951,6 +951,7 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         self.assertEqual(response.json["servers"][0]["endpoints"], satisfactory["endpoints"])
+        self.assertEqual(response.json["servers"][0]["adapter"], "satisfactory")
 
         conflicting = {
             "id": "other", "name": "Other", "backend": "systemd",
@@ -963,6 +964,40 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("tcp:7778", response.json["message"])
+
+    def test_satisfactory_adapter_supplies_effective_endpoints_with_sources(self):
+        server = backend.normalize_game_server({
+            "id": "satisfactory", "name": "Satisfactory",
+            "backend": "systemd", "kind": "generic",
+            "service": "satisfactory.service",
+        })
+        fake_backend = Mock()
+        fake_backend.status.return_value = WorkloadState("active", "active", "Běží")
+        discovered = [
+            {
+                "name": "Game/API", "protocol": "tcp", "port": 7778,
+                "source": "systemd ExecStart",
+            },
+            {
+                "name": "Game/Query", "protocol": "udp", "port": 7778,
+                "source": "systemd ExecStart",
+            },
+            {
+                "name": "Reliable messaging", "protocol": "tcp", "port": 8888,
+                "source": "výchozí Satisfactory",
+            },
+        ]
+        with (
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(
+                backend, "discover_satisfactory_endpoints", return_value=discovered,
+            ) as discover,
+        ):
+            status = backend.game_server_status(server)
+
+        discover.assert_called_once_with("satisfactory.service")
+        self.assertEqual(status["adapter"], "satisfactory")
+        self.assertEqual(status["endpoints"], discovered)
 
     def test_minecraft_port_suggestion_reserves_generic_tcp_endpoints(self):
         servers = [{

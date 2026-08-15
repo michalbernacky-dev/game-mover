@@ -239,6 +239,12 @@ the registry is saved:
 ]
 ```
 
+Game adapters can supply the same neutral endpoint model automatically.
+Minecraft uses `server.properties` or the Podman publication, while the
+Satisfactory systemd adapter reads its effective `ExecStart` (`-Port`,
+`-ReliablePort` or `-ExternalReliablePort`) and applies game defaults when an
+option is absent. The UI labels every effective endpoint with its source.
+
 The workload ID fixes the allowed data path to `<data root>/<id>/data`.
 Authorization for its actions lives in the central Security registry and never
 enables remote control. If a workload is running during backup, it is cleanly
@@ -649,6 +655,12 @@ na kartách a ve správě serveru a při uložení registru se kontrolují koliz
   {"name": "Reliable messaging", "protocol": "tcp", "port": 8888}
 ]
 ```
+
+Herní adaptéry mohou stejný neutrální model endpointů dodat automaticky.
+Minecraft používá `server.properties` nebo publikaci Podmanu; systemd adaptér
+Satisfactory čte efektivní `ExecStart` (`-Port`, `-ReliablePort` nebo
+`-ExternalReliablePort`) a u chybějící volby použije výchozí hodnotu hry. GUI u
+každého efektivního endpointu uvádí jeho zdroj.
 
 ID workloadu určuje povolenou datovou cestu `<data root>/<id>/data`.
 Autorizace jeho akcí žije v centrálním registru Zabezpečení a nikdy nepovoluje

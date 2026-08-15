@@ -78,7 +78,14 @@ def format_endpoint_config(endpoints):
 
 
 def format_endpoint_summary(endpoints):
-    return " · ".join(
-        f"{endpoint['name']}: {endpoint['protocol'].upper()}/{endpoint['port']}"
-        for endpoint in normalize_endpoints(endpoints)
-    )
+    normalized = normalize_endpoints(endpoints)
+    summaries = []
+    for index, endpoint in enumerate(normalized):
+        raw = endpoints[index] if isinstance(endpoints[index], dict) else {}
+        source = str(raw.get("source", "")).strip()
+        source_text = f" ({source})" if source else ""
+        summaries.append(
+            f"{endpoint['name']}: {endpoint['protocol'].upper()}/{endpoint['port']}"
+            f"{source_text}"
+        )
+    return " · ".join(summaries)

@@ -40,9 +40,8 @@ from game_mover_security import (
 )
 from game_mover_version import __version__
 from game_mover_endpoints import (
-    format_endpoint_config,
     format_endpoint_summary,
-    parse_endpoint_config,
+    normalize_endpoints,
 )
 
 # ------------------------------------------------------------
@@ -1059,10 +1058,10 @@ class GameMover(QWidget):
         self.local_services_label = QLabel("Sledované služby tohoto počítače")
         layout.addWidget(self.local_services_label)
         self.local_services_table = QTableWidget(self)
-        self.local_services_table.setColumnCount(8)
+        self.local_services_table.setColumnCount(7)
         self.local_services_table.setHorizontalHeaderLabels([
             "ID", "Název", "Backend", "Jednotka / container", "Typ",
-            "Datový adresář", "Adresář mods", "Síťové endpointy",
+            "Datový adresář", "Adresář mods",
         ])
         self.local_services_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.local_services_table.setFixedHeight(190)
@@ -1074,16 +1073,7 @@ class GameMover(QWidget):
         services_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         services_header.setSectionResizeMode(5, QHeaderView.Stretch)
         services_header.setSectionResizeMode(6, QHeaderView.Stretch)
-        services_header.setSectionResizeMode(7, QHeaderView.Stretch)
         layout.addWidget(self.local_services_table)
-        endpoint_help = QLabel(
-            "Endpointy: Název=tcp:port; Další=udp:port — například "
-            "Game/API=tcp:7778; Game/Query=udp:7778; Reliable=tcp:8888",
-            self,
-        )
-        endpoint_help.setWordWrap(True)
-        endpoint_help.setStyleSheet("color: #aab7c0;")
-        layout.addWidget(endpoint_help)
         services_actions = QHBoxLayout()
         self.local_services_refresh = QPushButton("Načíst", self)
         self.local_services_refresh.clicked.connect(self.load_local_services)
@@ -2362,7 +2352,6 @@ class GameMover(QWidget):
             3: reference,
             5: data.get("directory", ""),
             6: service.get("mods_dir", ""),
-            7: format_endpoint_config(service.get("endpoints")),
         }
         for column, value in values.items():
             item = QTableWidgetItem(str(value))
@@ -2407,12 +2396,6 @@ class GameMover(QWidget):
             runtime_reference = cell_text(3)
             data_directory = cell_text(5)
             mods_dir = cell_text(6)
-            try:
-                endpoints = parse_endpoint_config(cell_text(7))
-            except ValueError as error:
-                QMessageBox.warning(self, "Služby", str(error))
-                self.local_services_table.setCurrentCell(row, 7)
-                return
             if kind == "minecraft":
                 if not data_directory.startswith("/"):
                     QMessageBox.warning(self, "Služby", "Minecraft workload musí mít absolutní datový adresář.")
@@ -2429,10 +2412,6 @@ class GameMover(QWidget):
                 "id": cell_text(0), "name": cell_text(1), "backend": backend,
                 "kind": kind,
             })
-            if endpoints:
-                entry["endpoints"] = endpoints
-            else:
-                entry.pop("endpoints", None)
             entry.pop("control_auth", None)
             if backend == "systemd":
                 entry["service"] = runtime_reference
@@ -2596,10 +2575,12 @@ class GameMover(QWidget):
                 connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 card_layout.addWidget(connection_label)
             endpoints = server.get("endpoints")
-            if isinstance(endpoints, list) and endpoints:
+            if isinstance(endpoints, list):
                 endpoint_label = QLabel(f"Síť: {self.server_endpoints_text(server)}")
                 endpoint_label.setWordWrap(True)
                 endpoint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                if not endpoints:
+                    endpoint_label.setStyleSheet("color: #ffcc66;")
                 card_layout.addWidget(endpoint_label)
             if server.get("kind") == "minecraft":
                 version_label = QLabel(
@@ -2889,6 +2870,15 @@ class GameMover(QWidget):
         overview_form.addRow("Síťové endpointy:", endpoints_label)
         overview_form.addRow("Oprávnění:", permissions_label)
         overview_layout.addLayout(overview_form)
+        endpoint_actions = QHBoxLayout()
+        endpoint_actions.addStretch()
+        edit_endpoints = QPushButton("Upravit síťové endpointy…", overview)
+        edit_endpoints.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.edit_server_endpoints(selected_id)
+        )
+        endpoint_actions.addWidget(edit_endpoints)
+        overview_layout.addLayout(endpoint_actions)
         lifecycle = QHBoxLayout()
         lifecycle_buttons = {}
         for action, label in (("start", "Spustit"), ("stop", "Vypnout"), ("restart", "Restartovat")):
@@ -2943,6 +2933,7 @@ class GameMover(QWidget):
             "players": players_label,
             "runtime": runtime_label,
             "endpoints": endpoints_label,
+            "edit_endpoints": edit_endpoints,
             "permissions": permissions_label,
             "lifecycle": lifecycle_buttons,
             "delete_help": delete_help,
@@ -3351,6 +3342,162 @@ class GameMover(QWidget):
         if "backups_table" in entry and self.local_operation_headers("backup.catalog"):
             self.load_server_backups(server_id)
 
+    def edit_server_endpoints(self, server_id):
+        headers = self.local_operation_headers("server.registry")
+        if not is_host_management_mode(self.app_mode) or not headers:
+            QMessageBox.warning(
+                self, "Síťové endpointy",
+                "Úprava registru serverů vyžaduje oprávnění správce hostitele.",
+            )
+            return
+        try:
+            response = requests.get(
+                f"{self.host_management_api_url()}/servers/config",
+                headers=headers, timeout=5,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            servers = payload.get("servers", [])
+            server = next(
+                (item for item in servers if item.get("id") == server_id), None,
+            )
+            if server is None:
+                raise RuntimeError("Server už není v registru dostupný")
+            endpoints = normalize_endpoints(server.get("endpoints"))
+        except Exception as error:
+            QMessageBox.critical(
+                self, "Síťové endpointy", f"Načtení endpointů selhalo: {error}",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Síťové endpointy – {server.get('name', server_id)}")
+        dialog.setMinimumSize(650, 390)
+        layout = QVBoxLayout(dialog)
+        help_label = QLabel(
+            "Zaregistruj všechny porty, které hra zpřístupňuje na hostiteli. "
+            "První řádek se používá jako doporučená adresa pro připojení; "
+            "TCP a UDP na stejném čísle jsou dva samostatné endpointy.",
+            dialog,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        status_server = self.server_status_by_id(server_id) or {}
+        automatic_endpoints = [
+            endpoint for endpoint in status_server.get("endpoints", [])
+            if isinstance(endpoint, dict) and endpoint.get("source") != "registr"
+        ]
+        if automatic_endpoints:
+            automatic_label = QLabel(
+                "Automaticky zjištěné (není třeba vyplňovat):\n"
+                f"{format_endpoint_summary(automatic_endpoints)}",
+                dialog,
+            )
+            automatic_label.setWordWrap(True)
+            automatic_label.setStyleSheet("color: #66cc99;")
+            layout.addWidget(automatic_label)
+        elif status_server.get("endpoint_discovery_error"):
+            discovery_error = QLabel(
+                f"Automatické zjištění selhalo: "
+                f"{status_server['endpoint_discovery_error']}",
+                dialog,
+            )
+            discovery_error.setWordWrap(True)
+            discovery_error.setStyleSheet("color: #ff8f8f;")
+            layout.addWidget(discovery_error)
+        table = QTableWidget(dialog)
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Název", "Protokol", "Port"])
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        layout.addWidget(table)
+
+        def add_endpoint_row(endpoint=None):
+            endpoint = endpoint if isinstance(endpoint, dict) else {}
+            row = table.rowCount()
+            table.insertRow(row)
+            table.setItem(row, 0, QTableWidgetItem(str(endpoint.get("name", "Hra"))))
+            protocol = QComboBox(table)
+            protocol.addItem("TCP", "tcp")
+            protocol.addItem("UDP", "udp")
+            protocol.setCurrentIndex(max(0, protocol.findData(endpoint.get("protocol", "tcp"))))
+            table.setCellWidget(row, 1, protocol)
+            port = QSpinBox(table)
+            port.setRange(1, 65535)
+            port.setValue(int(endpoint.get("port", 25565)))
+            table.setCellWidget(row, 2, port)
+            table.setCurrentCell(row, 0)
+
+        for endpoint in endpoints:
+            add_endpoint_row(endpoint)
+
+        row_actions = QHBoxLayout()
+        add_button = QPushButton("Přidat endpoint", dialog)
+        add_button.clicked.connect(lambda _checked=False: add_endpoint_row())
+        row_actions.addWidget(add_button)
+        remove_button = QPushButton("Smazat vybraný", dialog)
+
+        def remove_selected_endpoint():
+            row = table.currentRow()
+            if row >= 0:
+                table.removeRow(row)
+
+        remove_button.clicked.connect(remove_selected_endpoint)
+        row_actions.addWidget(remove_button)
+        row_actions.addStretch()
+        layout.addLayout(row_actions)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog,
+        )
+        buttons.button(QDialogButtonBox.Save).setText("Uložit endpointy")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        while dialog.exec_() == QDialog.Accepted:
+            configured = []
+            for row in range(table.rowCount()):
+                name_item = table.item(row, 0)
+                protocol = table.cellWidget(row, 1)
+                port = table.cellWidget(row, 2)
+                configured.append({
+                    "name": name_item.text().strip() if name_item else "",
+                    "protocol": protocol.currentData() if protocol else "",
+                    "port": port.value() if port else 0,
+                })
+            try:
+                configured = normalize_endpoints(configured)
+            except ValueError as error:
+                QMessageBox.warning(dialog, "Síťové endpointy", str(error))
+                continue
+            if configured:
+                server["endpoints"] = configured
+            else:
+                server.pop("endpoints", None)
+            try:
+                response = requests.put(
+                    f"{self.host_management_api_url()}/servers/config",
+                    json={"servers": servers}, headers=headers, timeout=8,
+                )
+                result = response.json()
+                if response.status_code != 200:
+                    raise RuntimeError(result.get("message", f"HTTP {response.status_code}"))
+            except Exception as error:
+                QMessageBox.critical(
+                    dialog, "Síťové endpointy", f"Uložení endpointů selhalo: {error}",
+                )
+                continue
+            self.load_local_services()
+            self.refresh_server_statuses()
+            QMessageBox.information(
+                self, "Síťové endpointy", "Síťové endpointy byly uloženy.",
+            )
+            break
+
     def control_management_server(self, action, server_id):
         server = self.server_status_by_id(server_id)
         if not server:
@@ -3522,6 +3669,10 @@ class GameMover(QWidget):
         entry["players"].setText(self.server_players_text(server))
         entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
         entry["endpoints"].setText(self.server_endpoints_text(server))
+        entry["edit_endpoints"].setEnabled(
+            is_host_management_mode(self.app_mode)
+            and bool(self.local_operation_headers("server.registry"))
+        )
         permissions = server.get("permissions") if isinstance(server.get("permissions"), dict) else {}
         summary = " · ".join(
             f"{SERVER_ACTION_LABELS[action]}: {SERVER_POLICY_LABELS.get(permissions.get(action), 'zakázáno')}"

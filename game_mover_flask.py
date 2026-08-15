@@ -30,6 +30,7 @@ from game_mover_catalog import (
 )
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
 from game_mover_endpoints import normalize_endpoints
+from game_mover_satisfactory import discover_satisfactory_endpoints
 from game_mover_dns import (
     DnsConfigError,
     default_dns_config,
@@ -161,7 +162,7 @@ def curseforge_catalog_provider():
 def default_game_servers():
     return [
         {"id": "minecraft", "name": "Minecraft", "backend": "systemd", "service": os.getenv("GAME_MOVER_MINECRAFT_SERVICE", "forge-srv.service"), "kind": "minecraft", "mods_dir": MINECRAFT_MODS_DIR, "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
-        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "endpoints": [{"name": "Game/API", "protocol": "tcp", "port": 7778}, {"name": "Game/Query", "protocol": "udp", "port": 7778}, {"name": "Reliable messaging", "protocol": "tcp", "port": 8888}], "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
+        {"id": "satisfactory", "name": "Satisfactory", "backend": "systemd", "service": os.getenv("GAME_MOVER_SATISFACTORY_SERVICE", "satisfactory.service"), "kind": "generic", "adapter": "satisfactory", "permissions": {"start": "silent", "stop": "silent", "restart": "silent", "backup": "pam"}},
     ]
 
 
@@ -202,6 +203,17 @@ def normalize_game_server(server):
         container = str(runtime.get("container_name") or item.get("container") or "").strip()
         item["container"] = container
         item["runtime"] = {**runtime, "container_name": container}
+    adapter = str(item.get("adapter", "")).strip().lower()
+    effective_unit = str(item.get("runtime", {}).get("unit", "")).strip().lower()
+    if not adapter and (
+        str(item.get("id", "")).strip().lower() == "satisfactory"
+        or effective_unit == "satisfactory.service"
+    ):
+        adapter = "satisfactory"
+    if adapter == "satisfactory":
+        item["adapter"] = adapter
+    else:
+        item.pop("adapter", None)
     if item.get("kind") == "minecraft":
         data = item.get("data") if isinstance(item.get("data"), dict) else {}
         data_directory = str(data.get("directory") or "").strip()
@@ -343,12 +355,21 @@ def reserved_host_ports(servers=None, gate_config=None):
     servers = load_game_servers() if servers is None else servers
     reserved = set()
     for server in servers:
+        discovered_endpoints = []
+        if server.get("adapter") == "satisfactory":
+            runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+            try:
+                discovered_endpoints = discover_satisfactory_endpoints(
+                    runtime.get("unit", server.get("service", ""))
+                )
+            except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+                discovered_endpoints = []
         try:
             endpoints = normalize_endpoints(server.get("endpoints"))
         except ValueError:
             endpoints = []
         reserved.update(
-            endpoint["port"] for endpoint in endpoints
+            endpoint["port"] for endpoint in [*discovered_endpoints, *endpoints]
             if endpoint["protocol"] == "tcp"
         )
         connection = server.get("connection")
@@ -995,6 +1016,7 @@ def game_server_status(server, security_config=None):
         "service": server.get("service", ""),
         "runtime_label": f"{backend_name}: {reference}",
         "kind": server.get("kind", "generic"),
+        "adapter": server.get("adapter", ""),
         "has_mods": bool(server.get("mods_dir")),
         "permissions": {
             action: server_action_policy(server, action, security_config)
@@ -1032,19 +1054,37 @@ def game_server_status(server, security_config=None):
         port_source = "registry"
     if direct_port is not None:
         result["connection"] = {"direct_port": direct_port, "source": port_source}
-    try:
-        endpoints = normalize_endpoints(server.get("endpoints"))
-    except ValueError:
-        endpoints = []
-    if direct_port is not None and not any(
-        endpoint["protocol"] == "tcp" and endpoint["port"] == direct_port
-        for endpoint in endpoints
-    ):
-        endpoints.insert(0, {
+    endpoints = []
+    if direct_port is not None:
+        source_labels = {
+            "server.properties": "server.properties",
+            "podman": "Podman",
+            "registry": "registr",
+        }
+        endpoints.append({
             "name": "Minecraft" if server.get("kind") == "minecraft" else "Hra",
-            "protocol": "tcp",
-            "port": direct_port,
+            "protocol": "tcp", "port": direct_port,
+            "source": source_labels.get(port_source, str(port_source or "")),
         })
+    if server.get("adapter") == "satisfactory":
+        unit = runtime.get("unit", server.get("service", ""))
+        try:
+            endpoints.extend(discover_satisfactory_endpoints(unit))
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as error:
+            result["endpoint_discovery_error"] = str(error)
+    try:
+        configured_endpoints = normalize_endpoints(server.get("endpoints"))
+    except ValueError:
+        configured_endpoints = []
+    occupied = {
+        (endpoint["protocol"], endpoint["port"])
+        for endpoint in endpoints
+    }
+    for endpoint in configured_endpoints:
+        key = (endpoint["protocol"], endpoint["port"])
+        if key not in occupied:
+            endpoints.append({**endpoint, "source": "registr"})
+            occupied.add(key)
     result["endpoints"] = endpoints
     if server.get("kind") == "minecraft":
         players = {
@@ -2023,6 +2063,9 @@ def validate_game_server_entry(server, seen_ids):
         "backend": backend_name,
         "kind": kind,
     }
+    adapter = str(server.get("adapter", "")).strip().lower()
+    if adapter not in ("", "satisfactory"):
+        raise ValueError("Invalid game adapter")
     endpoints = normalize_endpoints(server.get("endpoints"))
     if endpoints:
         item["endpoints"] = endpoints
@@ -2047,6 +2090,10 @@ def validate_game_server_entry(server, seen_ids):
             raise ValueError("Invalid systemd unit")
         item["service"] = unit
         item["runtime"] = {"unit": unit}
+        if not adapter and (
+            server_id.lower() == "satisfactory" or unit.lower() == "satisfactory.service"
+        ):
+            adapter = "satisfactory"
     else:
         container = str(runtime.get("container_name") or server.get("container") or "").strip()
         if not CONTAINER_NAME_RE.fullmatch(container):
@@ -2056,6 +2103,11 @@ def validate_game_server_entry(server, seen_ids):
         if management_mode not in ("adopted", "managed"):
             raise ValueError("Invalid Podman management mode")
         item["management_mode"] = management_mode
+
+    if adapter:
+        if adapter == "satisfactory" and backend_name != "systemd":
+            raise ValueError("Satisfactory adapter currently requires systemd")
+        item["adapter"] = adapter
 
     if kind == "minecraft":
         mods_dir = str(server.get("mods_dir", "")).strip()
@@ -2112,6 +2164,13 @@ def servers_config():
     occupied_endpoints = {}
     for item in validated:
         candidates = list(item.get("endpoints", []))
+        if item.get("adapter") == "satisfactory":
+            try:
+                candidates.extend(discover_satisfactory_endpoints(
+                    item.get("runtime", {}).get("unit", item.get("service", ""))
+                ))
+            except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+                pass
         connection = item.get("connection")
         if isinstance(connection, dict) and connection.get("direct_port") is not None:
             candidates.append({
