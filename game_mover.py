@@ -3743,6 +3743,25 @@ class GameMover(QWidget):
             )
             return
 
+        suggested_port = 25570
+        try:
+            response = requests.get(
+                f"{self.host_management_api_url()}/servers/minecraft/install",
+                headers=headers,
+                timeout=10,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            suggested_port = int(data["suggested_port"])
+        except (KeyError, TypeError, ValueError, requests.RequestException, RuntimeError) as error:
+            QMessageBox.warning(
+                self,
+                "Minecraft instalace",
+                "Automatické zjištění volného portu selhalo. "
+                f"Zkontroluj proto nabídnutý port ručně.\n\n{error}",
+            )
+
         dialog = QDialog(self)
         dialog.setWindowTitle("Nový Minecraft server")
         dialog.setMinimumWidth(540)
@@ -3771,7 +3790,10 @@ class GameMover(QWidget):
         java_runtime.addItems(["Java 17", "Java 21"])
         port = QSpinBox(dialog)
         port.setRange(1024, 65535)
-        port.setValue(25571)
+        port.setValue(suggested_port)
+        port.setToolTip(
+            "První volný port od 25570; před instalací se dostupnost znovu ověří."
+        )
         hostname = QLineEdit("", dialog)
         hostname.setPlaceholderText("volitelně, např. forge.mc.example")
         form.addRow("ID serveru:", server_id)

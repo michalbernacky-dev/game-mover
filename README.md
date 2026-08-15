@@ -207,6 +207,10 @@ one of these verified backups into a new isolated data directory. The source
 server and its data are never modified by restore. The UI validates the workload
 ID, Minecraft and loader versions, Java image, memory, unique direct port and an
 optional Gate hostname, and requires explicit acceptance of the Minecraft EULA.
+The installer suggests the first free port starting at `25570`. The backend
+reserves ports belonging to registered servers even while they are stopped,
+reserves the Gate Lite listener, and skips ports currently bound by another
+process. Availability is checked again before the container is created.
 
 The management overview can permanently remove only Minecraft instances created
 and owned by the platform (`podman` plus `management_mode=managed`). Deletion has
@@ -575,6 +579,10 @@ adresáře obnovit jednu z těchto ověřených záloh. Zdrojový server ani jeh
 se obnovou nemění. Rozhraní ověřuje ID workloadu, verze Minecraftu a loaderu,
 Java image, paměť, unikátní přímý port a volitelný Gate hostname; před instalací
 také vyžaduje výslovný souhlas s Minecraft EULA.
+Instalátor automaticky nabídne první volný port od `25570`. Backend rezervuje
+porty registrovaných serverů i při jejich vypnutí, port Gate Lite a přeskočí
+porty aktuálně obsazené jiným procesem. Před vytvořením containeru dostupnost
+zvoleného portu znovu ověří.
 
 V přehledu správy lze nevratně odstranit pouze Minecraft instance vytvořené a
 vlastněné platformou (`podman` a `management_mode=managed`). Mazání má vlastní

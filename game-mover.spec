@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.15.1
+Version:        0.15.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -145,6 +145,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.15.2-1
+- Suggest the first available direct Minecraft port in the server installer
+- Reserve configured ports of stopped workloads and the Gate Lite listener
+- Recheck the selected host port immediately before installation
+
 * Fri Aug 14 2026 Game Mover Packager <packager@example.invalid> - 0.15.1-1
 - Show managed-server deletion phases and progress inline in cards and management
 - Stop displaying a delayed modal success dialog after the user changes tabs

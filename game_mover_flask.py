@@ -123,6 +123,8 @@ MINECRAFT_STATUS_LOCK = threading.Lock()
 MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 SECURITY_CONFIG_LOCK = threading.Lock()
 CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+MINECRAFT_INSTALL_PORT_START = 25570
+MINECRAFT_INSTALL_PORT_END = 65535
 
 
 def workload_lock(workload_id):
@@ -258,13 +260,66 @@ def wait_for_gate_ready(host, port, timeout=120):
     raise RuntimeError(f"Gate Lite se nespustil v časovém limitu: {last_error}")
 
 
-def check_host_port_available(port):
+def host_port_available(port):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind(("0.0.0.0", int(port)))
-    except OSError as error:
-        raise InstallError(f"Port {port} už je obsazený; zvol jiný") from error
+    except OSError:
+        return False
     return True
+
+
+def check_host_port_available(port):
+    if not host_port_available(port):
+        raise InstallError(f"Port {port} už je obsazený; zvol jiný")
+    return True
+
+
+def reserved_host_ports(servers=None, gate_config=None):
+    """Return ports reserved by configuration, including stopped workloads."""
+    servers = load_game_servers() if servers is None else servers
+    reserved = set()
+    for server in servers:
+        connection = server.get("connection")
+        if isinstance(connection, dict):
+            direct_port = connection.get("direct_port")
+            if isinstance(direct_port, int) and not isinstance(direct_port, bool):
+                reserved.add(direct_port)
+
+        if (
+            server.get("kind") != "minecraft"
+            or server.get("backend", "systemd") != "systemd"
+        ):
+            continue
+        data = server.get("data") if isinstance(server.get("data"), dict) else {}
+        data_directory = data.get("directory")
+        server_port = configured_server_port(data_directory)
+        if server_port is not None:
+            reserved.add(server_port)
+        rcon = configured_rcon(data_directory)
+        if isinstance(rcon, dict) and isinstance(rcon.get("port"), int):
+            reserved.add(rcon["port"])
+
+    gate_config = load_gate_config() if gate_config is None else gate_config
+    listen = gate_config.get("listen") if isinstance(gate_config, dict) else {}
+    gate_port = listen.get("port") if isinstance(listen, dict) else None
+    if isinstance(gate_port, int) and not isinstance(gate_port, bool):
+        reserved.add(gate_port)
+    return reserved
+
+
+def next_available_minecraft_port(
+    start=MINECRAFT_INSTALL_PORT_START,
+    end=MINECRAFT_INSTALL_PORT_END,
+    *,
+    servers=None,
+    gate_config=None,
+):
+    reserved = reserved_host_ports(servers=servers, gate_config=gate_config)
+    for port in range(int(start), int(end) + 1):
+        if port not in reserved and host_port_available(port):
+            return port
+    raise InstallError(f"V rozsahu {start}–{end} není volný port pro Minecraft server")
 
 
 def wait_for_minecraft_install_ready(host, port, backend, workload, timeout=600):
@@ -1939,10 +1994,22 @@ def servers_backups():
     return jsonify({"source_id": source_id, "backups": backups})
 
 
-@app.route("/servers/minecraft/install", methods=["POST"])
+@app.route("/servers/minecraft/install", methods=["GET", "POST"])
 def minecraft_install():
     if not require_local_operation(request, "minecraft.install"):
         return jsonify({"message": "Unauthorized"}), 403
+    if request.method == "GET":
+        try:
+            port = next_available_minecraft_port()
+        except (InstallError, OSError, TypeError, ValueError) as error:
+            return jsonify({"message": str(error)}), 409
+        return jsonify({
+            "suggested_port": port,
+            "range": {
+                "start": MINECRAFT_INSTALL_PORT_START,
+                "end": MINECRAFT_INSTALL_PORT_END,
+            },
+        })
     try:
         config = normalize_install_request(request.json or {})
     except (InstallError, TypeError, ValueError) as error:

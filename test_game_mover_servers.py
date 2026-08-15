@@ -1077,6 +1077,51 @@ class ServerRegistryTest(unittest.TestCase):
         })
         self.assertEqual(routed[-1]["host"], "*")
 
+    def test_minecraft_install_suggests_first_unreserved_available_port(self):
+        systemd_data = Path(self.temp_dir.name) / "systemd-minecraft"
+        systemd_data.mkdir()
+        (systemd_data / "server.properties").write_text(
+            "server-port=25571\nenable-rcon=true\nrcon.port=25573\nrcon.password=secret\n",
+            encoding="utf-8",
+        )
+        servers = [
+            {
+                "id": "managed", "kind": "minecraft", "backend": "podman",
+                "connection": {"direct_port": 25570},
+            },
+            {
+                "id": "systemd-mc", "kind": "minecraft", "backend": "systemd",
+                "data": {"directory": str(systemd_data)},
+            },
+        ]
+        gate_config = backend.default_gate_config()
+        gate_config["listen"]["port"] = 25572
+        with (
+            patch.object(backend, "load_game_servers", return_value=servers),
+            patch.object(backend, "load_gate_config", return_value=gate_config),
+            patch.object(
+                backend, "host_port_available", side_effect=lambda port: port != 25574,
+            ) as available,
+        ):
+            response = self.client.get(
+                "/servers/minecraft/install",
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["suggested_port"], 25575)
+        self.assertEqual(response.json["range"]["start"], 25570)
+        self.assertEqual(
+            [item.args[0] for item in available.call_args_list], [25574, 25575],
+        )
+
+    def test_minecraft_install_port_suggestion_requires_local_pam(self):
+        response = self.client.get(
+            "/servers/minecraft/install",
+            **self.local_options(self.admin_headers),
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_minecraft_install_requires_local_pam(self):
         payload = {
             "id": "new-server", "name": "New Server", "loader": "VANILLA",
