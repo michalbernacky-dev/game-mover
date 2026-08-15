@@ -2574,14 +2574,6 @@ class GameMover(QWidget):
                 connection_label = QLabel(f"Připojení: {recommended_connection}")
                 connection_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 card_layout.addWidget(connection_label)
-            endpoints = server.get("endpoints")
-            if isinstance(endpoints, list):
-                endpoint_label = QLabel(f"Síť: {self.server_endpoints_text(server)}")
-                endpoint_label.setWordWrap(True)
-                endpoint_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                if not endpoints:
-                    endpoint_label.setStyleSheet("color: #ffcc66;")
-                card_layout.addWidget(endpoint_label)
             if server.get("kind") == "minecraft":
                 version_label = QLabel(
                     f"Verze Minecraftu: {self.server_minecraft_version_text(server)}"
@@ -2743,16 +2735,6 @@ class GameMover(QWidget):
             )
         return ""
 
-    @staticmethod
-    def server_endpoints_text(server):
-        endpoints = server.get("endpoints")
-        if not isinstance(endpoints, list) or not endpoints:
-            return "Nejsou registrované"
-        try:
-            return format_endpoint_summary(endpoints)
-        except ValueError:
-            return "Neplatná konfigurace"
-
     def server_players_text(self, server):
         if server.get("kind") != "minecraft":
             return "Tento typ serveru neposkytuje Minecraft statistiky"
@@ -2852,9 +2834,6 @@ class GameMover(QWidget):
         players_label = QLabel(overview)
         runtime_label = QLabel(overview)
         runtime_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        endpoints_label = QLabel(overview)
-        endpoints_label.setWordWrap(True)
-        endpoints_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         permissions_label = QLabel(overview)
         permissions_label.setWordWrap(True)
         overview_form.addRow("Stav:", status_label)
@@ -2867,12 +2846,11 @@ class GameMover(QWidget):
             overview_form.addRow("Verze Minecraftu:", minecraft_version_label)
         overview_form.addRow("Hráči:", players_label)
         overview_form.addRow("Runtime:", runtime_label)
-        overview_form.addRow("Síťové endpointy:", endpoints_label)
         overview_form.addRow("Oprávnění:", permissions_label)
         overview_layout.addLayout(overview_form)
         endpoint_actions = QHBoxLayout()
         endpoint_actions.addStretch()
-        edit_endpoints = QPushButton("Upravit síťové endpointy…", overview)
+        edit_endpoints = QPushButton("Technické síťové porty…", overview)
         edit_endpoints.clicked.connect(
             lambda _checked=False, selected_id=server_id:
             self.edit_server_endpoints(selected_id)
@@ -2932,7 +2910,6 @@ class GameMover(QWidget):
             "minecraft_version": minecraft_version_label,
             "players": players_label,
             "runtime": runtime_label,
-            "endpoints": endpoints_label,
             "edit_endpoints": edit_endpoints,
             "permissions": permissions_label,
             "lifecycle": lifecycle_buttons,
@@ -3668,7 +3645,6 @@ class GameMover(QWidget):
             )
         entry["players"].setText(self.server_players_text(server))
         entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
-        entry["endpoints"].setText(self.server_endpoints_text(server))
         entry["edit_endpoints"].setEnabled(
             is_host_management_mode(self.app_mode)
             and bool(self.local_operation_headers("server.registry"))

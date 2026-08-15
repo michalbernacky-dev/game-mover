@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.19.0
+Version:        0.19.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -155,6 +155,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.19.1-1
+- Keep daily server cards focused on the player-facing connection address
+- Retain technical endpoint purposes and sources for backend policy and diagnostics
+- Move optional endpoint inspection behind a compact advanced-management action
+
 * Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.19.0-1
 - Add automatic Satisfactory endpoint discovery from effective systemd ExecStart
 - Merge adapter-discovered and manually registered endpoints with visible sources

@@ -22,7 +22,7 @@ class GameEndpointTest(unittest.TestCase):
         )
         sourced = [{**endpoints[0], "source": "systemd ExecStart"}]
         self.assertEqual(
-            format_endpoint_summary(sourced),
+            format_endpoint_summary(sourced, include_source=True),
             "Game/API: TCP/7778 (systemd ExecStart)",
         )
 
