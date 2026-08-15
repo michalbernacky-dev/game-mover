@@ -708,6 +708,7 @@ class GameMover(QWidget):
         self.modpack_catalog_thread = None
         self.modpack_search_index = 0
         self.selected_modpack = None
+        self.modpacks_tab = None
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
@@ -757,7 +758,6 @@ class GameMover(QWidget):
         self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
         self.init_servers_tab()
-        self.init_modpacks_tab()
         self.init_server_registry_tab()
         self.init_security_tab()
         self.init_timekpr_tab()
@@ -1769,8 +1769,19 @@ class GameMover(QWidget):
         tab_layout.addWidget(scroll_area)
         self.tabs.addTab(tab, "Servery")
 
-    def init_modpacks_tab(self):
-        tab = QWidget(self)
+    def open_modpack_catalog(self, *, version="", loader=""):
+        if self.modpacks_tab is not None and self.tabs.indexOf(self.modpacks_tab) >= 0:
+            if version:
+                self.modpack_version.setText(version)
+            loader_index = self.modpack_loader.findData(loader.lower()) if loader else -1
+            if loader_index >= 0:
+                self.modpack_loader.setCurrentIndex(loader_index)
+            self.tabs.setCurrentWidget(self.modpacks_tab)
+            return
+
+        tab = QWidget(self.tabs)
+        tab.setProperty("dynamic_kind", "modpack_catalog")
+        self.modpacks_tab = tab
         layout = QVBoxLayout(tab)
         title = QLabel("CurseForge modpacky", tab)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
@@ -1796,7 +1807,7 @@ class GameMover(QWidget):
         self.modpack_query.setPlaceholderText("Název nebo autor modpacku")
         self.modpack_query.returnPressed.connect(lambda: self.search_modpacks(reset=True))
         filters.addWidget(self.modpack_query, 2)
-        self.modpack_version = QLineEdit("1.20.1", tab)
+        self.modpack_version = QLineEdit(version or "1.20.1", tab)
         self.modpack_version.setPlaceholderText("Minecraft verze")
         self.modpack_version.setMaximumWidth(130)
         filters.addWidget(self.modpack_version)
@@ -1806,6 +1817,9 @@ class GameMover(QWidget):
             ("Fabric", "fabric"), ("NeoForge", "neoforge"), ("Quilt", "quilt"),
         ):
             self.modpack_loader.addItem(label, value)
+        loader_index = self.modpack_loader.findData(loader.lower()) if loader else -1
+        if loader_index >= 0:
+            self.modpack_loader.setCurrentIndex(loader_index)
         filters.addWidget(self.modpack_loader)
         self.modpack_sort = QComboBox(tab)
         for label, value in (
@@ -1874,7 +1888,8 @@ class GameMover(QWidget):
         files_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         files_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         layout.addWidget(self.modpack_files, 1)
-        self.tabs.addTab(tab, "Modpacky")
+        self.tabs.addTab(tab, "Minecraft: Modpacky")
+        self.tabs.setCurrentWidget(tab)
 
     def start_modpack_catalog_request(self, request_kind, *, project_id=None, params=None):
         if self.modpack_catalog_thread and self.modpack_catalog_thread.isRunning():
@@ -1919,6 +1934,8 @@ class GameMover(QWidget):
         self.search_modpacks(reset=False)
 
     def on_modpack_catalog_loaded(self, payload):
+        if self.modpacks_tab is None:
+            return
         request_kind = payload.get("request_kind")
         self.modpack_search_button.setEnabled(True)
         if payload.get("error"):
@@ -2578,7 +2595,18 @@ class GameMover(QWidget):
             return
         page = self.tabs.widget(index)
         server_id = page.property("server_id") if page else None
+        dynamic_kind = page.property("dynamic_kind") if page else None
         self.tabs.removeTab(index)
+        if dynamic_kind == "modpack_catalog":
+            if self.modpack_catalog_thread and self.modpack_catalog_thread.isRunning():
+                try:
+                    self.modpack_catalog_thread.loaded.disconnect(
+                        self.on_modpack_catalog_loaded
+                    )
+                except TypeError:
+                    pass
+            self.modpacks_tab = None
+            self.selected_modpack = None
         if server_id:
             entry = self.server_management_pages.get(server_id, {})
             timer = entry.get("logs_timer")
@@ -4108,6 +4136,13 @@ class GameMover(QWidget):
         form.addRow(eula_checkbox)
         outer.addLayout(form)
 
+        catalog_requested = {"value": False}
+        catalog_button = QPushButton("Procházet CurseForge modpacky…", dialog)
+        catalog_button.setToolTip(
+            "Zavře instalátor a otevře read-only katalog v samostatné záložce."
+        )
+        outer.addWidget(catalog_button)
+
         def update_loader_fields():
             is_vanilla = loader.currentText() == "VANILLA"
             loader_version.setEnabled(not is_vanilla)
@@ -4155,12 +4190,25 @@ class GameMover(QWidget):
         source.currentIndexChanged.connect(load_backups)
         update_loader_fields()
         update_restore_fields()
+
+        def browse_modpacks():
+            catalog_requested["value"] = True
+            dialog.reject()
+
+        catalog_button.clicked.connect(browse_modpacks)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         buttons.button(QDialogButtonBox.Ok).setText("Nainstalovat")
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         outer.addWidget(buttons)
         if dialog.exec_() != QDialog.Accepted:
+            if catalog_requested["value"]:
+                catalog_loader = loader.currentText().lower()
+                if catalog_loader == "vanilla":
+                    catalog_loader = "any"
+                self.open_modpack_catalog(
+                    version=version.text().strip(), loader=catalog_loader,
+                )
             return
         if restore_checkbox.isChecked() and backup.currentData() is None:
             QMessageBox.warning(self, "Minecraft instalace", "Vyber platnou zálohu k obnovení.")

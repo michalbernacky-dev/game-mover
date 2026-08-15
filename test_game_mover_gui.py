@@ -161,6 +161,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         update_ui.assert_called_once()
 
     def test_read_only_modpack_catalog_renders_projects_and_files(self):
+        self.window.open_modpack_catalog(version="1.20.1", loader="fabric")
         payload = {
             "request_kind": "search",
             "items": [{
@@ -203,12 +204,34 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(self.window.modpack_files.item(0, 4).text(), "Ano")
 
     def test_modpack_catalog_shows_missing_api_key_without_install_actions(self):
+        self.window.open_modpack_catalog()
         self.window.on_modpack_catalog_loaded({
             "request_kind": "status", "provider": "curseforge",
             "configured": False, "read_only": True, "cached": False,
         })
         self.assertIn("není nakonfigurovaný", self.window.modpack_status_label.text())
         self.assertFalse(hasattr(self.window, "modpack_install_button"))
+
+    def test_modpack_catalog_is_one_closable_contextual_tab(self):
+        fixed_count = self.window.fixed_tab_count
+        self.assertNotIn(
+            "Modpacky",
+            [self.window.tabs.tabText(index) for index in range(fixed_count)],
+        )
+
+        self.window.open_modpack_catalog(version="1.21.1", loader="neoforge")
+        page = self.window.modpacks_tab
+        self.window.open_modpack_catalog(version="1.20.1", loader="fabric")
+
+        self.assertIs(self.window.modpacks_tab, page)
+        self.assertEqual(self.window.tabs.count(), fixed_count + 1)
+        self.assertEqual(self.window.tabs.tabText(fixed_count), "Minecraft: Modpacky")
+        self.assertEqual(self.window.modpack_version.text(), "1.20.1")
+        self.assertEqual(self.window.modpack_loader.currentData(), "fabric")
+
+        self.window.close_server_management_tab(fixed_count)
+        self.assertIsNone(self.window.modpacks_tab)
+        self.assertEqual(self.window.tabs.count(), fixed_count)
 
 
 if __name__ == "__main__":

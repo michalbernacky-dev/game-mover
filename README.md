@@ -161,11 +161,13 @@ systemd Forge backup suitable as the input for a later container migration.
 
 ### Read-only CurseForge modpack catalog
 
-The fixed **Modpacks** tab searches the live CurseForge Minecraft modpack
-catalog by text, Minecraft version and loader, with sorting and pagination. A
-selected project exposes its public summary and compatible file metadata,
-including whether CurseForge advertises a related server pack. This first slice
-has no download, installation or mutation action.
+The Minecraft server installer opens the live catalog in a single closable
+**Minecraft: Modpacks** tab, keeping Minecraft-specific tooling out of Game
+Mover's fixed top-level navigation. It searches by text, Minecraft version and
+loader, with sorting and pagination. A selected project exposes its public
+summary and compatible file metadata, including whether CurseForge advertises a
+related server pack. This first slice has no download, installation or mutation
+action.
 
 CurseForge requires an approved third-party API key. Store it only on the host
 as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
@@ -549,11 +551,12 @@ jako vstup pro pozdější migraci do containeru.
 
 ### Read-only katalog CurseForge modpacků
 
-Pevná záložka **Modpacky** prohledává živý katalog Minecraft modpacků na
-CurseForge podle textu, verze Minecraftu a loaderu, včetně řazení a stránkování.
-Po výběru projektu ukáže jeho veřejný popis a metadata kompatibilních souborů,
-včetně informace o dostupném server packu. Tato první část nic nestahuje,
-neinstaluje ani nemění.
+Instalátor Minecraft serveru otevře živý katalog v jediné zavíratelné záložce
+**Minecraft: Modpacky**, takže Minecraft nástroje nezabírají pevnou hlavní
+navigaci obecné herní platformy. Katalog prohledává CurseForge podle textu,
+verze Minecraftu a loaderu, včetně řazení a stránkování. Po výběru projektu
+ukáže jeho veřejný popis a metadata kompatibilních souborů, včetně informace o
+dostupném server packu. Tato první část nic nestahuje, neinstaluje ani nemění.
 
 CurseForge vyžaduje schválený API klíč pro aplikaci třetí strany. Klíč patří
 pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim

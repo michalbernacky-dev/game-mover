@@ -117,14 +117,16 @@ the same model without allowing those protections to be weakened. Remote SSH
 administration is absent from Connections and remains hidden in Security until
 local PAM authentication.
 
-The fixed **Modpacks** tab is a provider-backed, read-only discovery surface.
-Its first provider is CurseForge and supports text, Minecraft-version and
-loader filters, sorting, pagination, project summaries and compatible file or
-server-pack metadata. Provider credentials remain host-only. Catalog responses
-are not persisted or cached, download URLs are not relayed, and the initial UI
-contains no download or installation action. The provider boundary must allow a
-future source to be added without coupling the GUI to CurseForge response
-schemas.
+The Minecraft installer opens **Minecraft: Modpacks** as a single closable,
+contextual tab instead of making Minecraft-specific discovery part of the
+platform's fixed top-level navigation. It is a provider-backed, read-only
+surface. Its first provider is CurseForge and supports text, Minecraft-version
+and loader filters, sorting, pagination, project summaries and compatible file
+or server-pack metadata. Provider credentials remain host-only. Catalog
+responses are not persisted or cached, download URLs are not relayed, and the
+initial UI contains no download or installation action. The provider boundary
+must allow a future source to be added without coupling the GUI to CurseForge
+response schemas.
 
 ## Security model
 
