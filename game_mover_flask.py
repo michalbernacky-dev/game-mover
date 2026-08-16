@@ -34,10 +34,12 @@ from game_mover_satisfactory import discover_satisfactory_endpoints
 from game_mover_dns import (
     DnsConfigError,
     default_dns_config,
+    dns_provider_catalog,
     normalize_dns_config,
     runtime_dns_config,
     write_runtime_config,
 )
+from game_mover_pihole import PiholeAdapterError, sync_pihole_records
 from game_mover_mods import scan_mod_directory
 from game_mover_security import (
     POLICY_MODES,
@@ -114,7 +116,9 @@ GATE_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "gate.json")
 SECURITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "security.json")
 DNS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns.json")
 DNS_RUNTIME_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns-runtime.json")
+DNS_PIHOLE_STATE_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns-pihole-state.json")
 DNS_SERVICE_NAME = "game-mover-dns.service"
+PIHOLE_SERVICE_NAME = "pihole-FTL.service"
 GATE_DATA_DIRECTORY = os.path.realpath(
     os.getenv("GAME_PLATFORM_GATE_DATA", "/var/lib/game-platform/proxies/gate")
 )
@@ -145,6 +149,7 @@ MINECRAFT_STATUS_INFLIGHT = set()
 MINECRAFT_STATUS_LOCK = threading.Lock()
 MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 SECURITY_CONFIG_LOCK = threading.Lock()
+DNS_CONFIG_LOCK = threading.Lock()
 CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 MINECRAFT_INSTALL_PORT_START = 25570
 MINECRAFT_INSTALL_PORT_END = 65535
@@ -302,19 +307,26 @@ def load_dns_config():
 def sync_dns_runtime_config(config=None, gate_config=None):
     config = load_dns_config() if config is None else normalize_dns_config(config)
     gate_config = load_gate_config() if gate_config is None else gate_config
-    return write_runtime_config(DNS_RUNTIME_CONFIG_PATH, config, gate_config)
+    runtime = write_runtime_config(DNS_RUNTIME_CONFIG_PATH, config, gate_config)
+    pihole_enabled = config["provider"] == "pihole_local"
+    if pihole_enabled or os.path.exists(DNS_PIHOLE_STATE_PATH):
+        sync_pihole_records(
+            runtime["records"], DNS_PIHOLE_STATE_PATH, enabled=pihole_enabled,
+        )
+    return runtime
 
 
 def save_dns_config(config):
     config = normalize_dns_config(config)
     os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
     temporary_path = f"{DNS_CONFIG_PATH}.tmp"
-    with open(temporary_path, "w", encoding="utf-8") as config_file:
-        json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
-        config_file.write("\n")
-    os.chmod(temporary_path, 0o644)
-    os.replace(temporary_path, DNS_CONFIG_PATH)
-    sync_dns_runtime_config(config=config)
+    with DNS_CONFIG_LOCK:
+        with open(temporary_path, "w", encoding="utf-8") as config_file:
+            json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
+            config_file.write("\n")
+        os.chmod(temporary_path, 0o644)
+        sync_dns_runtime_config(config=config)
+        os.replace(temporary_path, DNS_CONFIG_PATH)
     return config
 
 
@@ -444,7 +456,7 @@ def save_gate_config(config):
     os.replace(temporary_path, GATE_CONFIG_PATH)
     try:
         sync_dns_runtime_config(gate_config=config)
-    except (DnsConfigError, OSError):
+    except (DnsConfigError, PiholeAdapterError, OSError):
         pass
     return config
 
@@ -2996,7 +3008,8 @@ def dnsmasq_stop():
 def managed_dns_status():
     config = load_dns_config()
     runtime = runtime_dns_config(config, load_gate_config())
-    rc, service_status, error = systemctl_is_active(DNS_SERVICE_NAME)
+    service_name = PIHOLE_SERVICE_NAME if config["provider"] == "pihole_local" else DNS_SERVICE_NAME
+    rc, service_status, error = systemctl_is_active(service_name)
     return jsonify({
         "version": __version__,
         "dns": {
@@ -3007,10 +3020,7 @@ def managed_dns_status():
             "active": service_status == "active",
             "available": rc != 127,
             "error": error,
-            "provider_catalog": [
-                {"id": "disabled", "name": "Vypnuto"},
-                {"id": "builtin", "name": "Vestavěný autoritativní DNS"},
-            ],
+            "provider_catalog": dns_provider_catalog(),
         },
     })
 
@@ -3020,7 +3030,9 @@ def managed_dns_config():
     if not require_local_operation(request, "dns.config"):
         return jsonify({"message": "Unauthorized"}), 403
     if request.method == "GET":
-        return jsonify({"dns": load_dns_config()})
+        return jsonify({
+            "dns": load_dns_config(), "provider_catalog": dns_provider_catalog(),
+        })
     try:
         config = save_dns_config((request.json or {}).get("dns"))
         if config["provider"] == "builtin":
@@ -3033,7 +3045,7 @@ def managed_dns_config():
                 "dns": config,
                 "service_error": error or output,
             }), 500
-    except (DnsConfigError, OSError, TypeError, ValueError) as error:
+    except (DnsConfigError, PiholeAdapterError, OSError, TypeError, ValueError) as error:
         return jsonify({"message": str(error)}), 400
     return jsonify({"message": "DNS konfigurace byla uložena", "dns": config})
 

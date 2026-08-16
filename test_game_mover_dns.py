@@ -43,6 +43,10 @@ class ManagedDnsTest(unittest.TestCase):
             normalize_dns_config({"provider": "builtin", "answer_addresses": ["192.0.2.1"]})
         with self.assertRaises(DnsConfigError):
             normalize_dns_config({"provider": "builtin", "listen_addresses": ["127.0.0.1"]})
+        pihole = normalize_dns_config({
+            "provider": "pihole_local", "answer_addresses": ["192.0.2.66"],
+        })
+        self.assertEqual(pihole["listen_addresses"], [])
 
     def test_authoritative_response_returns_a_and_nxdomain_without_recursion(self):
         with tempfile.TemporaryDirectory() as directory:

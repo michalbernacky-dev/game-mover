@@ -18,6 +18,7 @@ class ServerRegistryTest(unittest.TestCase):
         self.original_security_config_path = backend.SECURITY_CONFIG_PATH
         self.original_dns_config_path = backend.DNS_CONFIG_PATH
         self.original_dns_runtime_config_path = backend.DNS_RUNTIME_CONFIG_PATH
+        self.original_dns_pihole_state_path = backend.DNS_PIHOLE_STATE_PATH
         self.original_operations = backend.OPERATIONS
         backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
@@ -25,6 +26,7 @@ class ServerRegistryTest(unittest.TestCase):
         backend.SECURITY_CONFIG_PATH = str(Path(self.temp_dir.name) / "security.json")
         backend.DNS_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns.json")
         backend.DNS_RUNTIME_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns-runtime.json")
+        backend.DNS_PIHOLE_STATE_PATH = str(Path(self.temp_dir.name) / "dns-pihole-state.json")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -59,6 +61,7 @@ class ServerRegistryTest(unittest.TestCase):
         backend.SECURITY_CONFIG_PATH = self.original_security_config_path
         backend.DNS_CONFIG_PATH = self.original_dns_config_path
         backend.DNS_RUNTIME_CONFIG_PATH = self.original_dns_runtime_config_path
+        backend.DNS_PIHOLE_STATE_PATH = self.original_dns_pihole_state_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
@@ -1410,6 +1413,38 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(status.json["dns"]["records"], [{
             "name": "forge.mc.home.arpa", "address": "192.0.2.66",
         }])
+
+    def test_local_pihole_provider_is_explicit_and_optional(self):
+        gate_config = backend.default_gate_config()
+        gate_config["routes"] = [{
+            "host": "forge.mc.example", "backend": {"host": "forge", "port": 25565},
+        }]
+        backend.save_gate_config(gate_config)
+        dns = {
+            "provider": "pihole_local", "zone": "mc.example", "ttl": 60,
+            "listen_addresses": [], "answer_addresses": ["192.0.2.66"],
+        }
+        with (
+            patch.object(backend, "sync_pihole_records", return_value={"changed": True}) as sync,
+            patch.object(backend, "systemctl_disable_now", return_value=(0, "", "")),
+        ):
+            response = self.client.put(
+                "/dns/config", json={"dns": dns},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        sync.assert_called_once_with(
+            [{"name": "forge.mc.example", "address": "192.0.2.66"}],
+            backend.DNS_PIHOLE_STATE_PATH,
+            enabled=True,
+        )
+        config = self.client.get(
+            "/dns/config", **self.local_options(self.pam_headers),
+        ).json
+        self.assertIn(
+            {"id": "pihole_local", "name": "Pi-hole na tomto hostiteli"},
+            config["provider_catalog"],
+        )
 
 
 if __name__ == "__main__":

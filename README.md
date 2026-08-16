@@ -182,13 +182,17 @@ browsing is read-only and requires the existing server read token.
 
 The fixed **Network** tab exposes a provider-neutral private DNS registry. Exact
 Gate hostnames inside the configured zone are its only source of records;
-wildcard fallback routes and unrelated names are never published. The optional
-built-in provider is an authoritative-only UDP/TCP service, binds only explicit
-addresses, performs no recursive resolution and is disabled by default. DNS
-configuration is local/PAM protected. A LAN router can conditionally forward the
-private zone to it, while Tailscale can use the same zone as a restricted
-nameserver without requiring players to select an exit node. Pi-hole is not a
-dependency and can be added later as an adapter to the same registry.
+wildcard fallback routes and unrelated names are never published. Every DNS
+integration is explicitly enabled and the default provider is **Disabled**. The
+optional built-in provider is an authoritative-only UDP/TCP service, binds only
+explicit addresses and performs no recursive resolution. The optional local
+Pi-hole v6 provider synchronizes records through Pi-hole FTL's `dns.hosts`
+configuration. It records ownership separately, preserves manual Local DNS
+records, reuses equal records without claiming them and rejects conflicting
+manual values. Pi-hole remains an optional integration, not a package dependency.
+DNS configuration is local/PAM protected. A LAN router can conditionally forward
+the private zone to the built-in provider, while Tailscale can use either provider
+as a restricted nameserver without requiring players to select an exit node.
 
 ### Rootless Podman workloads
 
@@ -601,12 +605,15 @@ stávající serverový read token.
 
 Pevná záložka **Síť** zpřístupňuje providerově nezávislý registr privátního DNS.
 Jediným zdrojem záznamů jsou konkrétní hostname Gate tras uvnitř nastavené zóny;
-výchozí wildcard ani cizí jména se nepublikují. Volitelný vestavěný provider je
-autoritativní UDP/TCP služba, poslouchá pouze na výslovně zadaných adresách,
-neprovádí rekurzivní dotazy a ve výchozím stavu je vypnutý. Konfigurace vyžaduje
-místní/PAM oprávnění. LAN router na ni může podmíněně směrovat privátní zónu a
-Tailscale může tutéž zónu použít jako Restricted nameserver bez zapnutí exit
-node u hráčů. Pi-hole není závislost; později může být adaptérem stejného registru.
+výchozí wildcard ani cizí jména se nepublikují. Všechny DNS integrace se zapínají
+výslovně a výchozí provider je **Vypnuto**. Volitelný vestavěný provider je
+autoritativní UDP/TCP služba bez rekurze. Volitelný lokální provider pro Pi-hole
+v6 synchronizuje záznamy přes podporované nastavení FTL `dns.hosts`. Vlastnictví
+si eviduje zvlášť, zachovává ruční Local DNS Records, shodné ruční záznamy pouze
+použije a konfliktní hodnoty odmítne přepsat. Pi-hole proto zůstává volitelnou
+integrací, nikoli závislostí balíčku. Konfigurace vyžaduje místní/PAM oprávnění.
+LAN router může zónu podmíněně směrovat na vestavěný provider a Tailscale může
+kterýkoli provider použít jako Restricted nameserver bez exit nodu u hráčů.
 
 ### Rootless Podman workloady
 

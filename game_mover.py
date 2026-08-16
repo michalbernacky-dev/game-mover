@@ -1782,8 +1782,8 @@ class GameMover(QWidget):
         layout.addWidget(title)
         description = QLabel(
             "Privátní autoritativní DNS převádí konkrétní hostname Gate tras na adresu "
-            "herního ingressu. Vestavěný provider je samostatný; Pi-hole a jiné integrace "
-            "mohou být později přidány jako volitelné adaptéry.",
+            "herního ingressu. DNS integrace jsou volitelné a ve výchozím stavu vypnuté; "
+            "Game Mover může použít vlastní službu nebo zapnutý externí provider.",
             tab,
         )
         description.setWordWrap(True)
@@ -1821,7 +1821,7 @@ class GameMover(QWidget):
         hint.setStyleSheet("color: #aab7c0;")
         layout.addWidget(hint)
         actions = QHBoxLayout()
-        self.managed_dns_config_button = QPushButton("Nastavit DNS…", tab)
+        self.managed_dns_config_button = QPushButton("Nastavit DNS integraci…", tab)
         self.managed_dns_config_button.clicked.connect(self.open_managed_dns_config)
         actions.addWidget(self.managed_dns_config_button)
         refresh = QPushButton("Obnovit stav", tab)
@@ -1849,6 +1849,7 @@ class GameMover(QWidget):
                 "Běží" if dns.get("active") else f"Neběží ({dns.get('service_status', '—')})"
             )
             self.managed_dns_listen_label.setText(
+                "zajišťuje Pi-hole" if dns.get("provider") == "pihole_local" else
                 ", ".join(dns.get("listen_addresses") or []) or "nenastavené"
             )
             self.managed_dns_answer_label.setText(
@@ -1883,20 +1884,25 @@ class GameMover(QWidget):
             return
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("Privátní herní DNS")
+        dialog.setWindowTitle("DNS integrace")
         dialog.setMinimumWidth(560)
         layout = QVBoxLayout(dialog)
         help_label = QLabel(
             "DNS záznamy vznikají automaticky z konkrétních Gate hostname. "
-            "Poslechové adresy určují, kde služba přijímá dotazy; cílové adresy "
-            "jsou IP adresy Gate vracené hráčům.", dialog,
+            "Integrace jsou ve výchozím stavu vypnuté. Vestavěná služba používá vlastní "
+            "poslechové adresy; lokální Pi-hole provider zapisuje pouze záznamy Game Moveru "
+            "do Local DNS Records a ostatní záznamy zachová.", dialog,
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
         form = QFormLayout()
         provider = QComboBox(dialog)
-        provider.addItem("Vypnuto", "disabled")
-        provider.addItem("Vestavěný autoritativní DNS", "builtin")
+        provider_catalog = payload.get("provider_catalog")
+        if not isinstance(provider_catalog, list):
+            provider_catalog = [{"id": "disabled", "name": "Vypnuto"}]
+        for item in provider_catalog:
+            if isinstance(item, dict) and item.get("id") and item.get("name"):
+                provider.addItem(str(item["name"]), str(item["id"]))
         provider.setCurrentIndex(max(0, provider.findData(current.get("provider", "disabled"))))
         zone = QLineEdit(current.get("zone", "mc.home.arpa"), dialog)
         listen = QLineEdit(", ".join(current.get("listen_addresses") or []), dialog)
@@ -1913,6 +1919,14 @@ class GameMover(QWidget):
         form.addRow("Vrácené adresy Gate:", answers)
         form.addRow("TTL:", ttl)
         layout.addLayout(form)
+
+        def update_provider_fields():
+            builtin = provider.currentData() == "builtin"
+            listen.setEnabled(builtin)
+            ttl.setEnabled(builtin)
+
+        provider.currentIndexChanged.connect(update_provider_fields)
+        update_provider_fields()
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, dialog)
         buttons.button(QDialogButtonBox.Save).setText("Uložit")
         buttons.accepted.connect(dialog.accept)

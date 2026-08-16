@@ -12,11 +12,20 @@ from pathlib import Path
 
 
 DNS_CONFIG_VERSION = 1
-DNS_PROVIDER_IDS = ("disabled", "builtin")
+DNS_PROVIDER_CATALOG = (
+    {"id": "disabled", "name": "Vypnuto"},
+    {"id": "builtin", "name": "Vestavěný autoritativní DNS"},
+    {"id": "pihole_local", "name": "Pi-hole na tomto hostiteli"},
+)
+DNS_PROVIDER_IDS = tuple(item["id"] for item in DNS_PROVIDER_CATALOG)
 
 
 class DnsConfigError(ValueError):
     pass
+
+
+def dns_provider_catalog() -> list[dict]:
+    return [dict(item) for item in DNS_PROVIDER_CATALOG]
 
 
 def default_dns_config() -> dict:

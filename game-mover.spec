@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.19.2
+Version:        0.20.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -47,6 +47,7 @@ install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
 install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
 install -Dpm0644 game_mover_catalog.py %{buildroot}/opt/game_mover/game_mover_catalog.py
 install -Dpm0755 game_mover_dns.py %{buildroot}/opt/game_mover/game_mover_dns.py
+install -Dpm0644 game_mover_pihole.py %{buildroot}/opt/game_mover/game_mover_pihole.py
 install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
 install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.py
 install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
@@ -131,6 +132,7 @@ fi
 /opt/game_mover/game_mover_mods.py
 /opt/game_mover/game_mover_catalog.py
 /opt/game_mover/game_mover_dns.py
+/opt/game_mover/game_mover_pihole.py
 /opt/game_mover/game_mover_minecraft.py
 /opt/game_mover/game_mover_gate.py
 /opt/game_mover/game_mover_backups.py
@@ -155,6 +157,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 16 2026 Game Mover Packager <packager@example.invalid> - 0.20.0-1
+- Add explicitly enabled DNS integrations with no default external dependency
+- Add a local Pi-hole v6 provider for Gate-derived Local DNS Records
+- Preserve manual Pi-hole records and reject conflicting ownership
+
 * Sat Aug 15 2026 Game Mover Packager <packager@example.invalid> - 0.19.2-1
 - Show discovered and configured endpoints together in one structured table
 - Render discovered rows in green and keep them read-only

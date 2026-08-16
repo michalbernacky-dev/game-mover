@@ -149,8 +149,13 @@ Private game DNS is a platform-level provider boundary shown in the fixed
 and proxy routing cannot become independent sources of truth. The optional
 built-in provider is an authoritative-only UDP/TCP service with explicit bind
 and answer addresses, no recursion, and PAM-protected configuration. It remains
-disabled by default and does not require Pi-hole; external DNS products belong
-behind optional adapters.
+disabled by default. Integrations are selected explicitly and external products
+remain behind adapters. The first external adapter targets a local Pi-hole v6
+installation through the supported FTL `dns.hosts` configuration. It keeps an
+ownership ledger outside Pi-hole, removes only records it created, preserves
+equal manual records and fails on conflicting manual values. Pi-hole is never a
+package dependency. Further DNS providers can implement the same registry sync
+boundary without changing Gate routing or the server installer.
 
 ## Security model
 
