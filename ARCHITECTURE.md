@@ -83,6 +83,16 @@ assuming one runtime:
 
 ## User interface
 
+The fixed **Launchers** tab is a provider-backed inventory of native desktop game
+launchers. Missing launchers remain visible but muted, installed versions are
+compared with their authoritative source, and available updates are highlighted.
+Providers keep discovery separate from mutation. The first mutable provider is
+Heroic: it accepts only the exact x86_64 RPM asset from the official Heroic
+GitHub release, validates its digest when published plus its RPM name, version,
+and architecture, refuses to replace a running launcher, and installs only after
+an explicit PAM-policy-controlled confirmation. Repository-managed launchers such
+as Lutris and Steam initially remain read-only inventory entries.
+
 The **Servers** tab is the daily overview. Every manageable workload has the
 appropriate lifecycle actions. Minecraft server cards additionally expose a
 **Management** action that opens a dynamic, closable in-application tab bound to

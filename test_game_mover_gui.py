@@ -42,6 +42,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "refresh_server_statuses",
             "refresh_cache_status",
             "refresh_dnsmasq_status",
+            "refresh_launcher_statuses",
             "refresh_game_lists",
             "update_disk_bars",
             "load_server_mods",
@@ -56,6 +57,28 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.window = game_mover.GameMover()
         self.window.last_server_statuses = [dict(SAMPLE_SERVER)]
         self.window.render_server_cards(self.window.last_server_statuses)
+
+    def test_launcher_tab_renders_outdated_and_missing_items(self):
+        self.window.on_launcher_statuses_loaded({
+            "update_policy": "pam",
+            "launchers": [
+                {
+                    "id": "heroic", "name": "Heroic Games Launcher", "icon": "heroic",
+                    "source": "Oficiální GitHub release", "installed": True,
+                    "installed_version": "2.22.0", "latest_version": "2.22.1",
+                    "update_available": True, "update_supported": True, "error": "",
+                },
+                {
+                    "id": "lutris", "name": "Lutris", "icon": "net.lutris.Lutris",
+                    "source": "Systémový RPM repozitář", "installed": False,
+                    "installed_version": "", "latest_version": "",
+                    "update_available": False, "update_supported": False, "error": "",
+                },
+            ],
+        })
+        self.assertEqual(self.window.tabs.tabText(self.window.launchers_tab_index), "Launchery (1)")
+        self.assertIn("2.22.0 → 2.22.1", self.window.launcher_cards["heroic"]["status"].text())
+        self.assertFalse(self.window.launcher_cards["lutris"]["card"].isEnabled())
 
     def tearDown(self):
         self.window.close()

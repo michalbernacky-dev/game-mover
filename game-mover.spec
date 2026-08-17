@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.20.1
+Version:        0.21.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -59,6 +59,7 @@ install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_move
 install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_security.py
 install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
 install -Dpm0644 game_mover_logs.py %{buildroot}/opt/game_mover/game_mover_logs.py
+install -Dpm0644 game_mover_launchers.py %{buildroot}/opt/game_mover/game_mover_launchers.py
 install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
 install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
@@ -144,6 +145,7 @@ fi
 /opt/game_mover/game_mover_security.py
 /opt/game_mover/game_mover_properties.py
 /opt/game_mover/game_mover_logs.py
+/opt/game_mover/game_mover_launchers.py
 /opt/game_mover/game_mover_operators.py
 /opt/game_mover/game_mover_whitelist.py
 /opt/game_mover/game_mover_version.py
@@ -157,6 +159,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 17 2026 Game Mover Packager <packager@example.invalid> - 0.21.0-1
+- Add launcher discovery and native version status for Heroic, Lutris, and Steam
+- Add a PAM-protected verified Heroic RPM update action
+
 * Mon Aug 17 2026 Game Mover Packager <packager@example.invalid> - 0.20.1-1
 - Show only the player-facing address without a Gate Lite source suffix
 - Keep Gate routing and direct backend details available in server management

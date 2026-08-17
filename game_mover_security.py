@@ -89,6 +89,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "description": "Změny privátní DNS zóny, adres a vestavěného DNS provideru.",
         "default": "pam",
     },
+    {
+        "id": "launcher.update",
+        "label": "Aktualizace herních launcherů",
+        "description": "Stažení a instalace ověřeného balíčku podporovaného launcheru.",
+        "default": "pam",
+    },
 )
 
 FIXED_OPERATION_DEFINITIONS = (

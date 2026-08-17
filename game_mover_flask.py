@@ -76,6 +76,7 @@ from game_mover_whitelist import (
     whitelist_command,
 )
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
+from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
 from game_mover_version import __version__
 from game_mover_gate import (
     GateConfigError,
@@ -1710,6 +1711,25 @@ def servers_status():
 def health():
     """Fast loopback probe used while establishing a managed SSH tunnel."""
     return jsonify({"status": "ok", "version": __version__})
+
+
+@app.route("/launchers/status", methods=["GET"])
+def launchers_status():
+    return jsonify({
+        "launchers": launcher_statuses(),
+        "update_policy": operation_policy("launcher.update"),
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+
+
+@app.route("/launchers/<launcher_id>/update", methods=["POST"])
+def launcher_update(launcher_id):
+    if not require_local_operation(request, "launcher.update"):
+        return jsonify({"message": "Unauthorized"}), 403
+    try:
+        return jsonify(update_launcher(launcher_id))
+    except LauncherError as error:
+        return jsonify({"message": str(error)}), 409
 
 
 @app.route("/security/policies", methods=["GET", "PUT"])

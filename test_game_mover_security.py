@@ -65,6 +65,7 @@ class SecurityPolicyTest(unittest.TestCase):
         payload = public_security_payload(config, self.servers)
         global_catalog = {item["id"]: item for item in payload["catalog"]["global"]}
         self.assertEqual(global_catalog["minecraft.delete"]["default"], "pam")
+        self.assertEqual(global_catalog["launcher.update"]["default"], "pam")
         fixed = {item["id"]: item for item in payload["catalog"]["fixed"]}
         self.assertEqual(fixed["timekpr.manage"]["policy"], "pam")
         self.assertEqual(fixed["security.manage"]["policy"], "pam")

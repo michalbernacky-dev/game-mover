@@ -16,8 +16,8 @@ from PyQt5.QtWidgets import (
     QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
     QDialog, QDialogButtonBox, QTabBar
 )
-from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QPixmap
-from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QThread, QUrl, pyqtSignal, QTimer
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPixmap
+from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_connections import (
@@ -654,6 +654,47 @@ class ServerStatusThread(QThread):
         except Exception as error:
             self.loaded.emit({"request_error": str(error)})
 
+
+class LauncherStatusThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url):
+        super().__init__()
+        self.base_url = base_url
+
+    def run(self):
+        try:
+            response = requests.get(f"{self.base_url}/launchers/status", timeout=90)
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit(data)
+        except Exception as error:
+            self.loaded.emit({"error": str(error)})
+
+
+class LauncherUpdateThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, launcher_id, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.launcher_id = launcher_id
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{self.base_url}/launchers/{self.launcher_id}/update",
+                headers=self.headers, timeout=1200,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({**data, "launcher_id": self.launcher_id})
+        except Exception as error:
+            self.completed.emit({"launcher_id": self.launcher_id, "error": str(error)})
+
 # ------------------------------------------------------------
 # GUI
 # ------------------------------------------------------------
@@ -715,6 +756,10 @@ class GameMover(QWidget):
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
         self.minecraft_install_thread = None
+        self.launcher_status_thread = None
+        self.launcher_update_thread = None
+        self.launcher_cards = {}
+        self.launcher_update_policy = "pam"
         self.last_server_statuses = []
         self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
         self.security_payload = None
@@ -760,6 +805,7 @@ class GameMover(QWidget):
         version_label.setToolTip(f"Game Mover {__version__}")
         self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
+        self.init_launchers_tab()
         self.init_servers_tab()
         self.init_network_tab()
         self.init_server_registry_tab()
@@ -785,6 +831,7 @@ class GameMover(QWidget):
         self.operation_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.refresh_server_statuses()
         self.refresh_game_lists()
+        self.refresh_launcher_statuses()
         self.server_refresh_timer = QTimer(self)
         self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.server_refresh_timer.start(10_000)
@@ -897,6 +944,177 @@ class GameMover(QWidget):
         self.update_disk_bars()
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Mover")
+
+    def init_launchers_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        title = QLabel("Herní launchery", tab)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        help_label = QLabel(
+            "Game Mover rozpozná nativně nainstalované launchery a porovná jejich verze. "
+            "Zašedlá položka na tomto počítači není nainstalovaná. Heroic lze bezpečně "
+            "aktualizovat z jeho oficiálního GitHub release.", tab,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        toolbar = QHBoxLayout()
+        self.launchers_summary = QLabel("Kontroluji launchery…", tab)
+        toolbar.addWidget(self.launchers_summary, 1)
+        self.launchers_refresh_button = QPushButton("Zkontrolovat aktualizace", tab)
+        self.launchers_refresh_button.clicked.connect(self.refresh_launcher_statuses)
+        toolbar.addWidget(self.launchers_refresh_button)
+        layout.addLayout(toolbar)
+
+        scroll = QScrollArea(tab)
+        scroll.setWidgetResizable(True)
+        self.launchers_widget = QWidget(scroll)
+        self.launchers_layout = QVBoxLayout(self.launchers_widget)
+        self.launchers_layout.addStretch()
+        scroll.setWidget(self.launchers_widget)
+        layout.addWidget(scroll)
+        self.launchers_tab = tab
+        self.launchers_tab_index = self.tabs.addTab(tab, "Launchery")
+
+    def launcher_api_url(self):
+        if is_host_management_mode(self.app_mode):
+            return self.host_management_api_url()
+        return FLASK_URL
+
+    def refresh_launcher_statuses(self):
+        if self.launcher_status_thread and self.launcher_status_thread.isRunning():
+            return
+        self.launchers_summary.setText("Kontroluji nainstalované a aktuální verze…")
+        self.launchers_refresh_button.setEnabled(False)
+        self.launcher_status_thread = LauncherStatusThread(self.launcher_api_url())
+        self.launcher_status_thread.loaded.connect(self.on_launcher_statuses_loaded)
+        self.launcher_status_thread.start()
+
+    def launcher_icon_pixmap(self, icon_name, installed):
+        icon = QIcon.fromTheme(icon_name)
+        if icon.isNull():
+            icon = QIcon.fromTheme("applications-games")
+        mode = QIcon.Normal if installed else QIcon.Disabled
+        return icon.pixmap(QSize(64, 64), mode)
+
+    def on_launcher_statuses_loaded(self, payload):
+        self.launchers_refresh_button.setEnabled(True)
+        if payload.get("error"):
+            self.launchers_summary.setText(f"Kontrola launcherů selhala: {payload['error']}")
+            return
+        self.launcher_update_policy = payload.get("update_policy", "pam")
+        self.clear_layout(self.launchers_layout)
+        self.launcher_cards = {}
+        launchers = payload.get("launchers") if isinstance(payload.get("launchers"), list) else []
+        update_count = 0
+        for launcher in launchers:
+            launcher_id = str(launcher.get("id", ""))
+            installed = bool(launcher.get("installed"))
+            update_available = bool(launcher.get("update_available"))
+            update_count += int(update_available)
+            card = QFrame(self.launchers_widget)
+            card.setFrameShape(QFrame.StyledPanel)
+            card.setEnabled(installed)
+            row = QHBoxLayout(card)
+            icon = QLabel(card)
+            icon.setFixedSize(72, 72)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setPixmap(self.launcher_icon_pixmap(launcher.get("icon", ""), installed))
+            row.addWidget(icon)
+            text_layout = QVBoxLayout()
+            name = QLabel(launcher.get("name", launcher_id), card)
+            name.setStyleSheet("font-size: 16px; font-weight: bold;")
+            text_layout.addWidget(name)
+            installed_version = launcher.get("installed_version") or "—"
+            latest_version = launcher.get("latest_version") or "—"
+            if not installed:
+                status_text, color = "Není nainstalováno", "#9aa8b0"
+            elif update_available:
+                status_text = f"Aktualizace: {installed_version} → {latest_version}"
+                color = "#ffcc66"
+            elif launcher.get("error"):
+                status_text = f"Nainstalováno {installed_version} · kontrola verze selhala"
+                color = "#ff8a80"
+            elif latest_version:
+                status_text = f"Aktuální · verze {installed_version}"
+                color = "#66cc66"
+            else:
+                status_text = f"Nainstalováno · verze {installed_version}"
+                color = "#d7e0e5"
+            status = QLabel(status_text, card)
+            status.setStyleSheet(f"color: {color}; font-weight: bold;")
+            if launcher.get("error"):
+                status.setToolTip(str(launcher["error"]))
+            text_layout.addWidget(status)
+            source = QLabel(str(launcher.get("source", "")), card)
+            source.setStyleSheet("color: #9fb0ba;")
+            text_layout.addWidget(source)
+            row.addLayout(text_layout, 1)
+            update_button = QPushButton("Aktualizovat", card)
+            update_button.setVisible(bool(launcher.get("update_supported")))
+            update_button.setEnabled(
+                update_available
+                and bool(self.local_server_action_headers(self.launcher_update_policy))
+            )
+            update_button.clicked.connect(
+                lambda _checked=False, item=dict(launcher): self.update_launcher(item)
+            )
+            row.addWidget(update_button)
+            self.launchers_layout.addWidget(card)
+            self.launcher_cards[launcher_id] = {
+                "card": card, "status": status, "update": update_button,
+                "launcher": dict(launcher),
+            }
+        self.launchers_layout.addStretch()
+        self.launchers_summary.setText(
+            f"Dostupné aktualizace: {update_count}" if update_count
+            else "Nainstalované launchery jsou aktuální."
+        )
+        self.tabs.setTabText(
+            self.launchers_tab_index,
+            f"Launchery ({update_count})" if update_count else "Launchery",
+        )
+
+    def update_launcher(self, launcher):
+        if self.launcher_update_thread and self.launcher_update_thread.isRunning():
+            return
+        headers = self.local_server_action_headers(self.launcher_update_policy)
+        if not headers:
+            QMessageBox.warning(
+                self, "Aktualizace launcheru",
+                "Aktualizace vyžaduje platné oprávnění. Ověř se jako wheel uživatel v Timekpr.",
+            )
+            return
+        name = launcher.get("name", launcher.get("id", "Launcher"))
+        target = launcher.get("latest_version", "novou verzi")
+        answer = QMessageBox.question(
+            self, "Aktualizovat launcher",
+            f"Aktualizovat {name} na verzi {target}?\n\nLauncher musí být před aktualizací ukončený.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        launcher_id = str(launcher.get("id", ""))
+        card = self.launcher_cards.get(launcher_id, {})
+        if card:
+            card["update"].setEnabled(False)
+            card["status"].setText("Stahuji a instaluji aktualizaci…")
+            card["status"].setStyleSheet("color: #74c0fc; font-weight: bold;")
+        self.launcher_update_thread = LauncherUpdateThread(
+            self.launcher_api_url(), launcher_id, headers,
+        )
+        self.launcher_update_thread.completed.connect(self.on_launcher_update_completed)
+        self.launcher_update_thread.start()
+
+    def on_launcher_update_completed(self, payload):
+        error = payload.get("error")
+        if error:
+            QMessageBox.critical(self, "Aktualizace launcheru", str(error))
+        else:
+            QMessageBox.information(
+                self, "Aktualizace launcheru", payload.get("message", "Aktualizace dokončena."),
+            )
+        self.refresh_launcher_statuses()
 
     def init_timekpr_tab(self):
         tab = QWidget(self)
@@ -2234,6 +2452,7 @@ class GameMover(QWidget):
         save_client_config(self.client_config)
         self.update_server_mode_ui()
         self.refresh_server_statuses()
+        self.refresh_launcher_statuses()
 
     def host_management_api_url(self):
         return management_api_url(self.app_mode, self.ssh_tunnel_port)
@@ -2306,6 +2525,16 @@ class GameMover(QWidget):
             self.local_operation_headers("minecraft.install")
         )
         self.minecraft_install_button.setEnabled(install_enabled)
+        for entry in self.launcher_cards.values():
+            launcher = entry.get("launcher", {})
+            entry["update"].setEnabled(
+                bool(launcher.get("update_available"))
+                and bool(self.local_server_action_headers(self.launcher_update_policy))
+                and not (
+                    self.launcher_update_thread is not None
+                    and self.launcher_update_thread.isRunning()
+                )
+            )
         if self.server_management_pages:
             self.update_open_server_management_pages()
 

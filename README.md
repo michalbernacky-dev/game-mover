@@ -6,6 +6,13 @@ Local-first game data manager for trusted local users on a single Linux machine.
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
+shows whether their installed versions are current. Heroic releases are checked
+against the official GitHub project. A confirmed update downloads only the exact
+official x86_64 RPM, validates its identity (and GitHub digest when available),
+then installs it through DNF under the `launcher.update` security policy, which
+requires PAM by default. Heroic must be closed first.
+
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
 
 ## Security model
