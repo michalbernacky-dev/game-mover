@@ -770,7 +770,8 @@ class GameMover(QWidget):
         self.setStyleSheet("""
             QWidget { background-color: #121f28; color: #f3f6f8; }
             QAbstractItemView {
-                alternate-background-color: #292929;
+                background-color: #252a2e;
+                alternate-background-color: #2d3439;
             }
             QPushButton {
                 background-color: #2c414d;
