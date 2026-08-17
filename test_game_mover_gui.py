@@ -87,7 +87,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(entry["status"].text(), "Běží")
         self.assertEqual(entry["players"].text(), "1 / 20 online · již viděno 2")
         self.assertEqual(entry["minecraft_version"].text(), "1.21.8")
-        self.assertEqual(entry["connection"].text(), "vanilla.mc.example:25581 (Gate Lite)")
+        self.assertEqual(entry["connection"].text(), "vanilla.mc.example:25581")
         self.assertEqual(entry["direct_connection"].text(), "127.0.0.1:25570")
         self.assertTrue(entry["direct_connection"].isVisibleTo(entry["page"]))
         self.assertEqual(entry["sections"].count(), 7)
@@ -177,7 +177,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             if layout.itemAt(index).widget() is not None
         ]
 
-        self.assertIn("Připojení: vanilla.mc.example:25581 (Gate Lite)", labels)
+        self.assertIn("Připojení: vanilla.mc.example:25581", labels)
         self.assertNotIn("Připojení: 127.0.0.1:25570", labels)
         self.assertFalse(any(label.startswith("Síť:") for label in labels))
 

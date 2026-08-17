@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.20.0
+Version:        0.20.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -157,6 +157,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Mon Aug 17 2026 Game Mover Packager <packager@example.invalid> - 0.20.1-1
+- Show only the player-facing address without a Gate Lite source suffix
+- Keep Gate routing and direct backend details available in server management
+
 * Sun Aug 16 2026 Game Mover Packager <packager@example.invalid> - 0.20.0-1
 - Add explicitly enabled DNS integrations with no default external dependency
 - Add a local Pi-hole v6 provider for Gate-derived Local DNS Records

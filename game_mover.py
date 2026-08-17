@@ -2732,7 +2732,7 @@ class GameMover(QWidget):
         if not isinstance(gate, dict) or gate.get("port") is None:
             return ""
         host = gate.get("host") or self.active_game_host()
-        return f"{self.formatted_game_endpoint(host, gate['port'])} (Gate Lite)"
+        return self.formatted_game_endpoint(host, gate["port"])
 
     def server_recommended_connection_text(self, server):
         gate = self.server_gate_connection_text(server)
