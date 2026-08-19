@@ -34,9 +34,18 @@ def read_pihole_hosts(executable="/usr/bin/pihole-FTL", *, runner=subprocess.run
     output = _run([executable, "--config", "dns.hosts"], runner=runner)
     try:
         records = json.loads(output)
-    except json.JSONDecodeError as error:
-        raise PiholeAdapterError("Pi-hole vrátil neplatný seznam Local DNS záznamů") from error
-    if not isinstance(records, list) or any(not isinstance(item, str) for item in records):
+    except json.JSONDecodeError:
+        # Current Pi-hole FTL prints string-array settings without JSON quotes,
+        # for example: [ 192.0.2.1 host.example, 192.0.2.2 other.example ]
+        stripped = output.strip()
+        if not (stripped.startswith("[") and stripped.endswith("]")):
+            raise PiholeAdapterError("Pi-hole vrátil neplatný seznam Local DNS záznamů")
+        contents = stripped[1:-1].strip()
+        records = [] if not contents else [item.strip() for item in contents.split(",")]
+    if (
+        not isinstance(records, list)
+        or any(not isinstance(item, str) or _host_record(item) is None for item in records)
+    ):
         raise PiholeAdapterError("Pi-hole vrátil neplatný seznam Local DNS záznamů")
     return records
 

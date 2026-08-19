@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from game_mover_pihole import PiholeAdapterError, sync_pihole_records
+from game_mover_pihole import PiholeAdapterError, read_pihole_hosts, sync_pihole_records
 
 
 class FakePihole:
@@ -21,6 +21,18 @@ class FakePihole:
 
 
 class PiholeAdapterTest(unittest.TestCase):
+    def test_reads_current_ftl_unquoted_string_array_format(self):
+        runner = lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="[ 192.0.2.66 test.mc.example, 192.0.2.66 forge.mc.example ]\n",
+            stderr="",
+        )
+
+        self.assertEqual(read_pihole_hosts(runner=runner), [
+            "192.0.2.66 test.mc.example",
+            "192.0.2.66 forge.mc.example",
+        ])
+
     def test_preserves_manual_records_and_removes_only_owned_records(self):
         fake = FakePihole([
             "192.0.2.20 printer.example",
