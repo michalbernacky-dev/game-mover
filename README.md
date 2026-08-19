@@ -186,8 +186,17 @@ marks its catalog API responses `Cache-Control: no-store`. Download URLs remain
 inside the host backend. Installation revalidates the project distribution
 permission and server-pack relationship, streams the official ZIP with strict
 size and hash verification, rejects unsafe archive entries and publishes data
-atomically. Remote catalog browsing stays read-only and requires the existing
-server read token; installation requires the `minecraft.install` host policy.
+atomically. Declarative server packs containing a `mods.csv` download recipe
+are also supported: every referenced mod is resolved again through the official
+API, its project distribution permission, origin, size and hash are checked,
+and only JAR files under `mods/` are downloaded. Recipe setup scripts are never
+executed. A Forge installer entry is translated into the loader version handled
+by the managed itzg container, and the installer selects the matching Java 8,
+17 or 21 image from the pack's Minecraft version. If any referenced author has
+disabled third-party distribution, the entire installation fails before a
+server is published. Remote catalog browsing stays read-only and requires the
+existing server read token; installation requires the `minecraft.install` host
+policy.
 CurseForge states that third-party downloads do not count toward project
 download totals or Reward Program earnings.
 
@@ -616,7 +625,14 @@ Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
 `Cache-Control: no-store`. Download URL zůstává pouze uvnitř backendu hostitele.
 Instalace znovu ověří svolení autora k distribuci i vazbu na server pack,
 zkontroluje velikost a hash ZIPu, odmítne nebezpečné položky archivu a data
-publikuje atomicky. Vzdálené procházení zůstává pouze pro čtení a vyžaduje
+publikuje atomicky. Podporované jsou také deklarativní server packy s receptem
+`mods.csv`: každý odkazovaný mod se znovu dohledá přes oficiální API a ověří se
+svolení projektu k distribuci, původ, velikost i hash; stahují se pouze JAR
+soubory pod `mods/`. Instalační skripty z receptu se nikdy nespouštějí. Záznam
+instalátoru Forge se převede na verzi loaderu, kterou nainstaluje spravovaný
+itzg container, a podle verze Minecraftu se zvolí obraz s Javou 8, 17 nebo 21.
+Pokud některý autor distribuci třetí stranou zakázal, instalace skončí ještě
+před zveřejněním serveru. Vzdálené procházení zůstává pouze pro čtení a vyžaduje
 serverový read token; instalace vyžaduje hostitelskou zásadu `minecraft.install`.
 CurseForge uvádí, že stažení třetí stranou se nezapočítává do počtu stažení
 projektu ani do příjmů z Reward Programu.

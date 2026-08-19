@@ -1267,6 +1267,8 @@ class ServerRegistryTest(unittest.TestCase):
         install_pack.assert_called_once_with(
             descriptor, data_root=str(data_root), target_id="family-pack",
             owner_user=backend.PODMAN_USER,
+            recipe_resolver=provider.resolve_recipe_files,
+            recipe_progress=install_pack.call_args.kwargs["recipe_progress"],
         )
         self.assertEqual(
             fake_backend.create_container.call_args.kwargs["mounts"][0]["source"],

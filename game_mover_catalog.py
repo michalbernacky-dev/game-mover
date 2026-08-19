@@ -16,6 +16,7 @@ CURSEFORGE_API_URL = "https://api.curseforge.com"
 CURSEFORGE_MINECRAFT_GAME_ID = 432
 CURSEFORGE_MODPACKS_CLASS_ID = 4471
 CURSEFORGE_PAGE_SIZE_MAX = 50
+CURSEFORGE_RECIPE_FILE_MAX = 1000
 CURSEFORGE_LOADER_TYPES = {
     "any": 0,
     "forge": 1,
@@ -159,7 +160,9 @@ def public_modpack_file(item):
 
 
 class CurseForgeCatalogProvider(ModpackCatalogProvider):
-    def __init__(self, api_key, *, requester=None, base_url=CURSEFORGE_API_URL):
+    def __init__(
+        self, api_key, *, requester=None, poster=None, base_url=CURSEFORGE_API_URL,
+    ):
         self.api_key = str(api_key or "").strip()
         if requester is None:
             session = requests.Session()
@@ -167,10 +170,12 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
             # inherit HTTP(S)_PROXY from the service environment.
             session.trust_env = False
             requester = session.get
+            poster = session.post
             self._session = session
         else:
             self._session = None
         self.requester = requester
+        self.poster = poster
         self.base_url = base_url.rstrip("/")
 
     @property
@@ -194,6 +199,40 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
         except requests.RequestException as error:
             raise CatalogUpstreamError("CurseForge API není dostupné") from error
         if response.status_code == 401 or response.status_code == 403:
+            raise CatalogUpstreamError("CurseForge API klíč byl odmítnut")
+        if response.status_code != 200:
+            raise CatalogUpstreamError(
+                f"CurseForge API vrátilo HTTP {response.status_code}"
+            )
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise CatalogUpstreamError(
+                "CurseForge API vrátilo neplatnou odpověď"
+            ) from error
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), expected_type):
+            raise CatalogUpstreamError("CurseForge API vrátilo neplatná data")
+        return payload
+
+    def _post_data(self, path, body, expected_type):
+        if not self.configured:
+            raise CatalogNotConfigured("CurseForge API klíč není nakonfigurovaný")
+        if self.poster is None:
+            raise CatalogUpstreamError("CurseForge API POST transport není dostupný")
+        try:
+            response = self.poster(
+                f"{self.base_url}{path}",
+                json=body,
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-store",
+                    "x-api-key": self.api_key,
+                },
+                timeout=(3.05, 30),
+            )
+        except requests.RequestException as error:
+            raise CatalogUpstreamError("CurseForge API není dostupné") from error
+        if response.status_code in (401, 403):
             raise CatalogUpstreamError("CurseForge API klíč byl odmítnut")
         if response.status_code != 200:
             raise CatalogUpstreamError(
@@ -342,3 +381,65 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
             # Internal only: never return this descriptor through a catalog route.
             "download_url": download_url,
         }
+
+    def resolve_recipe_files(self, file_ids):
+        """Resolve server-recipe dependencies through the official API only."""
+        if not isinstance(file_ids, (list, tuple)):
+            raise CatalogValidationError("Neplatný seznam souborů receptu")
+        normalized = []
+        for value in file_ids:
+            file_id = self._positive_id(value, "ID souboru receptu")
+            if file_id not in normalized:
+                normalized.append(file_id)
+        if not normalized or len(normalized) > CURSEFORGE_RECIPE_FILE_MAX:
+            raise CatalogValidationError("Recept obsahuje neplatný počet souborů")
+
+        files = self._post_data("/v1/mods/files", {"fileIds": normalized}, list)["data"]
+        if not all(isinstance(item, dict) for item in files):
+            raise CatalogUpstreamError("CurseForge vrátilo neplatné soubory receptu")
+        by_id = {int(item.get("id") or 0): item for item in files}
+        if set(by_id) != set(normalized):
+            raise CatalogValidationError("Některé soubory receptu nejsou na CurseForge dostupné")
+
+        mod_ids = sorted({int(item.get("modId") or 0) for item in files})
+        if not mod_ids or mod_ids[0] < 1:
+            raise CatalogUpstreamError("CurseForge vrátilo neplatné projekty receptu")
+        projects = self._post_data("/v1/mods", {"modIds": mod_ids}, list)["data"]
+        if not all(isinstance(item, dict) for item in projects):
+            raise CatalogUpstreamError("CurseForge vrátilo neplatné projekty receptu")
+        project_by_id = {int(item.get("id") or 0): item for item in projects}
+        if set(project_by_id) != set(mod_ids):
+            raise CatalogValidationError("Některé projekty receptu nejsou dostupné")
+
+        descriptors = []
+        for file_id in normalized:
+            item = by_id[file_id]
+            mod_id = int(item.get("modId") or 0)
+            project = project_by_id[mod_id]
+            if int(item.get("gameId") or 0) != CURSEFORGE_MINECRAFT_GAME_ID:
+                raise CatalogValidationError("Recept odkazuje na soubor mimo Minecraft")
+            if int(project.get("gameId") or 0) != CURSEFORGE_MINECRAFT_GAME_ID:
+                raise CatalogValidationError("Recept odkazuje na projekt mimo Minecraft")
+            if project.get("allowModDistribution") is False:
+                project_name = str(project.get("name") or f"ID {mod_id}").strip()
+                raise CatalogValidationError(
+                    f"Autor modu {project_name} nepovolil distribuci třetím stranám"
+                )
+            file_name = str(item.get("fileName", "")).strip()
+            download_url = str(item.get("downloadUrl", "")).strip()
+            hashes = item.get("hashes") if isinstance(item.get("hashes"), list) else []
+            if not file_name.lower().endswith(".jar") or not download_url:
+                raise CatalogValidationError("Recept obsahuje nepodporovaný CurseForge soubor")
+            descriptors.append({
+                "provider": "curseforge",
+                "project_id": mod_id,
+                "file_id": file_id,
+                "file_name": file_name,
+                "file_length": int(item.get("fileLength") or 0),
+                "hashes": [
+                    {"algorithm": int(value.get("algo") or 0), "value": str(value.get("value", ""))}
+                    for value in hashes if isinstance(value, dict)
+                ],
+                "download_url": download_url,
+            })
+        return descriptors

@@ -4806,11 +4806,15 @@ class GameMover(QWidget):
         memory.setValue(8192)
         memory.setSuffix(" MiB")
         java_runtime = QComboBox(dialog)
-        java_runtime.addItems(["Java 17", "Java 21"])
+        java_runtime.addItems(["Java 8", "Java 17", "Java 21"])
         if curseforge:
             version_parts = tuple(int(part) for part in curseforge["version"].split("."))
-            if version_parts >= (1, 20, 5):
+            if version_parts <= (1, 16, 5):
+                java_runtime.setCurrentText("Java 8")
+            elif version_parts >= (1, 20, 5):
                 java_runtime.setCurrentText("Java 21")
+            else:
+                java_runtime.setCurrentText("Java 17")
         port = QSpinBox(dialog)
         port.setRange(1024, 65535)
         port.setValue(suggested_port)
@@ -4931,7 +4935,9 @@ class GameMover(QWidget):
         if not eula_checkbox.isChecked():
             QMessageBox.warning(self, "Minecraft instalace", "Před instalací potvrď Minecraft EULA.")
             return
-        java_tag = "java17" if java_runtime.currentText() == "Java 17" else "java21"
+        java_tag = {
+            "Java 8": "java8", "Java 17": "java17", "Java 21": "java21",
+        }[java_runtime.currentText()]
         payload = {
             "id": server_id.text().strip(),
             "name": name.text().strip(),

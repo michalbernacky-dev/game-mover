@@ -197,7 +197,7 @@ class MinecraftInstallTest(unittest.TestCase):
             )
         self.assertFalse((self.data_root / "unsafe-pack").exists())
 
-    def test_rejects_server_pack_that_requires_external_setup_script(self):
+    def test_rejects_recipe_pack_without_official_api_resolver(self):
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, "w") as archive:
             archive.writestr("mods.csv", "https://edge.forgecdn.net/files/1/2/mod.jar,mods/mod.jar\n")
@@ -211,13 +211,92 @@ class MinecraftInstallTest(unittest.TestCase):
             "hashes": [{"algorithm": 1, "value": hashlib.sha1(payload).hexdigest()}],
         }
 
-        with self.assertRaisesRegex(InstallError, "externího setup skriptu"):
+        with self.assertRaisesRegex(InstallError, "resolver není dostupný"):
             install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="recipe-pack",
                 owner_user="gameplatform",
                 requester=Mock(return_value=self.curseforge_response(payload)),
             )
         self.assertFalse((self.data_root / "recipe-pack").exists())
+
+    def test_installs_declarative_recipe_without_executing_setup_script(self):
+        mod_payload = b"verified server mod"
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "mods.csv",
+                "https://files.minecraftforge.net/maven/net/minecraftforge/forge/"
+                "1.16.5-36.2.39/forge-1.16.5-36.2.39-installer.jar,forge-installer.jar\n"
+                "https://edge.forgecdn.net/files/4371/666/jei.jar,mods/jei.jar\n",
+            )
+            archive.writestr("setup_server.sh", "exit 99\n")
+            archive.writestr("config/example.toml", "enabled=true\n")
+        pack_payload = stream.getvalue()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": len(pack_payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(pack_payload).hexdigest()}],
+        }
+        mod_descriptor = {
+            "project_id": 238222, "file_id": 4371666, "file_name": "jei.jar",
+            "download_url": "https://edge.forgecdn.net/files/4371/666/jei.jar",
+            "file_length": len(mod_payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(mod_payload).hexdigest()}],
+        }
+        resolver = Mock(return_value=[mod_descriptor])
+        progress = Mock()
+        requester = Mock(side_effect=[
+            self.curseforge_response(pack_payload),
+            self.curseforge_response(mod_payload),
+        ])
+
+        with patch("game_mover_installs._chown_tree"):
+            result = install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="recipe-pack",
+                owner_user="gameplatform", requester=requester,
+                recipe_resolver=resolver, recipe_progress=progress,
+            )
+
+        data = Path(result["data_directory"])
+        self.assertEqual((data / "mods/jei.jar").read_bytes(), mod_payload)
+        self.assertFalse((data / "mods.csv").exists())
+        self.assertFalse((data / "setup_server.sh").exists())
+        self.assertEqual(result["loader_version"], "36.2.39")
+        self.assertEqual(result["recipe_files"], 1)
+        resolver.assert_called_once_with([4371666])
+        progress.assert_called_once_with(1, 1, len(mod_payload), len(mod_payload))
+
+    def test_rejects_recipe_with_arbitrary_download_or_target(self):
+        for row in (
+            "https://example.invalid/mod.jar,mods/mod.jar\n",
+            "https://edge.forgecdn.net/files/4371/666/mod.jar,../mod.jar\n",
+            "https://edge.forgecdn.net/files/4371/666/mod.jar,config/mod.jar\n",
+        ):
+            with self.subTest(row=row):
+                stream = io.BytesIO()
+                with zipfile.ZipFile(stream, "w") as archive:
+                    archive.writestr("mods.csv", row)
+                    archive.writestr("config/example.toml", "enabled=true\n")
+                payload = stream.getvalue()
+                descriptor = {
+                    "project_id": 123, "file_id": 790,
+                    "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+                    "file_length": len(payload),
+                    "hashes": [{
+                        "algorithm": 1, "value": hashlib.sha1(payload).hexdigest(),
+                    }],
+                }
+                resolver = Mock()
+                with self.assertRaises(InstallError):
+                    install_curseforge_server_pack(
+                        descriptor, data_root=str(self.data_root),
+                        target_id="unsafe-recipe", owner_user="gameplatform",
+                        requester=Mock(return_value=self.curseforge_response(payload)),
+                        recipe_resolver=resolver,
+                    )
+                resolver.assert_not_called()
+                self.assertFalse((self.data_root / "unsafe-recipe").exists())
 
     def test_detects_loader_version_bundled_in_server_pack(self):
         data = self.data_root / "detected" / "data"

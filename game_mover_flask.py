@@ -2382,19 +2382,34 @@ def minecraft_install():
                     message="Ověřuji a stahuji CurseForge server pack", progress=10,
                 )
                 reference = config["curseforge"]
-                descriptor = curseforge_catalog_provider().resolve_server_pack(
+                catalog_provider = curseforge_catalog_provider()
+                descriptor = catalog_provider.resolve_server_pack(
                     reference["project_id"], reference["file_id"],
                 )
+
+                def recipe_progress(index, total, downloaded, total_bytes):
+                    progress = 12 + int(26 * downloaded / max(1, total_bytes))
+                    OPERATIONS.update(
+                        operation_id, phase="server-pack-recipe",
+                        message=f"Stahuji serverové mody z CurseForge ({index}/{total})",
+                        progress=min(38, progress),
+                    )
+
                 pack_result = install_curseforge_server_pack(
                     descriptor,
                     data_root=PODMAN_DATA_ROOT,
                     target_id=config["id"],
                     owner_user=PODMAN_USER,
+                    recipe_resolver=catalog_provider.resolve_recipe_files,
+                    recipe_progress=recipe_progress,
                 )
                 data_directory = pack_result["data_directory"]
                 if not config["loader_version"]:
-                    config["loader_version"] = detect_server_pack_loader_version(
-                        data_directory, config["loader"], config["version"],
+                    config["loader_version"] = (
+                        pack_result.get("loader_version", "")
+                        or detect_server_pack_loader_version(
+                            data_directory, config["loader"], config["version"],
+                        )
                     )
             else:
                 OPERATIONS.update(

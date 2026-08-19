@@ -110,6 +110,52 @@ class CurseForgeCatalogProviderTest(unittest.TestCase):
         with self.assertRaisesRegex(catalog.CatalogValidationError, "nepovolil"):
             provider.resolve_server_pack(123, 789)
 
+    def test_resolves_recipe_files_and_checks_project_distribution(self):
+        poster = Mock(side_effect=[
+            self.response({"data": [{
+                "id": 4371666, "modId": 238222, "gameId": 432,
+                "fileName": "jei.jar", "fileLength": 1234,
+                "hashes": [{"algo": 1, "value": "a" * 40}],
+                "downloadUrl": "https://edge.forgecdn.net/files/4371/666/jei.jar",
+            }]}),
+            self.response({"data": [{
+                "id": 238222, "gameId": 432, "allowModDistribution": True,
+            }]}),
+        ])
+        provider = catalog.CurseForgeCatalogProvider(
+            "api-secret", requester=Mock(), poster=poster,
+        )
+
+        descriptors = provider.resolve_recipe_files([4371666])
+
+        self.assertEqual(descriptors[0]["file_id"], 4371666)
+        self.assertEqual(descriptors[0]["project_id"], 238222)
+        self.assertEqual(descriptors[0]["hashes"][0]["algorithm"], 1)
+        self.assertEqual(poster.call_args_list[0].kwargs["json"], {"fileIds": [4371666]})
+        self.assertEqual(poster.call_args_list[1].kwargs["json"], {"modIds": [238222]})
+
+    def test_rejects_recipe_file_when_project_disallows_distribution(self):
+        poster = Mock(side_effect=[
+            self.response({"data": [{
+                "id": 4371666, "modId": 238222, "gameId": 432,
+                "fileName": "jei.jar", "fileLength": 1234,
+                "hashes": [{"algo": 1, "value": "a" * 40}],
+                "downloadUrl": "https://edge.forgecdn.net/files/4371/666/jei.jar",
+            }]}),
+            self.response({"data": [{
+                "id": 238222, "gameId": 432, "name": "Private Example",
+                "allowModDistribution": False,
+            }]}),
+        ])
+        provider = catalog.CurseForgeCatalogProvider(
+            "api-secret", requester=Mock(), poster=poster,
+        )
+
+        with self.assertRaisesRegex(
+            catalog.CatalogValidationError, "Private Example nepovolil",
+        ):
+            provider.resolve_recipe_files([4371666])
+
     def test_missing_key_and_upstream_failures_are_safe(self):
         with self.assertRaises(catalog.CatalogNotConfigured):
             catalog.CurseForgeCatalogProvider("").search()

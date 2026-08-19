@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -39,6 +41,12 @@ CURSEFORGE_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024 * 1024
 CURSEFORGE_DOWNLOAD_MAX_REDIRECTS = 5
 CURSEFORGE_EXTRACT_MAX_BYTES = 16 * 1024 * 1024 * 1024
 CURSEFORGE_EXTRACT_MAX_FILES = 100_000
+CURSEFORGE_RECIPE_MAX_FILES = 1000
+CURSEFORGE_RECIPE_MAX_BYTES = 4 * 1024 * 1024 * 1024
+CURSEFORGE_FILE_PATH_RE = re.compile(r"^/files/([0-9]+)/([0-9]+)/[^/]+$")
+FORGE_INSTALLER_PATH_RE = re.compile(
+    r"^/maven/net/minecraftforge/forge/([^/]+)/forge-([^/]+)-installer[.]jar$"
+)
 
 
 class InstallError(RuntimeError):
@@ -255,13 +263,15 @@ def _expected_curseforge_hash(hashes: list[dict]) -> tuple[str, str] | None:
     return None
 
 
-def _download_curseforge_archive(descriptor: dict, target: Path, requester=None) -> dict:
+def _download_curseforge_archive(
+    descriptor: dict, target: Path, requester=None, *, label="server pack",
+) -> dict:
     expected_size = int(descriptor.get("file_length") or 0)
     if not 1 <= expected_size <= CURSEFORGE_DOWNLOAD_MAX_BYTES:
-        raise InstallError("CurseForge server pack má neplatnou nebo příliš velkou velikost")
+        raise InstallError(f"CurseForge {label} má neplatnou nebo příliš velkou velikost")
     expected_hash = _expected_curseforge_hash(descriptor.get("hashes") or [])
     if expected_hash is None:
-        raise InstallError("CurseForge server pack nemá podporovaný kontrolní součet")
+        raise InstallError(f"CurseForge {label} nemá podporovaný kontrolní součet")
     hash_name, expected_digest = expected_hash
     digest = hashlib.new(hash_name)
     url = _validated_curseforge_url(descriptor.get("download_url", ""))
@@ -278,48 +288,175 @@ def _download_curseforge_archive(descriptor: dict, target: Path, requester=None)
                 headers={"Accept": "application/zip"},
             )
         except requests.RequestException as error:
-            raise InstallError("CurseForge server pack nelze stáhnout") from error
+            raise InstallError(f"CurseForge {label} nelze stáhnout") from error
         if response.status_code not in redirect_statuses:
             break
         location = response.headers.get("Location", "")
         response.close()
         response = None
         if redirect_count >= CURSEFORGE_DOWNLOAD_MAX_REDIRECTS:
-            raise InstallError("Stažení CurseForge server packu obsahuje příliš mnoho přesměrování")
+            raise InstallError(f"Stažení CurseForge {label} obsahuje příliš mnoho přesměrování")
         url = _validated_curseforge_url(urljoin(url, location))
     if response is None:
-        raise InstallError("CurseForge server pack nelze stáhnout")
+        raise InstallError(f"CurseForge {label} nelze stáhnout")
     written = 0
     try:
         if response.status_code != 200:
             raise InstallError(
-                f"Stažení CurseForge server packu vrátilo HTTP {response.status_code}"
+                f"Stažení CurseForge {label} vrátilo HTTP {response.status_code}"
             )
         content_length = response.headers.get("Content-Length")
         if content_length:
             try:
                 if int(content_length) != expected_size:
-                    raise InstallError("Velikost CurseForge server packu nesouhlasí")
+                    raise InstallError(f"Velikost CurseForge {label} nesouhlasí")
             except ValueError as error:
-                raise InstallError("Stažení vrátilo neplatnou délku server packu") from error
+                raise InstallError(f"Stažení vrátilo neplatnou délku CurseForge {label}") from error
         with target.open("xb") as output:
             for chunk in response.iter_content(chunk_size=1024 * 1024):
                 if not chunk:
                     continue
                 written += len(chunk)
                 if written > expected_size or written > CURSEFORGE_DOWNLOAD_MAX_BYTES:
-                    raise InstallError("Stažený CurseForge server pack překročil povolenou velikost")
+                    raise InstallError(f"Stažený CurseForge {label} překročil povolenou velikost")
                 output.write(chunk)
                 digest.update(chunk)
     except requests.RequestException as error:
-        raise InstallError("Stahování CurseForge server packu bylo přerušeno") from error
+        raise InstallError(f"Stahování CurseForge {label} bylo přerušeno") from error
     finally:
         response.close()
     if written != expected_size:
-        raise InstallError("Stažený CurseForge server pack není úplný")
+        raise InstallError(f"Stažený CurseForge {label} není úplný")
     if digest.hexdigest().lower() != expected_digest:
-        raise InstallError("Kontrolní součet CurseForge server packu nesouhlasí")
+        raise InstallError(f"Kontrolní součet CurseForge {label} nesouhlasí")
     return {"size_bytes": written, hash_name: expected_digest}
+
+
+def _curseforge_file_id_from_url(value: str) -> int | None:
+    parsed = urlparse(str(value or ""))
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in CURSEFORGE_DOWNLOAD_HOSTS
+        or parsed.port not in (None, 443)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    match = CURSEFORGE_FILE_PATH_RE.fullmatch(parsed.path)
+    if not match:
+        return None
+    return int(f"{int(match.group(1))}{int(match.group(2)):03d}")
+
+
+def _server_recipe_entries(root: Path) -> dict | None:
+    manifest = root / "mods.csv"
+    if not manifest.is_file():
+        return None
+    if manifest.is_symlink() or manifest.stat().st_size > 1024 * 1024:
+        raise InstallError("mods.csv v server packu je neplatný nebo příliš velký")
+    try:
+        rows = list(csv.reader(io.StringIO(manifest.read_text(encoding="utf-8-sig"))))
+    except (OSError, UnicodeError, csv.Error) as error:
+        raise InstallError("mods.csv v server packu nelze přečíst") from error
+    if not rows or len(rows) > CURSEFORGE_RECIPE_MAX_FILES + 1:
+        raise InstallError("mods.csv obsahuje neplatný počet položek")
+
+    entries = []
+    targets = set()
+    file_ids = set()
+    forge_installer_seen = False
+    forge_loader_version = ""
+    for row in rows:
+        if len(row) != 2:
+            raise InstallError("mods.csv obsahuje neplatný řádek")
+        url = row[0].strip()
+        target = row[1].strip()
+        path = PurePosixPath(target)
+        if (
+            not target or "\\" in target or path.is_absolute() or ".." in path.parts
+            or target in targets
+        ):
+            raise InstallError("mods.csv obsahuje neplatnou cílovou cestu")
+        targets.add(target)
+
+        file_id = _curseforge_file_id_from_url(url)
+        if file_id is not None:
+            if len(path.parts) != 2 or path.parts[0] != "mods" or not path.name.lower().endswith(".jar"):
+                raise InstallError("CurseForge mod z receptu musí směřovat do mods/*.jar")
+            if file_id in file_ids:
+                raise InstallError("mods.csv obsahuje duplicitní CurseForge soubor")
+            file_ids.add(file_id)
+            entries.append({"file_id": file_id, "target": target})
+            continue
+
+        parsed = urlparse(url)
+        forge_match = FORGE_INSTALLER_PATH_RE.fullmatch(parsed.path)
+        if (
+            not forge_installer_seen
+            and target == "forge-installer.jar"
+            and parsed.scheme == "https"
+            and parsed.hostname == "files.minecraftforge.net"
+            and parsed.port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and forge_match
+            and forge_match.group(1) == forge_match.group(2)
+        ):
+            # The managed itzg image installs the selected Forge loader itself.
+            forge_installer_seen = True
+            forge_loader_version = forge_match.group(1).rsplit("-", 1)[-1]
+            if not VERSION_RE.fullmatch(forge_loader_version):
+                raise InstallError("mods.csv obsahuje neplatnou verzi Forge")
+            continue
+        raise InstallError("mods.csv odkazuje na nepodporovaný zdroj nebo cíl")
+    if not entries:
+        raise InstallError("mods.csv neobsahuje žádné CurseForge serverové mody")
+    return {"entries": entries, "loader_version": forge_loader_version}
+
+
+def _install_server_recipe(
+    root: Path, entries: list[dict], resolver, requester=None, progress=None,
+) -> dict:
+    if resolver is None:
+        raise InstallError(
+            "Server pack vyžaduje deklarativní setup recept, ale resolver není dostupný"
+        )
+    descriptors = resolver([entry["file_id"] for entry in entries])
+    if not isinstance(descriptors, list):
+        raise InstallError("CurseForge vrátilo neplatné soubory setup receptu")
+    descriptor_by_id = {
+        int(item.get("file_id") or 0): item for item in descriptors if isinstance(item, dict)
+    }
+    if set(descriptor_by_id) != {entry["file_id"] for entry in entries}:
+        raise InstallError("CurseForge nevrátilo všechny soubory setup receptu")
+    total_bytes = sum(int(item.get("file_length") or 0) for item in descriptors)
+    if not 1 <= total_bytes <= CURSEFORGE_RECIPE_MAX_BYTES:
+        raise InstallError("Setup recept má neplatnou nebo příliš velkou celkovou velikost")
+
+    downloaded = 0
+    for index, entry in enumerate(entries, start=1):
+        descriptor = descriptor_by_id[entry["file_id"]]
+        destination = root.joinpath(*PurePosixPath(entry["target"]).parts)
+        if destination.exists() or destination.is_symlink():
+            raise InstallError("Setup recept se pokouší přepsat existující serverový mod")
+        destination.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+        _download_curseforge_archive(
+            descriptor, destination, requester=requester, label="mod receptu",
+        )
+        destination.chmod(0o640)
+        downloaded += int(descriptor.get("file_length") or 0)
+        if progress is not None:
+            progress(index, len(entries), downloaded, total_bytes)
+
+    for name in ("mods.csv", "setup_server.sh", "setup-server.sh", "setup_server.bat"):
+        candidate = root / name
+        if candidate.is_file() and not candidate.is_symlink():
+            candidate.unlink()
+    return {"recipe_files": len(entries), "recipe_bytes": downloaded}
 
 
 def _safe_zip_members(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], str | None]:
@@ -356,6 +493,7 @@ def _safe_zip_members(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], 
 
 def install_curseforge_server_pack(
     descriptor: dict, *, data_root: str, target_id: str, owner_user: str, requester=None,
+    recipe_resolver=None, recipe_progress=None,
 ) -> dict:
     """Download, verify and atomically publish one CurseForge server-pack ZIP."""
     if not INSTALL_ID_RE.fullmatch(target_id):
@@ -396,18 +534,15 @@ def install_curseforge_server_pack(
             raise InstallError("CurseForge server pack není platný ZIP archiv") from error
         if not any(extracted.iterdir()):
             raise InstallError("CurseForge server pack neobsahuje serverová data")
-        recipe_files = ("mods.csv", "setup_server.sh", "setup-server.sh")
-        requires_external_setup = any((extracted / name).is_file() for name in recipe_files)
-        bundled_mods = extracted / "mods"
-        has_bundled_mods = (
-            bundled_mods.is_dir()
-            and any(path.is_file() for path in bundled_mods.glob("*.jar"))
-        )
-        if requires_external_setup and not has_bundled_mods:
-            raise InstallError(
-                "Server pack vyžaduje spuštění externího setup skriptu a neobsahuje "
-                "hotové serverové mody; tento typ balíku Game Mover bezpečně nepodporuje"
+        recipe_result = {}
+        recipe = _server_recipe_entries(extracted)
+        if recipe is not None:
+            recipe_result = _install_server_recipe(
+                extracted, recipe["entries"], recipe_resolver,
+                requester=requester, progress=recipe_progress,
             )
+            if recipe["loader_version"]:
+                recipe_result["loader_version"] = recipe["loader_version"]
         server_root.mkdir(mode=0o750)
         os.replace(extracted, data_directory)
         _chown_tree(server_root, owner_user)
@@ -421,6 +556,7 @@ def install_curseforge_server_pack(
         "project_id": int(descriptor["project_id"]),
         "file_id": int(descriptor["file_id"]),
         **verification,
+        **recipe_result,
     }
 
 
