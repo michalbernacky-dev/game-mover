@@ -2509,6 +2509,17 @@ class GameMover(QWidget):
             pack_loader = loader_map[filtered_loader]
         if not pack_version and re.fullmatch(r"\d+\.\d+(?:\.\d+)?", filtered_version):
             pack_version = filtered_version
+        project_loader_versions = (
+            project.get("loaders_by_version")
+            if isinstance(project.get("loaders_by_version"), dict) else {}
+        )
+        project_loaders = project_loader_versions.get(pack_version, [])
+        if (
+            not pack_loader and isinstance(project_loaders, list)
+            and len(project_loaders) == 1
+            and str(project_loaders[0]).lower() in loader_map
+        ):
+            pack_loader = loader_map[str(project_loaders[0]).lower()]
         if not pack_loader or not pack_version:
             QMessageBox.warning(
                 self, "CurseForge server pack",

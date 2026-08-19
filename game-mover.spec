@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.23.0
+Version:        0.23.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -159,6 +159,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 19 2026 Game Mover Packager <packager@example.invalid> - 0.23.1-1
+- Infer missing legacy file loaders from an exact catalog filter
+- Use a project's unique loader for the selected Minecraft version as a safe fallback
+
 * Wed Aug 19 2026 Game Mover Packager <packager@example.invalid> - 0.23.0-1
 - Support declarative CurseForge server-pack recipes without executing pack scripts
 - Resolve, authorize, size-check, and hash-check every recipe mod through the official API

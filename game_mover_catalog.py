@@ -24,6 +24,9 @@ CURSEFORGE_LOADER_TYPES = {
     "quilt": 5,
     "neoforge": 6,
 }
+CURSEFORGE_LOADER_NAMES = {
+    value: name for name, value in CURSEFORGE_LOADER_TYPES.items() if value
+}
 CURSEFORGE_SORT_FIELDS = {
     "featured": 1,
     "popularity": 2,
@@ -124,6 +127,22 @@ def _author_names(project):
     ]
 
 
+def _project_loaders_by_version(project):
+    indexes = (
+        project.get("latestFilesIndexes")
+        if isinstance(project.get("latestFilesIndexes"), list) else []
+    )
+    result = {}
+    for item in indexes:
+        if not isinstance(item, dict):
+            continue
+        version = str(item.get("gameVersion") or "").strip()
+        loader = CURSEFORGE_LOADER_NAMES.get(int(item.get("modLoader") or 0))
+        if version and loader and loader not in result.setdefault(version, []):
+            result[version].append(loader)
+    return result
+
+
 def public_modpack(project):
     logo = project.get("logo") if isinstance(project.get("logo"), dict) else {}
     links = project.get("links") if isinstance(project.get("links"), dict) else {}
@@ -137,6 +156,7 @@ def public_modpack(project):
         "date_modified": str(project.get("dateModified", "")),
         "website_url": str(links.get("websiteUrl", "")),
         "thumbnail_url": str(logo.get("thumbnailUrl", "")),
+        "loaders_by_version": _project_loaders_by_version(project),
     }
 
 

@@ -26,6 +26,9 @@ class CurseForgeCatalogProviderTest(unittest.TestCase):
                 "links": {"websiteUrl": "https://www.curseforge.com/test"},
                 "logo": {"thumbnailUrl": "https://media.example/icon.png"},
                 "latestFiles": [{"downloadUrl": "https://secret.example/file.zip"}],
+                "latestFilesIndexes": [{
+                    "gameVersion": "1.20.1", "fileId": 11, "modLoader": 4,
+                }],
             }],
             "pagination": {"index": 0, "pageSize": 20, "resultCount": 1, "totalCount": 1},
         }))
@@ -39,6 +42,9 @@ class CurseForgeCatalogProviderTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["name"], "Fabric Pack")
         self.assertNotIn("latestFiles", result["items"][0])
         self.assertNotIn("download_url", result["items"][0])
+        self.assertEqual(
+            result["items"][0]["loaders_by_version"], {"1.20.1": ["fabric"]},
+        )
         kwargs = requester.call_args.kwargs
         self.assertEqual(kwargs["params"]["gameId"], 432)
         self.assertEqual(kwargs["params"]["classId"], 4471)
