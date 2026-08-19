@@ -13,7 +13,7 @@ import shutil
 import stat
 import tarfile
 import tempfile
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 import zipfile
 
 import requests
@@ -36,6 +36,7 @@ CURSEFORGE_DOWNLOAD_HOSTS = frozenset((
     "mediafilez.forgecdn.net",
 ))
 CURSEFORGE_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024 * 1024
+CURSEFORGE_DOWNLOAD_MAX_REDIRECTS = 5
 CURSEFORGE_EXTRACT_MAX_BYTES = 16 * 1024 * 1024 * 1024
 CURSEFORGE_EXTRACT_MAX_FILES = 100_000
 
@@ -268,13 +269,26 @@ def _download_curseforge_archive(descriptor: dict, target: Path, requester=None)
         session = requests.Session()
         session.trust_env = False
         requester = session.get
-    try:
-        response = requester(
-            url, stream=True, allow_redirects=False, timeout=(5, 120),
-            headers={"Accept": "application/zip"},
-        )
-    except requests.RequestException as error:
-        raise InstallError("CurseForge server pack nelze stáhnout") from error
+    response = None
+    redirect_statuses = {301, 302, 303, 307, 308}
+    for redirect_count in range(CURSEFORGE_DOWNLOAD_MAX_REDIRECTS + 1):
+        try:
+            response = requester(
+                url, stream=True, allow_redirects=False, timeout=(5, 120),
+                headers={"Accept": "application/zip"},
+            )
+        except requests.RequestException as error:
+            raise InstallError("CurseForge server pack nelze stáhnout") from error
+        if response.status_code not in redirect_statuses:
+            break
+        location = response.headers.get("Location", "")
+        response.close()
+        response = None
+        if redirect_count >= CURSEFORGE_DOWNLOAD_MAX_REDIRECTS:
+            raise InstallError("Stažení CurseForge server packu obsahuje příliš mnoho přesměrování")
+        url = _validated_curseforge_url(urljoin(url, location))
+    if response is None:
+        raise InstallError("CurseForge server pack nelze stáhnout")
     written = 0
     try:
         if response.status_code != 200:

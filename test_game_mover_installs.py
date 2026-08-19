@@ -103,12 +103,55 @@ class MinecraftInstallTest(unittest.TestCase):
             normalize_install_request(config)
 
     @staticmethod
-    def curseforge_response(payload):
+    def curseforge_response(payload, *, status=200, headers=None):
         response = Mock()
-        response.status_code = 200
-        response.headers = {"Content-Length": str(len(payload))}
+        response.status_code = status
+        response.headers = headers or {"Content-Length": str(len(payload))}
         response.iter_content.return_value = [payload[:7], payload[7:]]
         return response
+
+    def test_follows_only_validated_curseforge_redirects(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("mods/example.jar", b"mod")
+        payload = stream.getvalue()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": len(payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(payload).hexdigest()}],
+        }
+        redirect = self.curseforge_response(
+            b"", status=302,
+            headers={"Location": "https://mediafiles.forgecdn.net/files/1/server.zip"},
+        )
+        requester = Mock(side_effect=[redirect, self.curseforge_response(payload)])
+
+        with patch("game_mover_installs._chown_tree"):
+            install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="redirect-pack",
+                owner_user="gameplatform", requester=requester,
+            )
+
+        self.assertEqual(requester.call_count, 2)
+        self.assertTrue(redirect.close.called)
+
+    def test_rejects_curseforge_redirect_to_unapproved_host(self):
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": 3,
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(b"zip").hexdigest()}],
+        }
+        redirect = self.curseforge_response(
+            b"", status=302, headers={"Location": "https://example.invalid/server.zip"},
+        )
+        with self.assertRaisesRegex(InstallError, "nepovolenou adresu"):
+            install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="unsafe-redirect",
+                owner_user="gameplatform", requester=Mock(return_value=redirect),
+            )
+        self.assertTrue(redirect.close.called)
 
     def test_installs_verified_curseforge_server_pack_atomically(self):
         stream = io.BytesIO()
