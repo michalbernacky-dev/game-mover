@@ -435,7 +435,15 @@ def wait_for_minecraft_install_ready(host, port, backend, workload, timeout=600)
     while time.monotonic() < deadline:
         state = backend.status(workload)
         if state.status == "inactive":
-            raise RuntimeError(state.error or state.message or "Minecraft container se zastavil")
+            message = state.error or state.message or "Minecraft container se zastavil"
+            log_result = backend.logs(workload, 40)
+            log_text = log_result.output or log_result.error
+            if log_text:
+                lines = [line.strip() for line in log_text.splitlines() if line.strip()]
+                detail = "\n".join(lines[-8:])[-2000:]
+                if detail:
+                    message = f"{message}\n\nPoslední log containeru:\n{detail}"
+            raise RuntimeError(message)
         try:
             return query_server_status(host, port, timeout=4)
         except (OSError, UnicodeError, ValueError) as error:

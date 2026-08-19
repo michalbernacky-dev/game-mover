@@ -72,6 +72,22 @@ class ServerRegistryTest(unittest.TestCase):
     def local_options(self, headers=None):
         return {"headers": headers or {}, "environ_base": {"REMOTE_ADDR": "127.0.0.1"}}
 
+    def test_install_readiness_reports_container_log_when_it_stops(self):
+        workload_backend = Mock()
+        workload_backend.status.return_value = WorkloadState(
+            "inactive", "exited", "Neběží",
+        )
+        workload_backend.logs.return_value = BackendResult(
+            0, "Preparing server\nUnsupported Java version",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Unsupported Java version"):
+            backend.wait_for_minecraft_install_ready(
+                "127.0.0.1", 25570, workload_backend,
+                {"runtime": {"container_name": "failed-pack"}}, timeout=1,
+            )
+        workload_backend.logs.assert_called_once()
+
     def save_servers(self):
         response = self.client.put(
             "/servers/config", json={"servers": self.servers},

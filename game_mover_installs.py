@@ -396,6 +396,18 @@ def install_curseforge_server_pack(
             raise InstallError("CurseForge server pack není platný ZIP archiv") from error
         if not any(extracted.iterdir()):
             raise InstallError("CurseForge server pack neobsahuje serverová data")
+        recipe_files = ("mods.csv", "setup_server.sh", "setup-server.sh")
+        requires_external_setup = any((extracted / name).is_file() for name in recipe_files)
+        bundled_mods = extracted / "mods"
+        has_bundled_mods = (
+            bundled_mods.is_dir()
+            and any(path.is_file() for path in bundled_mods.glob("*.jar"))
+        )
+        if requires_external_setup and not has_bundled_mods:
+            raise InstallError(
+                "Server pack vyžaduje spuštění externího setup skriptu a neobsahuje "
+                "hotové serverové mody; tento typ balíku Game Mover bezpečně nepodporuje"
+            )
         server_root.mkdir(mode=0o750)
         os.replace(extracted, data_directory)
         _chown_tree(server_root, owner_user)

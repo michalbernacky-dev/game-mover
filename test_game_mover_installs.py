@@ -197,6 +197,28 @@ class MinecraftInstallTest(unittest.TestCase):
             )
         self.assertFalse((self.data_root / "unsafe-pack").exists())
 
+    def test_rejects_server_pack_that_requires_external_setup_script(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("mods.csv", "https://edge.forgecdn.net/files/1/2/mod.jar,mods/mod.jar\n")
+            archive.writestr("setup_server.sh", "wget something\n")
+            archive.writestr("config/example.toml", "enabled=true\n")
+        payload = stream.getvalue()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": len(payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(payload).hexdigest()}],
+        }
+
+        with self.assertRaisesRegex(InstallError, "externího setup skriptu"):
+            install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="recipe-pack",
+                owner_user="gameplatform",
+                requester=Mock(return_value=self.curseforge_response(payload)),
+            )
+        self.assertFalse((self.data_root / "recipe-pack").exists())
+
     def test_detects_loader_version_bundled_in_server_pack(self):
         data = self.data_root / "detected" / "data"
         forge = data / "libraries/net/minecraftforge/forge/1.20.1-47.4.4"
