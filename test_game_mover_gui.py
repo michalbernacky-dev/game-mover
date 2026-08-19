@@ -98,10 +98,19 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.assertIsNone(
                 self.window.tabs.tabBar().tabButton(index, QTabBar.RightSide)
             )
-
         self.window.close_server_management_tab(fixed_count)
         self.assertEqual(self.window.tabs.count(), fixed_count)
         self.assertNotIn("mc-test", self.window.server_management_pages)
+
+    def test_servers_tab_has_stable_widget_reference(self):
+        self.window.tabs.setCurrentIndex(0)
+        self.window.tabs.setCurrentWidget(self.window.servers_tab)
+
+        self.assertIs(self.window.tabs.currentWidget(), self.window.servers_tab)
+        self.assertEqual(
+            self.window.tabs.tabText(self.window.tabs.indexOf(self.window.servers_tab)),
+            "Servery",
+        )
 
     def test_management_page_contains_existing_server_capabilities(self):
         self.window.open_server_management("mc-test")

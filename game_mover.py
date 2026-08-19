@@ -1954,6 +1954,7 @@ class GameMover(QWidget):
 
     def init_servers_tab(self):
         tab = QWidget(self)
+        self.servers_tab = tab
         tab_layout = QVBoxLayout(tab)
         scroll_area = QScrollArea(tab)
         scroll_area.setWidgetResizable(True)
@@ -4968,6 +4969,7 @@ class GameMover(QWidget):
         )
         if answer != QMessageBox.Yes:
             return
+        self.tabs.setCurrentWidget(self.servers_tab)
         self.minecraft_install_thread = MinecraftInstallThread(
             self.host_management_api_url(), payload, headers,
         )
