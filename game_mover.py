@@ -2384,6 +2384,7 @@ class GameMover(QWidget):
         self.modpack_results.blockSignals(False)
         self.selected_modpack = None
         self.selected_modpack_file = None
+        self.modpack_file_filters = {}
         self.modpack_files.setRowCount(0)
         self.modpack_detail.setText("Vyber modpack pro zobrazení dostupných souborů.")
         self.modpack_website.setEnabled(False)
@@ -2416,6 +2417,7 @@ class GameMover(QWidget):
         self.modpack_website.setEnabled(website.startswith("https://www.curseforge.com/"))
         self.modpack_files.setRowCount(0)
         self.selected_modpack_file = None
+        self.modpack_file_filters = {}
         self.modpack_install_button.setEnabled(False)
         self.modpack_status_label.setText("Načítám dostupné soubory modpacku…")
         self.start_modpack_catalog_request(
@@ -2431,6 +2433,9 @@ class GameMover(QWidget):
         if not self.selected_modpack or payload.get("project_id") != self.selected_modpack.get("id"):
             return
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        self.modpack_file_filters = (
+            dict(payload["filters"]) if isinstance(payload.get("filters"), dict) else {}
+        )
         release_labels = {1: "Release", 2: "Beta", 3: "Alpha"}
         self.modpack_files.setRowCount(len(items))
         for row, item in enumerate(items):
@@ -2493,6 +2498,17 @@ class GameMover(QWidget):
             (value for value in game_versions if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value)),
             "",
         )
+        # Older CurseForge files may omit the loader in gameVersions. A file
+        # returned by an exact API filter is still authoritative for that
+        # loader/version; retain the response filters instead of rereading
+        # mutable GUI controls here.
+        response_filters = getattr(self, "modpack_file_filters", {})
+        filtered_loader = str(response_filters.get("loader", "")).lower()
+        filtered_version = str(response_filters.get("version", ""))
+        if not pack_loader and filtered_loader in loader_map:
+            pack_loader = loader_map[filtered_loader]
+        if not pack_version and re.fullmatch(r"\d+\.\d+(?:\.\d+)?", filtered_version):
+            pack_version = filtered_version
         if not pack_loader or not pack_version:
             QMessageBox.warning(
                 self, "CurseForge server pack",

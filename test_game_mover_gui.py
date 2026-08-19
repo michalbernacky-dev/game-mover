@@ -318,6 +318,36 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("není nakonfigurovaný", self.window.modpack_status_label.text())
         self.assertFalse(self.window.modpack_install_button.isEnabled())
 
+    def test_modpack_install_uses_exact_response_filter_for_legacy_loader_metadata(self):
+        self.window.open_modpack_catalog(version="1.16.5", loader="forge")
+        self.window.selected_modpack = {
+            "id": 454031,
+            "name": "Crucial 2 - The Refresh Update",
+            "slug": "crucial-2",
+        }
+        self.window.render_modpack_files({
+            "project_id": 454031,
+            "filters": {"version": "1.16.5", "loader": "forge"},
+            "items": [{
+                "id": 3497749,
+                "display_name": "Crucial2-1.3.6.zip",
+                "game_versions": ["1.16.5"],
+                "release_type": 1,
+                "file_length": 1024,
+                "is_server_pack": False,
+                "server_pack_file_id": 3497751,
+            }],
+        })
+        self.window.modpack_files.selectRow(0)
+        QApplication.processEvents()
+
+        with patch.object(self.window, "open_minecraft_installer") as open_installer:
+            self.window.install_selected_server_pack()
+
+        source = open_installer.call_args.kwargs["curseforge"]
+        self.assertEqual(source["loader"], "FORGE")
+        self.assertEqual(source["version"], "1.16.5")
+
     def test_modpack_catalog_is_one_closable_contextual_tab(self):
         fixed_count = self.window.fixed_tab_count
         self.assertNotIn(
