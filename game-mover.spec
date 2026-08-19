@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.21.0
+Version:        0.22.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -159,6 +159,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Wed Aug 19 2026 Game Mover Packager <packager@example.invalid> - 0.22.0-1
+- Install user-selected CurseForge server packs into new managed Minecraft servers
+- Keep API keys and download URLs host-only and enforce author distribution consent
+- Verify archive size and hash and safely extract ZIP contents with atomic rollback
+
 * Mon Aug 17 2026 Game Mover Packager <packager@example.invalid> - 0.21.0-1
 - Add launcher discovery and native version status for Heroic, Lutris, and Steam
 - Add a PAM-protected verified Heroic RPM update action

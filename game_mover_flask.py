@@ -89,7 +89,9 @@ from game_mover_gate import (
 from game_mover_installs import (
     InstallError,
     container_environment,
+    detect_server_pack_loader_version,
     fresh_data_directory,
+    install_curseforge_server_pack,
     list_backups,
     normalize_install_request,
     restore_backup,
@@ -2248,7 +2250,8 @@ def minecraft_modpack_catalog_status():
     return no_store_json({
         "provider": "curseforge",
         "configured": provider.configured,
-        "read_only": True,
+        "server_pack_install": True,
+        "client_install": False,
         "cached": False,
     })
 
@@ -2365,6 +2368,26 @@ def minecraft_install():
                     owner_user=PODMAN_USER,
                 )
                 data_directory = restore_result["data_directory"]
+            elif config.get("curseforge"):
+                OPERATIONS.update(
+                    operation_id, phase="server-pack",
+                    message="Ověřuji a stahuji CurseForge server pack", progress=10,
+                )
+                reference = config["curseforge"]
+                descriptor = curseforge_catalog_provider().resolve_server_pack(
+                    reference["project_id"], reference["file_id"],
+                )
+                pack_result = install_curseforge_server_pack(
+                    descriptor,
+                    data_root=PODMAN_DATA_ROOT,
+                    target_id=config["id"],
+                    owner_user=PODMAN_USER,
+                )
+                data_directory = pack_result["data_directory"]
+                if not config["loader_version"]:
+                    config["loader_version"] = detect_server_pack_loader_version(
+                        data_directory, config["loader"], config["version"],
+                    )
             else:
                 OPERATIONS.update(
                     operation_id, phase="data",
@@ -2496,7 +2519,10 @@ def minecraft_install():
                             )
                 except (GateConfigError, InstallError, OSError, ValueError) as error:
                     route_warning = str(error)
-    except (InstallError, KeyError, OSError, RuntimeError, ValueError) as error:
+    except (
+        CatalogNotConfigured, CatalogUpstreamError, CatalogValidationError,
+        InstallError, KeyError, OSError, RuntimeError, ValueError,
+    ) as error:
         if container_created and proxy_backend is not None:
             proxy_backend.remove_container(workload, force=True)
         if data_created and not registered:

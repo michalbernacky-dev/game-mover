@@ -1,14 +1,18 @@
 import hashlib
+import io
 import json
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import zipfile
 
 from game_mover_installs import (
     InstallError,
     container_environment,
+    detect_server_pack_loader_version,
+    install_curseforge_server_pack,
     list_backups,
     normalize_install_request,
     restore_backup,
@@ -86,6 +90,79 @@ class MinecraftInstallTest(unittest.TestCase):
         config["accept_eula"] = False
         with self.assertRaisesRegex(InstallError, "EULA"):
             normalize_install_request(config)
+
+    def test_normalizes_curseforge_reference_and_rejects_backup_combination(self):
+        config = self.config()
+        config.pop("backup")
+        config["curseforge"] = {"project_id": "123", "file_id": 789}
+        normalized = normalize_install_request(config)
+        self.assertEqual(normalized["curseforge"], {"project_id": 123, "file_id": 789})
+
+        config["backup"] = {"source_id": "minecraft", "id": "backup-1"}
+        with self.assertRaisesRegex(InstallError, "současně"):
+            normalize_install_request(config)
+
+    @staticmethod
+    def curseforge_response(payload):
+        response = Mock()
+        response.status_code = 200
+        response.headers = {"Content-Length": str(len(payload))}
+        response.iter_content.return_value = [payload[:7], payload[7:]]
+        return response
+
+    def test_installs_verified_curseforge_server_pack_atomically(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("Family Server/mods/example.jar", b"mod")
+            archive.writestr("Family Server/config/example.toml", b"enabled=true\n")
+        payload = stream.getvalue()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": len(payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(payload).hexdigest()}],
+        }
+        requester = Mock(return_value=self.curseforge_response(payload))
+
+        with patch("game_mover_installs._chown_tree"):
+            result = install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="family-pack",
+                owner_user="gameplatform", requester=requester,
+            )
+
+        data = Path(result["data_directory"])
+        self.assertEqual((data / "mods" / "example.jar").read_bytes(), b"mod")
+        self.assertEqual((data / "config" / "example.toml").read_text(), "enabled=true\n")
+        self.assertFalse(list(self.data_root.glob(".*-curseforge-*")))
+
+    def test_rejects_unsafe_curseforge_zip_and_cleans_target(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr("../outside.txt", b"unsafe")
+        payload = stream.getvalue()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": len(payload),
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(payload).hexdigest()}],
+        }
+        with self.assertRaisesRegex(InstallError, "mimo datový"):
+            install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="unsafe-pack",
+                owner_user="gameplatform",
+                requester=Mock(return_value=self.curseforge_response(payload)),
+            )
+        self.assertFalse((self.data_root / "unsafe-pack").exists())
+
+    def test_detects_loader_version_bundled_in_server_pack(self):
+        data = self.data_root / "detected" / "data"
+        forge = data / "libraries/net/minecraftforge/forge/1.20.1-47.4.4"
+        forge.mkdir(parents=True)
+        (forge / "unix_args.txt").write_text("", encoding="utf-8")
+        self.assertEqual(
+            detect_server_pack_loader_version(str(data), "FORGE", "1.20.1"),
+            "47.4.4",
+        )
 
     def test_lists_and_atomically_restores_verified_backup(self):
         backup_id = self.make_backup()

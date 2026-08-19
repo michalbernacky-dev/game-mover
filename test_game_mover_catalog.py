@@ -71,6 +71,45 @@ class CurseForgeCatalogProviderTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["server_pack_file_id"], 790)
         self.assertNotIn("download_url", result["items"][0])
 
+    def test_resolves_only_authorized_server_pack_download(self):
+        requester = Mock(side_effect=[
+            self.response({"data": {
+                "id": 123, "gameId": 432, "classId": 4471,
+                "name": "Family Pack", "allowModDistribution": True,
+            }}),
+            self.response({"data": {
+                "id": 789, "modId": 123, "isServerPack": False,
+                "serverPackFileId": 790,
+            }}),
+            self.response({"data": {
+                "id": 790, "modId": 123, "isServerPack": True,
+                "isAvailable": True, "displayName": "Family Server",
+                "fileName": "family-server.zip", "fileLength": 1024,
+                "hashes": [{"algo": 1, "value": "a" * 40}],
+            }}),
+            self.response({"data": "https://edge.forgecdn.net/files/1/server.zip"}),
+        ])
+        provider = catalog.CurseForgeCatalogProvider("api-secret", requester=requester)
+
+        descriptor = provider.resolve_server_pack(123, 789)
+
+        self.assertEqual(descriptor["file_id"], 790)
+        self.assertEqual(descriptor["source_file_id"], 789)
+        self.assertEqual(
+            descriptor["download_url"], "https://edge.forgecdn.net/files/1/server.zip",
+        )
+        self.assertEqual(requester.call_count, 4)
+
+    def test_rejects_project_that_disallows_third_party_distribution(self):
+        requester = Mock(return_value=self.response({"data": {
+            "id": 123, "gameId": 432, "classId": 4471,
+            "allowModDistribution": False,
+        }}))
+        provider = catalog.CurseForgeCatalogProvider("api-secret", requester=requester)
+
+        with self.assertRaisesRegex(catalog.CatalogValidationError, "nepovolil"):
+            provider.resolve_server_pack(123, 789)
+
     def test_missing_key_and_upstream_failures_are_safe(self):
         with self.assertRaises(catalog.CatalogNotConfigured):
             catalog.CurseForgeCatalogProvider("").search()
@@ -105,7 +144,7 @@ class CurseForgeCatalogApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json, {
             "provider": "curseforge", "configured": True,
-            "read_only": True, "cached": False,
+            "server_pack_install": True, "client_install": False, "cached": False,
         })
         self.assertEqual(response.headers["Cache-Control"], "no-store")
 

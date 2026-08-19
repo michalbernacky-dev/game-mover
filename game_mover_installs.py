@@ -10,8 +10,13 @@ from pathlib import Path, PurePosixPath
 import pwd
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
+from urllib.parse import urlparse
+import zipfile
+
+import requests
 
 from game_mover_workloads import OCI_IMAGE_RE
 
@@ -25,6 +30,14 @@ LOADER_VERSION_ENV = {
     "FABRIC": "FABRIC_LOADER_VERSION",
     "NEOFORGE": "NEOFORGE_VERSION",
 }
+CURSEFORGE_DOWNLOAD_HOSTS = frozenset((
+    "edge.forgecdn.net",
+    "mediafiles.forgecdn.net",
+    "mediafilez.forgecdn.net",
+))
+CURSEFORGE_DOWNLOAD_MAX_BYTES = 4 * 1024 * 1024 * 1024
+CURSEFORGE_EXTRACT_MAX_BYTES = 16 * 1024 * 1024 * 1024
+CURSEFORGE_EXTRACT_MAX_FILES = 100_000
 
 
 class InstallError(RuntimeError):
@@ -87,6 +100,22 @@ def normalize_install_request(raw: dict) -> dict:
             raise InstallError("Neplatné ID zdrojové zálohy")
         normalized_backup = {"source_id": source_id, "id": backup_id}
 
+    curseforge = raw.get("curseforge")
+    normalized_curseforge = None
+    if curseforge is not None:
+        if not isinstance(curseforge, dict):
+            raise InstallError("Neplatný zdroj CurseForge server packu")
+        try:
+            project_id = int(curseforge.get("project_id"))
+            file_id = int(curseforge.get("file_id"))
+        except (TypeError, ValueError) as error:
+            raise InstallError("Neplatná reference CurseForge server packu") from error
+        if project_id < 1 or file_id < 1:
+            raise InstallError("Neplatná reference CurseForge server packu")
+        normalized_curseforge = {"project_id": project_id, "file_id": file_id}
+    if normalized_backup and normalized_curseforge:
+        raise InstallError("Nelze současně obnovit zálohu a instalovat CurseForge server pack")
+
     return {
         "id": server_id,
         "name": name,
@@ -98,6 +127,7 @@ def normalize_install_request(raw: dict) -> dict:
         "port": _port(raw.get("port", 25565)),
         "hostname": hostname,
         "backup": normalized_backup,
+        "curseforge": normalized_curseforge,
         "accept_eula": True,
     }
 
@@ -194,6 +224,215 @@ def _chown_tree(path: Path, owner_user: str) -> None:
             os.chown(os.path.join(root, name), account.pw_uid, account.pw_gid)
         for name in files:
             os.chown(os.path.join(root, name), account.pw_uid, account.pw_gid)
+
+
+def _validated_curseforge_url(value: str) -> str:
+    parsed = urlparse(str(value or ""))
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname not in CURSEFORGE_DOWNLOAD_HOSTS
+        or parsed.port not in (None, 443)
+    ):
+        raise InstallError("CurseForge vrátil nepovolenou adresu server packu")
+    return parsed.geturl()
+
+
+def _expected_curseforge_hash(hashes: list[dict]) -> tuple[str, str] | None:
+    # CurseForge algorithms: 1 = SHA-1, 2 = MD5. Prefer SHA-1 when both exist.
+    supported = {1: "sha1", 2: "md5"}
+    by_algorithm = {
+        int(item.get("algorithm") or 0): str(item.get("value", "")).lower()
+        for item in hashes if isinstance(item, dict)
+    }
+    for algorithm in (1, 2):
+        value = by_algorithm.get(algorithm, "")
+        expected_length = 40 if algorithm == 1 else 32
+        if re.fullmatch(rf"[0-9a-f]{{{expected_length}}}", value):
+            return supported[algorithm], value
+    return None
+
+
+def _download_curseforge_archive(descriptor: dict, target: Path, requester=None) -> dict:
+    expected_size = int(descriptor.get("file_length") or 0)
+    if not 1 <= expected_size <= CURSEFORGE_DOWNLOAD_MAX_BYTES:
+        raise InstallError("CurseForge server pack má neplatnou nebo příliš velkou velikost")
+    expected_hash = _expected_curseforge_hash(descriptor.get("hashes") or [])
+    if expected_hash is None:
+        raise InstallError("CurseForge server pack nemá podporovaný kontrolní součet")
+    hash_name, expected_digest = expected_hash
+    digest = hashlib.new(hash_name)
+    url = _validated_curseforge_url(descriptor.get("download_url", ""))
+    if requester is None:
+        session = requests.Session()
+        session.trust_env = False
+        requester = session.get
+    try:
+        response = requester(
+            url, stream=True, allow_redirects=False, timeout=(5, 120),
+            headers={"Accept": "application/zip"},
+        )
+    except requests.RequestException as error:
+        raise InstallError("CurseForge server pack nelze stáhnout") from error
+    written = 0
+    try:
+        if response.status_code != 200:
+            raise InstallError(
+                f"Stažení CurseForge server packu vrátilo HTTP {response.status_code}"
+            )
+        content_length = response.headers.get("Content-Length")
+        if content_length:
+            try:
+                if int(content_length) != expected_size:
+                    raise InstallError("Velikost CurseForge server packu nesouhlasí")
+            except ValueError as error:
+                raise InstallError("Stažení vrátilo neplatnou délku server packu") from error
+        with target.open("xb") as output:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                written += len(chunk)
+                if written > expected_size or written > CURSEFORGE_DOWNLOAD_MAX_BYTES:
+                    raise InstallError("Stažený CurseForge server pack překročil povolenou velikost")
+                output.write(chunk)
+                digest.update(chunk)
+    except requests.RequestException as error:
+        raise InstallError("Stahování CurseForge server packu bylo přerušeno") from error
+    finally:
+        response.close()
+    if written != expected_size:
+        raise InstallError("Stažený CurseForge server pack není úplný")
+    if digest.hexdigest().lower() != expected_digest:
+        raise InstallError("Kontrolní součet CurseForge server packu nesouhlasí")
+    return {"size_bytes": written, hash_name: expected_digest}
+
+
+def _safe_zip_members(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], str | None]:
+    members = archive.infolist()
+    files = [member for member in members if not member.is_dir()]
+    if not files:
+        raise InstallError("CurseForge server pack je prázdný")
+    if len(files) > CURSEFORGE_EXTRACT_MAX_FILES:
+        raise InstallError("CurseForge server pack obsahuje příliš mnoho souborů")
+    total_size = 0
+    top_levels = set()
+    has_root_file = False
+    for member in members:
+        if "\\" in member.filename:
+            raise InstallError("CurseForge server pack obsahuje neplatnou cestu")
+        path = PurePosixPath(member.filename)
+        if path.is_absolute() or not path.parts or ".." in path.parts:
+            raise InstallError("CurseForge server pack obsahuje cestu mimo datový adresář")
+        mode = member.external_attr >> 16
+        file_type = stat.S_IFMT(mode)
+        if file_type and not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)):
+            raise InstallError("CurseForge server pack obsahuje nepovolený odkaz nebo speciální soubor")
+        if member.flag_bits & 0x1:
+            raise InstallError("CurseForge server pack obsahuje šifrovaný soubor")
+        total_size += member.file_size
+        if total_size > CURSEFORGE_EXTRACT_MAX_BYTES:
+            raise InstallError("Rozbalený CurseForge server pack je příliš velký")
+        top_levels.add(path.parts[0])
+        if len(path.parts) == 1 and not member.is_dir():
+            has_root_file = True
+    wrapper = next(iter(top_levels)) if len(top_levels) == 1 and not has_root_file else None
+    return members, wrapper
+
+
+def install_curseforge_server_pack(
+    descriptor: dict, *, data_root: str, target_id: str, owner_user: str, requester=None,
+) -> dict:
+    """Download, verify and atomically publish one CurseForge server-pack ZIP."""
+    if not INSTALL_ID_RE.fullmatch(target_id):
+        raise InstallError("Neplatné cílové ID serveru")
+    root = Path(data_root).resolve()
+    server_root = root / target_id
+    data_directory = server_root / "data"
+    if server_root.exists():
+        raise InstallError("Cílový datový adresář už existuje")
+    root.mkdir(mode=0o750, parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{target_id}-curseforge-", dir=root))
+    archive_path = staging / "server-pack.zip"
+    published = False
+    try:
+        verification = _download_curseforge_archive(descriptor, archive_path, requester=requester)
+        extracted = staging / "extracted"
+        extracted.mkdir(mode=0o750)
+        try:
+            with zipfile.ZipFile(archive_path, mode="r") as archive:
+                members, wrapper = _safe_zip_members(archive)
+                if archive.testzip() is not None:
+                    raise InstallError("CurseForge server pack je poškozený")
+                for member in members:
+                    path = PurePosixPath(member.filename)
+                    parts = path.parts[1:] if wrapper else path.parts
+                    if not parts:
+                        continue
+                    destination = extracted.joinpath(*parts)
+                    if member.is_dir():
+                        destination.mkdir(mode=0o750, parents=True, exist_ok=True)
+                        continue
+                    destination.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+                    with archive.open(member) as source, destination.open("xb") as output:
+                        shutil.copyfileobj(source, output, length=1024 * 1024)
+                    archived_mode = (member.external_attr >> 16) & 0o777
+                    destination.chmod(archived_mode or 0o640)
+        except zipfile.BadZipFile as error:
+            raise InstallError("CurseForge server pack není platný ZIP archiv") from error
+        if not any(extracted.iterdir()):
+            raise InstallError("CurseForge server pack neobsahuje serverová data")
+        server_root.mkdir(mode=0o750)
+        os.replace(extracted, data_directory)
+        _chown_tree(server_root, owner_user)
+        published = True
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+        if not published:
+            shutil.rmtree(server_root, ignore_errors=True)
+    return {
+        "data_directory": str(data_directory),
+        "project_id": int(descriptor["project_id"]),
+        "file_id": int(descriptor["file_id"]),
+        **verification,
+    }
+
+
+def detect_server_pack_loader_version(
+    data_directory: str, loader: str, minecraft_version: str,
+) -> str:
+    """Best-effort detection of a pinned loader already bundled in server data."""
+    root = Path(data_directory)
+    loader = str(loader or "").upper()
+    minecraft_version = str(minecraft_version or "")
+    candidates = []
+    if loader == "FORGE":
+        prefix = f"{minecraft_version}-"
+        for path in root.glob("libraries/net/minecraftforge/forge/*/unix_args.txt"):
+            if path.parent.name.startswith(prefix):
+                candidates.append(path.parent.name[len(prefix):])
+        jar_prefix = f"forge-{minecraft_version}-"
+        for path in root.glob(f"{jar_prefix}*-installer.jar"):
+            candidates.append(path.name[len(jar_prefix):-len("-installer.jar")])
+    elif loader == "NEOFORGE":
+        candidates.extend(
+            path.parent.name
+            for path in root.glob("libraries/net/neoforged/neoforge/*/unix_args.txt")
+        )
+
+    variables = root / "variables.txt"
+    try:
+        if variables.is_file() and not variables.is_symlink() and variables.stat().st_size <= 64 * 1024:
+            for line in variables.read_text(encoding="utf-8").splitlines():
+                key, separator, value = line.partition("=")
+                if separator and key.strip() in {
+                    "FORGE_VERSION", "NEOFORGE_VERSION", "MOD_LOADER_VERSION",
+                    "MODLOADER_VERSION",
+                }:
+                    candidates.append(value.strip().strip('"\''))
+    except (OSError, UnicodeError):
+        pass
+    return next((value for value in candidates if VERSION_RE.fullmatch(value)), "")
 
 
 def restore_backup(

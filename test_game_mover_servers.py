@@ -1205,6 +1205,58 @@ class ServerRegistryTest(unittest.TestCase):
             [item.args[0] for item in available.call_args_list], [25574, 25575],
         )
 
+    def test_minecraft_install_resolves_and_installs_curseforge_server_pack(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        installed_data = data_root / "family-pack" / "data"
+        fake_backend = Mock()
+        fake_backend.container_exists.return_value = False
+        fake_backend.network_exists.return_value = True
+        fake_backend.pull_image.return_value = BackendResult(0, "sha256:image")
+        fake_backend.create_container.return_value = BackendResult(0, "family-pack")
+        fake_backend.start.return_value = BackendResult(0)
+        provider = Mock()
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+        }
+        provider.resolve_server_pack.return_value = descriptor
+        request = {
+            "id": "family-pack", "name": "Family Pack", "loader": "FABRIC",
+            "version": "1.20.1", "memory_mb": 8192, "port": 25576,
+            "hostname": "", "accept_eula": True,
+            "curseforge": {"project_id": 123, "file_id": 789},
+        }
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "load_game_servers", return_value=[]),
+            patch.object(backend, "save_game_servers"),
+            patch.object(backend, "check_host_port_available"),
+            patch.object(backend, "backend_for", return_value=fake_backend),
+            patch.object(backend, "curseforge_catalog_provider", return_value=provider),
+            patch.object(backend, "install_curseforge_server_pack", return_value={
+                "data_directory": str(installed_data), "sha1": "abc",
+            }) as install_pack,
+            patch.object(backend, "wait_for_minecraft_install_ready", return_value={
+                "online": 0, "max": 20,
+            }),
+            patch.object(backend, "load_gate_config", return_value=backend.default_gate_config()),
+        ):
+            response = self.client.post(
+                "/servers/minecraft/install", json=request,
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        provider.resolve_server_pack.assert_called_once_with(123, 789)
+        install_pack.assert_called_once_with(
+            descriptor, data_root=str(data_root), target_id="family-pack",
+            owner_user=backend.PODMAN_USER,
+        )
+        self.assertEqual(
+            fake_backend.create_container.call_args.kwargs["mounts"][0]["source"],
+            str(installed_data),
+        )
+
     def test_minecraft_install_port_suggestion_requires_local_pam(self):
         response = self.client.get(
             "/servers/minecraft/install",

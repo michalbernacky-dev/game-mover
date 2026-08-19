@@ -752,6 +752,7 @@ class GameMover(QWidget):
         self.modpack_catalog_thread = None
         self.modpack_search_index = 0
         self.selected_modpack = None
+        self.selected_modpack_file = None
         self.modpacks_tab = None
         self.gate_deploy_thread = None
         self.gate_routes_thread = None
@@ -2193,8 +2194,7 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         help_label = QLabel(
-            "Read-only katalog: Game Mover zobrazuje živá metadata CurseForge, "
-            "nic nestahuje, neinstaluje ani necachuje.",
+            "Katalog CurseForge server packů.",
             tab,
         )
         help_label.setWordWrap(True)
@@ -2278,6 +2278,10 @@ class GameMover(QWidget):
         self.modpack_website.setEnabled(False)
         self.modpack_website.clicked.connect(self.open_selected_modpack_website)
         detail_row.addWidget(self.modpack_website)
+        self.modpack_install_button = QPushButton("Nainstalovat server pack…", tab)
+        self.modpack_install_button.setEnabled(False)
+        self.modpack_install_button.clicked.connect(self.install_selected_server_pack)
+        detail_row.addWidget(self.modpack_install_button)
         layout.addLayout(detail_row)
 
         self.modpack_files = QTableWidget(tab)
@@ -2286,7 +2290,9 @@ class GameMover(QWidget):
             "Soubor", "Verze", "Vydání", "Velikost", "Server pack",
         ])
         self.modpack_files.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.modpack_files.setSelectionMode(QAbstractItemView.SingleSelection)
         self.modpack_files.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.modpack_files.itemSelectionChanged.connect(self.on_modpack_file_selected)
         files_header = self.modpack_files.horizontalHeader()
         files_header.setSectionResizeMode(0, QHeaderView.Stretch)
         files_header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -2376,9 +2382,11 @@ class GameMover(QWidget):
                 self.modpack_results.setItem(row, column, item)
         self.modpack_results.blockSignals(False)
         self.selected_modpack = None
+        self.selected_modpack_file = None
         self.modpack_files.setRowCount(0)
         self.modpack_detail.setText("Vyber modpack pro zobrazení dostupných souborů.")
         self.modpack_website.setEnabled(False)
+        self.modpack_install_button.setEnabled(False)
         pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
         index = int(pagination.get("index") or self.modpack_search_index)
         count = int(pagination.get("resultCount") or len(items))
@@ -2406,6 +2414,8 @@ class GameMover(QWidget):
         website = str(project.get("website_url", ""))
         self.modpack_website.setEnabled(website.startswith("https://www.curseforge.com/"))
         self.modpack_files.setRowCount(0)
+        self.selected_modpack_file = None
+        self.modpack_install_button.setEnabled(False)
         self.modpack_status_label.setText("Načítám dostupné soubory modpacku…")
         self.start_modpack_catalog_request(
             "files", project_id=project["id"], params={
@@ -2432,10 +2442,71 @@ class GameMover(QWidget):
                 "Ano" if item.get("is_server_pack") or item.get("server_pack_file_id") else "Ne",
             )
             for column, value in enumerate(values):
-                self.modpack_files.setItem(row, column, QTableWidgetItem(str(value)))
+                table_item = QTableWidgetItem(str(value))
+                if column == 0:
+                    table_item.setData(Qt.UserRole, item)
+                self.modpack_files.setItem(row, column, table_item)
         self.modpack_status_label.setText(
             f"Modpack nabízí {len(items)} odpovídajících souborů."
         )
+
+    def on_modpack_file_selected(self):
+        selected = self.modpack_files.selectedItems()
+        self.selected_modpack_file = None
+        if selected:
+            item = self.modpack_files.item(selected[0].row(), 0)
+            data = item.data(Qt.UserRole) if item else None
+            if isinstance(data, dict):
+                self.selected_modpack_file = data
+        self.update_modpack_install_availability()
+
+    def update_modpack_install_availability(self):
+        if self.modpacks_tab is None or not hasattr(self, "modpack_install_button"):
+            return
+        item = self.selected_modpack_file or {}
+        has_server_pack = bool(item.get("is_server_pack") or item.get("server_pack_file_id"))
+        allowed = (
+            has_server_pack
+            and is_host_management_mode(self.app_mode)
+            and bool(self.local_operation_headers("minecraft.install"))
+        )
+        self.modpack_install_button.setEnabled(allowed)
+
+    def install_selected_server_pack(self):
+        project = self.selected_modpack or {}
+        item = self.selected_modpack_file or {}
+        if not project.get("id") or not item.get("id"):
+            return
+        if not (item.get("is_server_pack") or item.get("server_pack_file_id")):
+            QMessageBox.warning(
+                self, "CurseForge server pack", "Vybraný soubor nemá server pack.",
+            )
+            return
+        game_versions = [str(value) for value in item.get("game_versions") or []]
+        loader_map = {"forge": "FORGE", "fabric": "FABRIC", "neoforge": "NEOFORGE"}
+        pack_loader = next(
+            (loader_map[value.lower()] for value in game_versions if value.lower() in loader_map),
+            None,
+        )
+        pack_version = next(
+            (value for value in game_versions if re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value)),
+            "",
+        )
+        if not pack_loader or not pack_version:
+            QMessageBox.warning(
+                self, "CurseForge server pack",
+                "U vybraného server packu nelze určit podporovaný loader a verzi Minecraftu.",
+            )
+            return
+        self.open_minecraft_installer(curseforge={
+            "project_id": int(project["id"]),
+            "file_id": int(item["id"]),
+            "project_name": str(project.get("name", "")),
+            "slug": str(project.get("slug", "")),
+            "file_name": str(item.get("display_name") or item.get("file_name", "")),
+            "loader": pack_loader,
+            "version": pack_version,
+        })
 
     def open_selected_modpack_website(self):
         if not self.selected_modpack:
@@ -2528,6 +2599,7 @@ class GameMover(QWidget):
             self.local_operation_headers("minecraft.install")
         )
         self.minecraft_install_button.setEnabled(install_enabled)
+        self.update_modpack_install_availability()
         for entry in self.launcher_cards.values():
             launcher = entry.get("launcher", {})
             entry["update"].setEnabled(
@@ -3031,6 +3103,7 @@ class GameMover(QWidget):
                     pass
             self.modpacks_tab = None
             self.selected_modpack = None
+            self.selected_modpack_file = None
         if server_id:
             entry = self.server_management_pages.get(server_id, {})
             timer = entry.get("logs_timer")
@@ -4663,7 +4736,8 @@ class GameMover(QWidget):
             updated_at = updated_at.replace("T", " ").split("+")[0]
         self.servers_updated_label.setText(f"Poslední aktualizace: {updated_at or '—'}")
 
-    def open_minecraft_installer(self):
+    def open_minecraft_installer(self, curseforge=None):
+        curseforge = curseforge if isinstance(curseforge, dict) else None
         if not is_host_management_mode(self.app_mode):
             return
         if self.minecraft_install_thread and self.minecraft_install_thread.isRunning():
@@ -4708,11 +4782,21 @@ class GameMover(QWidget):
         description.setWordWrap(True)
         outer.addWidget(description)
         form = QFormLayout()
-        server_id = QLineEdit("novy-minecraft", dialog)
-        name = QLineEdit("Nový Minecraft", dialog)
+        suggested_id = "novy-minecraft"
+        suggested_name = "Nový Minecraft"
+        if curseforge:
+            suggested_name = curseforge.get("project_name") or suggested_name
+            suggested_id = re.sub(r"[^a-z0-9_-]+", "-", curseforge.get("slug", "").lower())
+            suggested_id = suggested_id.strip("-_")[:32]
+            if not suggested_id or not suggested_id[0].isalpha():
+                suggested_id = "minecraft-pack"
+        server_id = QLineEdit(suggested_id, dialog)
+        name = QLineEdit(suggested_name, dialog)
         loader = QComboBox(dialog)
         loader.addItems(["VANILLA", "FORGE", "FABRIC", "NEOFORGE"])
-        version = QLineEdit("1.20.1", dialog)
+        if curseforge:
+            loader.setCurrentText(curseforge["loader"])
+        version = QLineEdit(curseforge.get("version", "1.20.1") if curseforge else "1.20.1", dialog)
         loader_version = QLineEdit("", dialog)
         loader_version.setPlaceholderText("např. 47.4.4 (prázdné = doporučená)")
         memory = QSpinBox(dialog)
@@ -4722,6 +4806,10 @@ class GameMover(QWidget):
         memory.setSuffix(" MiB")
         java_runtime = QComboBox(dialog)
         java_runtime.addItems(["Java 17", "Java 21"])
+        if curseforge:
+            version_parts = tuple(int(part) for part in curseforge["version"].split("."))
+            if version_parts >= (1, 20, 5):
+                java_runtime.setCurrentText("Java 21")
         port = QSpinBox(dialog)
         port.setRange(1024, 65535)
         port.setValue(suggested_port)
@@ -4739,6 +4827,10 @@ class GameMover(QWidget):
         form.addRow("Java runtime:", java_runtime)
         form.addRow("Přímý LAN port:", port)
         form.addRow("Gate hostname:", hostname)
+        if curseforge:
+            source_name = QLabel(curseforge.get("file_name") or curseforge.get("project_name"), dialog)
+            source_name.setWordWrap(True)
+            form.addRow("Server pack:", source_name)
 
         restore_checkbox = QCheckBox("Použít data z existující zálohy", dialog)
         source = QComboBox(dialog)
@@ -4750,16 +4842,19 @@ class GameMover(QWidget):
         form.addRow(restore_checkbox)
         form.addRow("Zdrojový server:", source)
         form.addRow("Záloha:", backup)
+        if curseforge:
+            restore_checkbox.setEnabled(False)
+            source.setEnabled(False)
+            backup.setEnabled(False)
         eula_checkbox = QCheckBox("Souhlasím s Minecraft EULA (aka.ms/MinecraftEULA)", dialog)
         form.addRow(eula_checkbox)
         outer.addLayout(form)
 
         catalog_requested = {"value": False}
-        catalog_button = QPushButton("Procházet CurseForge modpacky…", dialog)
-        catalog_button.setToolTip(
-            "Zavře instalátor a otevře read-only katalog v samostatné záložce."
-        )
-        outer.addWidget(catalog_button)
+        catalog_button = None
+        if not curseforge:
+            catalog_button = QPushButton("Procházet CurseForge modpacky…", dialog)
+            outer.addWidget(catalog_button)
 
         def update_loader_fields():
             is_vanilla = loader.currentText() == "VANILLA"
@@ -4813,7 +4908,8 @@ class GameMover(QWidget):
             catalog_requested["value"] = True
             dialog.reject()
 
-        catalog_button.clicked.connect(browse_modpacks)
+        if catalog_button is not None:
+            catalog_button.clicked.connect(browse_modpacks)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         buttons.button(QDialogButtonBox.Ok).setText("Nainstalovat")
         buttons.accepted.connect(dialog.accept)
@@ -4851,10 +4947,17 @@ class GameMover(QWidget):
             payload["backup"] = {
                 "source_id": source.currentData(), "id": backup.currentData(),
             }
+        elif curseforge:
+            payload["curseforge"] = {
+                "project_id": curseforge["project_id"],
+                "file_id": curseforge["file_id"],
+            }
         restore_text = (
             f"\nData budou obnovena ze zálohy serveru {source.currentText()}."
             if restore_checkbox.isChecked() else "\nServer dostane nový prázdný datový adresář."
         )
+        if curseforge:
+            restore_text = f"\nBude použit server pack {curseforge.get('file_name', '')}."
         answer = QMessageBox.question(
             self,
             "Potvrdit instalaci",

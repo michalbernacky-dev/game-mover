@@ -1,7 +1,8 @@
-"""Read-only modpack catalog providers.
+"""Live modpack catalogs and host-only server-pack resolution.
 
 CurseForge data is deliberately never persisted or cached. The API key stays in
-the host service and provider responses are reduced to fields needed by the UI.
+the host service, public responses are reduced to fields needed by the UI, and
+download URLs are resolved only within an authorized server installation.
 """
 
 from abc import ABC, abstractmethod
@@ -57,6 +58,10 @@ class ModpackCatalogProvider(ABC):
 
     @abstractmethod
     def files(self, project_id, **filters):
+        raise NotImplementedError
+
+    @abstractmethod
+    def resolve_server_pack(self, project_id, file_id):
         raise NotImplementedError
 
 
@@ -172,7 +177,7 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
     def configured(self):
         return bool(self.api_key)
 
-    def _get(self, path, params):
+    def _get_data(self, path, params, expected_type):
         if not self.configured:
             raise CatalogNotConfigured("CurseForge API klíč není nakonfigurovaný")
         try:
@@ -200,13 +205,28 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
             raise CatalogUpstreamError(
                 "CurseForge API vrátilo neplatnou odpověď"
             ) from error
-        if (
-            not isinstance(payload, dict)
-            or not isinstance(payload.get("data"), list)
-            or not all(isinstance(item, dict) for item in payload["data"])
-        ):
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), expected_type):
             raise CatalogUpstreamError("CurseForge API vrátilo neplatná data")
         return payload
+
+    def _get(self, path, params):
+        payload = self._get_data(path, params, list)
+        if not all(isinstance(item, dict) for item in payload["data"]):
+            raise CatalogUpstreamError("CurseForge API vrátilo neplatná data")
+        return payload
+
+    def _get_object(self, path):
+        return self._get_data(path, {}, dict)["data"]
+
+    @staticmethod
+    def _positive_id(value, label):
+        try:
+            value = int(value)
+        except (TypeError, ValueError) as error:
+            raise CatalogValidationError(f"Neplatné {label}") from error
+        if value < 1:
+            raise CatalogValidationError(f"Neplatné {label}")
+        return value
 
     def search(self, **raw_filters):
         filters = normalize_catalog_filters(raw_filters)
@@ -240,12 +260,7 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
         }
 
     def files(self, project_id, **raw_filters):
-        try:
-            project_id = int(project_id)
-        except (TypeError, ValueError) as error:
-            raise CatalogValidationError("Neplatné ID modpacku") from error
-        if project_id < 1:
-            raise CatalogValidationError("Neplatné ID modpacku")
+        project_id = self._positive_id(project_id, "ID modpacku")
         filters = normalize_catalog_filters(raw_filters, include_query=False)
         params = {
             "index": filters["index"],
@@ -265,4 +280,65 @@ class CurseForgeCatalogProvider(ModpackCatalogProvider):
                 if isinstance(payload.get("pagination"), dict) else {}
             ),
             "filters": filters,
+        }
+
+    def resolve_server_pack(self, project_id, file_id):
+        """Resolve a selected release to its server pack without exposing its URL."""
+        project_id = self._positive_id(project_id, "ID modpacku")
+        file_id = self._positive_id(file_id, "ID souboru")
+        project = self._get_object(f"/v1/mods/{project_id}")
+        if (
+            int(project.get("id") or 0) != project_id
+            or int(project.get("gameId") or 0) != CURSEFORGE_MINECRAFT_GAME_ID
+            or int(project.get("classId") or 0) != CURSEFORGE_MODPACKS_CLASS_ID
+        ):
+            raise CatalogValidationError("Projekt není Minecraft modpack")
+        if project.get("allowModDistribution") is False:
+            raise CatalogValidationError("Autor modpacku nepovolil distribuci třetím stranám")
+
+        selected = self._get_object(f"/v1/mods/{project_id}/files/{file_id}")
+        if int(selected.get("id") or 0) != file_id:
+            raise CatalogUpstreamError("CurseForge vrátilo jiný soubor")
+        if selected.get("isServerPack"):
+            server_file_id = file_id
+        else:
+            server_file_id = self._positive_id(
+                selected.get("serverPackFileId"), "ID server packu",
+            )
+        server_file = (
+            selected if server_file_id == file_id
+            else self._get_object(f"/v1/mods/{project_id}/files/{server_file_id}")
+        )
+        if (
+            int(server_file.get("id") or 0) != server_file_id
+            or int(server_file.get("modId") or project_id) != project_id
+            or not server_file.get("isServerPack")
+            or server_file.get("isAvailable") is False
+        ):
+            raise CatalogValidationError("Vybraný soubor nemá dostupný server pack")
+        file_name = str(server_file.get("fileName", "")).strip()
+        if not file_name.lower().endswith(".zip"):
+            raise CatalogValidationError("Server pack není podporovaný ZIP archiv")
+
+        download_url = self._get_data(
+            f"/v1/mods/{project_id}/files/{server_file_id}/download-url", {}, str,
+        )["data"].strip()
+        if not download_url:
+            raise CatalogValidationError("CurseForge neposkytl URL server packu")
+        hashes = server_file.get("hashes") if isinstance(server_file.get("hashes"), list) else []
+        return {
+            "provider": "curseforge",
+            "project_id": project_id,
+            "source_file_id": file_id,
+            "file_id": server_file_id,
+            "project_name": str(project.get("name", "")),
+            "display_name": str(server_file.get("displayName", "")),
+            "file_name": file_name,
+            "file_length": int(server_file.get("fileLength") or 0),
+            "hashes": [
+                {"algorithm": int(item.get("algo") or 0), "value": str(item.get("value", ""))}
+                for item in hashes if isinstance(item, dict)
+            ],
+            # Internal only: never return this descriptor through a catalog route.
+            "download_url": download_url,
         }

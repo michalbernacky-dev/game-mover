@@ -238,13 +238,14 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         update_ui.assert_called_once()
 
-    def test_read_only_modpack_catalog_renders_projects_and_files(self):
+    def test_modpack_catalog_renders_projects_and_server_pack_install_action(self):
         self.window.open_modpack_catalog(version="1.20.1", loader="fabric")
         payload = {
             "request_kind": "search",
             "items": [{
                 "id": 123,
                 "name": "Fabric Family Pack",
+                "slug": "fabric-family-pack",
                 "summary": "A friendly Fabric modpack.",
                 "authors": ["Builder"],
                 "download_count": 12345,
@@ -270,6 +271,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.window.render_modpack_files({
             "project_id": 123,
             "items": [{
+                "id": 455,
                 "display_name": "Fabric Family Pack 1.0",
                 "game_versions": ["1.20.1", "Fabric"],
                 "release_type": 1,
@@ -280,15 +282,32 @@ class ServerManagementGuiTest(unittest.TestCase):
         })
         self.assertEqual(self.window.modpack_files.rowCount(), 1)
         self.assertEqual(self.window.modpack_files.item(0, 4).text(), "Ano")
+        self.window.modpack_files.selectRow(0)
+        QApplication.processEvents()
+        self.assertFalse(self.window.modpack_install_button.isEnabled())
+        self.window.app_mode = "server"
+        with patch.object(
+            self.window, "local_operation_headers", return_value={"X-Test": "allowed"},
+        ):
+            self.window.update_modpack_install_availability()
+        self.assertTrue(self.window.modpack_install_button.isEnabled())
+        with patch.object(self.window, "open_minecraft_installer") as open_installer:
+            self.window.install_selected_server_pack()
+        source = open_installer.call_args.kwargs["curseforge"]
+        self.assertEqual(source["project_id"], 123)
+        self.assertEqual(source["file_id"], 455)
+        self.assertEqual(source["loader"], "FABRIC")
+        self.assertEqual(source["version"], "1.20.1")
 
-    def test_modpack_catalog_shows_missing_api_key_without_install_actions(self):
+    def test_modpack_catalog_shows_missing_api_key_with_install_disabled(self):
         self.window.open_modpack_catalog()
         self.window.on_modpack_catalog_loaded({
             "request_kind": "status", "provider": "curseforge",
-            "configured": False, "read_only": True, "cached": False,
+            "configured": False, "server_pack_install": True,
+            "client_install": False, "cached": False,
         })
         self.assertIn("není nakonfigurovaný", self.window.modpack_status_label.text())
-        self.assertFalse(hasattr(self.window, "modpack_install_button"))
+        self.assertFalse(self.window.modpack_install_button.isEnabled())
 
     def test_modpack_catalog_is_one_closable_contextual_tab(self):
         fixed_count = self.window.fixed_tab_count

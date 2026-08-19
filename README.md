@@ -166,15 +166,15 @@ returned to its previous running state afterward. The manifest records the
 source backend and systemd unit or non-secret Podman runtime metadata, making a
 systemd Forge backup suitable as the input for a later container migration.
 
-### Read-only CurseForge modpack catalog
+### CurseForge server-pack catalog
 
 The Minecraft server installer opens the live catalog in a single closable
 **Minecraft: Modpacks** tab, keeping Minecraft-specific tooling out of Game
 Mover's fixed top-level navigation. It searches by text, Minecraft version and
 loader, with sorting and pagination. A selected project exposes its public
-summary and compatible file metadata, including whether CurseForge advertises a
-related server pack. This first slice has no download, installation or mutation
-action.
+summary and compatible file metadata. A host administrator can select a release
+with a server pack and use it as the initial data of a new managed Minecraft
+server. Game Mover does not download or install client modpacks or client mods.
 
 CurseForge requires an approved third-party API key. Store it only on the host
 as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
@@ -182,8 +182,14 @@ as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
 to the GUI, remote clients or logs. The path can be overridden with
 `GAME_MOVER_CURSEFORGE_API_KEY_PATH`. In accordance with the CurseForge third-
 party API terms, Game Mover does not persist or cache catalog responses and
-marks its catalog API responses `Cache-Control: no-store`. Remote catalog
-browsing is read-only and requires the existing server read token.
+marks its catalog API responses `Cache-Control: no-store`. Download URLs remain
+inside the host backend. Installation revalidates the project distribution
+permission and server-pack relationship, streams the official ZIP with strict
+size and hash verification, rejects unsafe archive entries and publishes data
+atomically. Remote catalog browsing stays read-only and requires the existing
+server read token; installation requires the `minecraft.install` host policy.
+CurseForge states that third-party downloads do not count toward project
+download totals or Reward Program earnings.
 
 ### Private game DNS
 
@@ -590,14 +596,16 @@ vrátí do původního stavu. Manifest zaznamená zdrojový backend a systemd je
 nebo nesekretní Podman metadata, takže záloha systemd Forge může přímo posloužit
 jako vstup pro pozdější migraci do containeru.
 
-### Read-only katalog CurseForge modpacků
+### Katalog CurseForge server packů
 
 Instalátor Minecraft serveru otevře živý katalog v jediné zavíratelné záložce
 **Minecraft: Modpacky**, takže Minecraft nástroje nezabírají pevnou hlavní
 navigaci obecné herní platformy. Katalog prohledává CurseForge podle textu,
 verze Minecraftu a loaderu, včetně řazení a stránkování. Po výběru projektu
-ukáže jeho veřejný popis a metadata kompatibilních souborů, včetně informace o
-dostupném server packu. Tato první část nic nestahuje, neinstaluje ani nemění.
+ukáže jeho veřejný popis a metadata kompatibilních souborů. Správce hostitele
+může vybrat vydání se server packem a použít jej jako počáteční data nového
+spravovaného Minecraft serveru. Game Mover nestahuje ani neinstaluje klientské
+modpacky nebo klientské mody.
 
 CurseForge vyžaduje schválený API klíč pro aplikaci třetí strany. Klíč patří
 pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim
@@ -605,8 +613,13 @@ pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim
 nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
 `GAME_MOVER_CURSEFORGE_API_KEY_PATH`. V souladu s podmínkami CurseForge Game
 Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
-`Cache-Control: no-store`. Vzdálené procházení je pouze pro čtení a vyžaduje
-stávající serverový read token.
+`Cache-Control: no-store`. Download URL zůstává pouze uvnitř backendu hostitele.
+Instalace znovu ověří svolení autora k distribuci i vazbu na server pack,
+zkontroluje velikost a hash ZIPu, odmítne nebezpečné položky archivu a data
+publikuje atomicky. Vzdálené procházení zůstává pouze pro čtení a vyžaduje
+serverový read token; instalace vyžaduje hostitelskou zásadu `minecraft.install`.
+CurseForge uvádí, že stažení třetí stranou se nezapočítává do počtu stažení
+projektu ani do příjmů z Reward Programu.
 
 ### Privátní herní DNS
 
