@@ -15,6 +15,7 @@ import secrets
 import datetime
 import sys
 import json
+import sqlite3
 import threading
 import ipaddress
 import socket
@@ -77,6 +78,10 @@ from game_mover_whitelist import (
 )
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
+from game_mover_notes import (
+    NotesError, delete_target_notes, initialize_notes_database, list_all_notes,
+    list_notes, replace_notes,
+)
 from game_mover_version import __version__
 from game_mover_gate import (
     GateConfigError,
@@ -132,6 +137,9 @@ PODMAN_DATA_ROOT = os.path.realpath(
 )
 BACKUP_ROOT = os.path.realpath(
     os.getenv("GAME_PLATFORM_BACKUP_ROOT", "/var/lib/game-platform/backups")
+)
+NOTES_DB_PATH = os.path.realpath(
+    os.getenv("GAME_MOVER_NOTES_DB_PATH", "/var/lib/game-platform/game-mover-notes.sqlite3")
 )
 CURSEFORGE_API_KEY_PATH = os.getenv(
     "GAME_MOVER_CURSEFORGE_API_KEY_PATH",
@@ -795,14 +803,21 @@ def restrict_remote_api():
         return None
     read_only_paths = (
         "/servers/status",
+        "/notes",
         "/servers/minecraft/mods",
         "/proxy/status",
         "/dns/status",
         "/minecraft/modpacks/status",
         "/minecraft/modpacks/search",
     )
-    read_only_prefixes = ("/minecraft/modpacks/",)
-    if request.path not in read_only_paths and not request.path.startswith(read_only_prefixes):
+    read_only_prefixes = ("/minecraft/modpacks/", "/notes/")
+    if (
+        request.method != "GET"
+        or (
+            request.path not in read_only_paths
+            and not request.path.startswith(read_only_prefixes)
+        )
+    ):
         return jsonify({"message": "Remote access is limited to server status endpoints"}), 403
     if not require_read_access(request):
         return jsonify({"message": "Unauthorized"}), 403
@@ -1050,6 +1065,12 @@ def game_server_status(server, security_config=None):
         "message": state.message,
         "error": state.error,
     }
+    try:
+        result["notes"] = list_notes(
+            NOTES_DB_PATH, "server", server.get("id", ""),
+        )
+    except (NotesError, OSError, sqlite3.Error):
+        result["notes"] = []
     result["deletion_supported"] = (
         server.get("kind") == "minecraft"
         and backend_name == "podman"
@@ -1715,6 +1736,41 @@ def servers_status():
         "operation_policies": dict(security_config["global"]),
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
+
+
+@app.route("/notes", methods=["GET"])
+def notes_catalog():
+    try:
+        return jsonify({"notes": list_all_notes(NOTES_DB_PATH)})
+    except (OSError, sqlite3.Error) as error:
+        return jsonify({"message": f"Databázi poznámek nelze použít: {error}"}), 500
+
+
+@app.route("/notes/<target_type>/<target_id>", methods=["GET", "PUT"])
+def target_notes(target_type, target_id):
+    try:
+        if request.method == "GET":
+            return jsonify({
+                "target_type": target_type,
+                "target_id": target_id,
+                "notes": list_notes(NOTES_DB_PATH, target_type, target_id),
+            })
+        if not require_local_operation(request, "server.registry"):
+            return jsonify({"message": "Unauthorized"}), 403
+        notes = replace_notes(
+            NOTES_DB_PATH, target_type, target_id,
+            (request.get_json(silent=True) or {}).get("notes"),
+        )
+        return jsonify({
+            "message": "Poznámky byly uloženy",
+            "target_type": target_type,
+            "target_id": target_id,
+            "notes": notes,
+        })
+    except NotesError as error:
+        return jsonify({"message": str(error)}), 400
+    except (OSError, sqlite3.Error) as error:
+        return jsonify({"message": f"Databázi poznámek nelze použít: {error}"}), 500
 
 
 @app.route("/health", methods=["GET"])
@@ -2743,6 +2799,10 @@ def minecraft_delete():
                 current_security, remaining_servers,
             ))
             save_game_servers(remaining_servers)
+            try:
+                delete_target_notes(NOTES_DB_PATH, "server", server_id)
+            except (NotesError, OSError, sqlite3.Error):
+                pass
             with MINECRAFT_STATUS_LOCK:
                 for key in list(MINECRAFT_STATUS_CACHE):
                     if key and key[0] == server_id:
@@ -3299,6 +3359,7 @@ def timekpr_reset_today():
 
 
 if __name__ == "__main__":
+    initialize_notes_database(NOTES_DB_PATH)
     app.run(
         host=os.getenv("GAME_MOVER_BIND_HOST", "127.0.0.1"),
         port=int(os.getenv("GAME_MOVER_PORT", "5000")),

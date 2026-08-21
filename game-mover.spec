@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.23.1
+Version:        0.24.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -60,6 +60,7 @@ install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_s
 install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
 install -Dpm0644 game_mover_logs.py %{buildroot}/opt/game_mover/game_mover_logs.py
 install -Dpm0644 game_mover_launchers.py %{buildroot}/opt/game_mover/game_mover_launchers.py
+install -Dpm0644 game_mover_notes.py %{buildroot}/opt/game_mover/game_mover_notes.py
 install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
 install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
@@ -109,6 +110,10 @@ install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform/servers \
     /var/lib/game-platform/backups \
     /var/lib/game-platform/proxies || :
+PYTHONPATH=/opt/game_mover python3 -c \
+    'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
+chown root:gemers /var/lib/game-platform/game-mover-notes.sqlite3 || :
+chmod 0640 /var/lib/game-platform/game-mover-notes.sqlite3 || :
 loginctl enable-linger gameplatform >/dev/null 2>&1 || :
 gameplatform_uid="$(id -u gameplatform)"
 runuser -u gameplatform -- env XDG_RUNTIME_DIR="/run/user/${gameplatform_uid}" \
@@ -146,6 +151,7 @@ fi
 /opt/game_mover/game_mover_properties.py
 /opt/game_mover/game_mover_logs.py
 /opt/game_mover/game_mover_launchers.py
+/opt/game_mover/game_mover_notes.py
 /opt/game_mover/game_mover_operators.py
 /opt/game_mover/game_mover_whitelist.py
 /opt/game_mover/game_mover_version.py
@@ -159,6 +165,15 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Fri Aug 21 2026 Game Mover Packager <packager@example.invalid> - 0.24.1-1
+- Initialize and migrate the SQLite knowledge base during a fresh host install
+- Keep service startup as a fallback schema initializer
+
+* Fri Aug 21 2026 Game Mover Packager <packager@example.invalid> - 0.24.0-1
+- Add a shared SQLite knowledge base for games, servers, and launchers
+- Store platform-specific verified procedures and expose them read-only to clients
+- Add editable server notes and a general knowledge-base tab
+
 * Wed Aug 19 2026 Game Mover Packager <packager@example.invalid> - 0.23.1-1
 - Infer missing legacy file loaders from an exact catalog filter
 - Use a project's unique loader for the selected Minecraft version as a safe fallback

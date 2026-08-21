@@ -80,6 +80,20 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("2.22.0 → 2.22.1", self.window.launcher_cards["heroic"]["status"].text())
         self.assertFalse(self.window.launcher_cards["lutris"]["card"].isEnabled())
 
+    def test_knowledge_base_supports_game_notes_with_platform_metadata(self):
+        self.window.set_knowledge_target("game", "gta-v-enhanced")
+        self.window.render_knowledge_notes([{
+            "title": "Epic vlastnictví přes Rockstar Launcher",
+            "platform": "Fedora · Heroic · Epic · Rockstar",
+            "body": "Použij alternativní fix.bat a vypni UMU.",
+        }])
+
+        self.assertEqual(self.window.knowledge_target_type.currentData(), "game")
+        self.assertEqual(self.window.knowledge_target_id.text(), "gta-v-enhanced")
+        self.assertEqual(self.window.knowledge_table.rowCount(), 1)
+        self.assertIn("Heroic", self.window.knowledge_table.item(0, 1).text())
+        self.assertIn("fix.bat", self.window.knowledge_table.item(0, 2).text())
+
     def tearDown(self):
         self.window.close()
         self.window.deleteLater()
@@ -122,10 +136,13 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(entry["connection"].text(), "vanilla.mc.example:25581")
         self.assertEqual(entry["direct_connection"].text(), "127.0.0.1:25570")
         self.assertTrue(entry["direct_connection"].isVisibleTo(entry["page"]))
-        self.assertEqual(entry["sections"].count(), 7)
+        self.assertEqual(entry["sections"].count(), 8)
         self.assertEqual(
-            [entry["sections"].tabText(index) for index in range(7)],
-            ["Přehled", "Logy", "Nastavení", "Hráči", "Whitelist", "Zálohy", "Mody"],
+            [entry["sections"].tabText(index) for index in range(8)],
+            [
+                "Přehled", "Poznámky", "Logy", "Nastavení", "Hráči",
+                "Whitelist", "Zálohy", "Mody",
+            ],
         )
         self.assertEqual(set(entry["lifecycle"]), {"start", "stop", "restart"})
         self.assertIn("properties_fields", entry)
@@ -133,6 +150,24 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("operators_table", entry)
         self.assertIn("whitelist_table", entry)
         self.assertTrue(entry["delete_server"].isVisibleTo(entry["page"]))
+
+    def test_management_page_renders_platform_specific_notes(self):
+        server = {
+            **SAMPLE_SERVER,
+            "notes": [{
+                "title": "Fedora + Wayland",
+                "platform": "Fedora · CurseForge · NVIDIA",
+                "body": "Použij systémové GLFW a spusť CurseForge přes X11.",
+            }],
+        }
+        self.window.last_server_statuses = [server]
+        self.window.open_server_management("mc-test")
+        table = self.window.server_management_pages["mc-test"]["notes_table"]
+
+        self.assertEqual(table.rowCount(), 1)
+        self.assertEqual(table.item(0, 0).text(), "Fedora + Wayland")
+        self.assertEqual(table.item(0, 1).text(), "Fedora · CurseForge · NVIDIA")
+        self.assertIn("systémové GLFW", table.item(0, 2).text())
 
     def test_direct_connection_is_recommended_when_gate_route_is_absent(self):
         server = dict(SAMPLE_SERVER)

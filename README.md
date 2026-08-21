@@ -13,6 +13,15 @@ official x86_64 RPM, validates its identity (and GitHub digest when available),
 then installs it through DNF under the `launcher.update` security policy, which
 requires PAM by default. Heroic must be closed first.
 
+The **Knowledge Base** tab stores verified, platform-specific procedures in the
+host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
+Entries can target a game, server, or launcher. Authenticated remote clients can
+read them; editing is restricted to host-management mode under the server
+registry policy. Server-specific entries also appear directly in the server's
+**Notes** tab. A fresh RPM or `install.sh` deployment creates and migrates the
+database automatically; `requirements.txt` needs no SQLite package because the
+Python `sqlite3` module is part of the standard library.
+
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
 
 ## Security model
@@ -458,6 +467,15 @@ Behavior:
 Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jednom Linux stroji.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
+
+Záložka **Znalostní báze** ukládá vlastní ověřené postupy podle hry, serveru
+nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi
+`/var/lib/game-platform/game-mover-notes.sqlite3`. Ověření vzdálení klienti je
+mohou číst, úpravy vyžadují režim správy hostitele a oprávnění k registru
+serverů. Poznámky přiřazené serveru se zobrazují také přímo v jeho záložce
+**Poznámky**. Čistá instalace přes RPM nebo `install.sh` databázi automaticky
+vytvoří či migruje; `sqlite3` je součást standardní knihovny Pythonu a nepatří
+proto do `requirements.txt`.
 
 ## Bezpečnostní model
 

@@ -19,6 +19,7 @@ class ServerRegistryTest(unittest.TestCase):
         self.original_dns_config_path = backend.DNS_CONFIG_PATH
         self.original_dns_runtime_config_path = backend.DNS_RUNTIME_CONFIG_PATH
         self.original_dns_pihole_state_path = backend.DNS_PIHOLE_STATE_PATH
+        self.original_notes_db_path = backend.NOTES_DB_PATH
         self.original_operations = backend.OPERATIONS
         backend.OPERATIONS = type(backend.OPERATIONS)()
         backend.GAME_SERVERS_CONFIG_PATH = self.config_path
@@ -27,6 +28,7 @@ class ServerRegistryTest(unittest.TestCase):
         backend.DNS_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns.json")
         backend.DNS_RUNTIME_CONFIG_PATH = str(Path(self.temp_dir.name) / "dns-runtime.json")
         backend.DNS_PIHOLE_STATE_PATH = str(Path(self.temp_dir.name) / "dns-pihole-state.json")
+        backend.NOTES_DB_PATH = str(Path(self.temp_dir.name) / "notes.sqlite3")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
@@ -62,6 +64,7 @@ class ServerRegistryTest(unittest.TestCase):
         backend.DNS_CONFIG_PATH = self.original_dns_config_path
         backend.DNS_RUNTIME_CONFIG_PATH = self.original_dns_runtime_config_path
         backend.DNS_PIHOLE_STATE_PATH = self.original_dns_pihole_state_path
+        backend.NOTES_DB_PATH = self.original_notes_db_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
         with backend.MINECRAFT_STATUS_LOCK:
@@ -139,6 +142,28 @@ class ServerRegistryTest(unittest.TestCase):
         })
         self.assertEqual(statuses["forge"]["permissions"]["start"], "pam")
         self.assertEqual(statuses["pixelmon"]["permissions"]["backup"], "pam")
+
+    def test_notes_api_persists_platform_specific_server_guidance(self):
+        notes = [{
+            "title": "Fedora + Wayland",
+            "platform": "Fedora · CurseForge · NVIDIA",
+            "body": "Spusť CurseForge přes X11.",
+        }]
+        response = self.client.put(
+            "/notes/server/forge", json={"notes": notes},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertEqual(response.json["notes"][0]["platform"], notes[0]["platform"])
+
+        response = self.client.get(
+            "/notes/server/forge", **self.local_options(),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["notes"][0]["body"], notes[0]["body"])
+        response = self.client.get("/notes", **self.local_options())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["notes"][0]["target_id"], "forge")
 
     def test_security_registry_requires_local_pam_and_applies_immediately(self):
         self.save_servers()

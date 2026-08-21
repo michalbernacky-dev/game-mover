@@ -92,6 +92,7 @@ rsync -a --delete \
   --include='/game_mover_security.py' \
   --include='/game_mover_properties.py' \
   --include='/game_mover_logs.py' \
+  --include='/game_mover_notes.py' \
   --include='/game_mover_operators.py' \
   --include='/game_mover_whitelist.py' \
   --include='/game-mover' \
@@ -118,6 +119,10 @@ fi
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" \
   "${PODMAN_HOME}" "${PODMAN_HOME}/servers" "${PODMAN_HOME}/backups" \
   "${PODMAN_HOME}/proxies"
+PYTHONPATH="${INSTALL_DIR}" python3 -c \
+  'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
+chown root:"${GROUP_NAME}" "${PODMAN_HOME}/game-mover-notes.sqlite3"
+chmod 0640 "${PODMAN_HOME}/game-mover-notes.sqlite3"
 loginctl enable-linger "${PODMAN_USER}"
 podman_uid="$(id -u "${PODMAN_USER}")"
 runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \

@@ -83,6 +83,16 @@ assuming one runtime:
 
 ## User interface
 
+The host also owns a small SQLite knowledge base for operational notes that do
+not belong in workload configuration. Notes target a stable game, server, or
+launcher ID and carry a title, platform/environment qualifier, verified plain
+text procedure, ordering, and timestamps. Remote authenticated clients may read
+the catalog; mutation remains a host-management operation. Server notes appear
+in the contextual server page, while the fixed knowledge-base tab also covers
+desktop games and launchers. This keeps locally verified compatibility fixes
+shareable between family clients without turning `servers.json` into a document
+store.
+
 The fixed **Launchers** tab is a provider-backed inventory of native desktop game
 launchers. Missing launchers remain visible but muted, installed versions are
 compared with their authoritative source, and available updates are highlighted.

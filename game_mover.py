@@ -810,6 +810,7 @@ class GameMover(QWidget):
         self.tabs.setCornerWidget(version_label, Qt.TopRightCorner)
         self.init_mover_tab()
         self.init_launchers_tab()
+        self.init_knowledge_tab()
         self.init_servers_tab()
         self.init_network_tab()
         self.init_server_registry_tab()
@@ -979,6 +980,229 @@ class GameMover(QWidget):
         layout.addWidget(scroll)
         self.launchers_tab = tab
         self.launchers_tab_index = self.tabs.addTab(tab, "Launchery")
+
+    def init_knowledge_tab(self):
+        tab = QWidget(self)
+        layout = QVBoxLayout(tab)
+        title = QLabel("Vlastní znalostní báze", tab)
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(title)
+        help_label = QLabel(
+            "Ověřené postupy z reálného provozu jsou uložené na hostiteli v SQLite. "
+            "Mohou patřit ke hře, serveru nebo launcheru a obsahují prostředí, pro které platí.",
+            tab,
+        )
+        help_label.setWordWrap(True)
+        layout.addWidget(help_label)
+        target_row = QHBoxLayout()
+        self.knowledge_known_targets = QComboBox(tab)
+        self.knowledge_known_targets.setMinimumWidth(240)
+        self.knowledge_known_targets.currentIndexChanged.connect(
+            self.on_knowledge_known_target_selected
+        )
+        target_row.addWidget(QLabel("Uložené cíle:", tab))
+        target_row.addWidget(self.knowledge_known_targets, 1)
+        self.knowledge_refresh = QPushButton("Obnovit seznam", tab)
+        self.knowledge_refresh.clicked.connect(self.refresh_knowledge_targets)
+        target_row.addWidget(self.knowledge_refresh)
+        layout.addLayout(target_row)
+        editor_row = QHBoxLayout()
+        self.knowledge_target_type = QComboBox(tab)
+        for label, value in (("Hra", "game"), ("Server", "server"), ("Launcher", "launcher")):
+            self.knowledge_target_type.addItem(label, value)
+        editor_row.addWidget(self.knowledge_target_type)
+        self.knowledge_target_id = QLineEdit(tab)
+        self.knowledge_target_id.setPlaceholderText("stabilní-id-cíle, např. gta-v-enhanced")
+        self.knowledge_target_id.setMaxLength(128)
+        editor_row.addWidget(self.knowledge_target_id, 1)
+        self.knowledge_load = QPushButton("Načíst cíl", tab)
+        self.knowledge_load.clicked.connect(self.load_knowledge_target)
+        editor_row.addWidget(self.knowledge_load)
+        layout.addLayout(editor_row)
+        self.knowledge_status = QLabel("Zvol cíl nebo zadej nové ID.", tab)
+        self.knowledge_status.setWordWrap(True)
+        self.knowledge_status.setStyleSheet("color: #aab7c0;")
+        layout.addWidget(self.knowledge_status)
+        self.knowledge_table = QTableWidget(tab)
+        self.knowledge_table.setColumnCount(3)
+        self.knowledge_table.setHorizontalHeaderLabels([
+            "Nadpis", "Platforma / prostředí", "Ověřený postup",
+        ])
+        self.knowledge_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.knowledge_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.knowledge_table.setAlternatingRowColors(True)
+        self.knowledge_table.setWordWrap(True)
+        self.knowledge_table.verticalHeader().setVisible(False)
+        header = self.knowledge_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self.knowledge_table.itemChanged.connect(self.mark_knowledge_dirty)
+        layout.addWidget(self.knowledge_table)
+        actions = QHBoxLayout()
+        self.knowledge_add = QPushButton("Přidat poznámku", tab)
+        self.knowledge_add.clicked.connect(self.add_knowledge_row)
+        actions.addWidget(self.knowledge_add)
+        self.knowledge_remove = QPushButton("Odebrat vybranou", tab)
+        self.knowledge_remove.clicked.connect(self.remove_knowledge_row)
+        actions.addWidget(self.knowledge_remove)
+        self.knowledge_save = QPushButton("Uložit cíl", tab)
+        self.knowledge_save.clicked.connect(self.save_knowledge_target)
+        actions.addWidget(self.knowledge_save)
+        actions.addStretch()
+        layout.addLayout(actions)
+        self.knowledge_dirty = False
+        self.knowledge_tab = tab
+        self.tabs.addTab(tab, "Znalostní báze")
+        self.update_knowledge_editability()
+
+    def knowledge_request_target(self):
+        return self.server_request_target()
+
+    def refresh_knowledge_targets(self):
+        base_url, headers = self.knowledge_request_target()
+        current = (
+            self.knowledge_target_type.currentData(), self.knowledge_target_id.text().strip(),
+        )
+        try:
+            response = requests.get(f"{base_url}/notes", headers=headers, timeout=5)
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            targets = sorted({
+                (str(note.get("target_type", "")), str(note.get("target_id", "")))
+                for note in payload.get("notes", []) if isinstance(note, dict)
+            })
+            self.knowledge_known_targets.blockSignals(True)
+            self.knowledge_known_targets.clear()
+            self.knowledge_known_targets.addItem("— vyber uložený cíl —", None)
+            for target_type, target_id in targets:
+                self.knowledge_known_targets.addItem(
+                    f"{target_type} · {target_id}", (target_type, target_id),
+                )
+            self.knowledge_known_targets.blockSignals(False)
+            self.knowledge_status.setText(f"Databáze obsahuje {len(targets)} cílů.")
+            if current[1]:
+                self.set_knowledge_target(*current)
+        except Exception as error:
+            self.knowledge_status.setText(f"Načtení znalostní báze selhalo: {error}")
+
+    def on_knowledge_known_target_selected(self, index):
+        target = self.knowledge_known_targets.itemData(index)
+        if isinstance(target, tuple) and len(target) == 2:
+            self.set_knowledge_target(*target)
+            self.load_knowledge_target()
+
+    def set_knowledge_target(self, target_type, target_id):
+        index = self.knowledge_target_type.findData(target_type)
+        self.knowledge_target_type.setCurrentIndex(max(0, index))
+        self.knowledge_target_id.setText(target_id)
+
+    def load_knowledge_target(self):
+        target_type = self.knowledge_target_type.currentData()
+        target_id = self.knowledge_target_id.text().strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", target_id):
+            self.knowledge_status.setText("ID musí začínat písmenem nebo číslem a být bezpečný slug.")
+            return
+        base_url, headers = self.knowledge_request_target()
+        try:
+            response = requests.get(
+                f"{base_url}/notes/{target_type}/{target_id}", headers=headers, timeout=5,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            self.render_knowledge_notes(payload.get("notes", []))
+        except Exception as error:
+            self.knowledge_status.setText(f"Načtení poznámek selhalo: {error}")
+
+    def render_knowledge_notes(self, notes):
+        self.knowledge_table.blockSignals(True)
+        self.knowledge_table.setRowCount(0)
+        for note in notes if isinstance(notes, list) else []:
+            if not isinstance(note, dict):
+                continue
+            row = self.knowledge_table.rowCount()
+            self.knowledge_table.insertRow(row)
+            for column, value in enumerate((
+                note.get("title", ""), note.get("platform", "Obecné"), note.get("body", ""),
+            )):
+                self.knowledge_table.setItem(row, column, QTableWidgetItem(str(value)))
+        self.knowledge_table.resizeRowsToContents()
+        self.knowledge_table.blockSignals(False)
+        self.knowledge_dirty = False
+        self.knowledge_status.setText(
+            f"Načteno {self.knowledge_table.rowCount()} poznámek."
+            if self.knowledge_table.rowCount() else "Tento cíl zatím nemá poznámky."
+        )
+
+    def mark_knowledge_dirty(self, _item=None):
+        self.knowledge_dirty = True
+        self.knowledge_status.setText("Cíl má neuložené změny.")
+
+    def add_knowledge_row(self):
+        row = self.knowledge_table.rowCount()
+        self.knowledge_table.insertRow(row)
+        for column, value in enumerate(("Nový tip", "Obecné", "Popiš ověřený postup…")):
+            self.knowledge_table.setItem(row, column, QTableWidgetItem(value))
+        self.knowledge_table.setCurrentCell(row, 0)
+        self.knowledge_table.editItem(self.knowledge_table.item(row, 0))
+
+    def remove_knowledge_row(self):
+        rows = sorted({item.row() for item in self.knowledge_table.selectedItems()}, reverse=True)
+        for row in rows:
+            self.knowledge_table.removeRow(row)
+        if rows:
+            self.mark_knowledge_dirty()
+
+    def save_knowledge_target(self):
+        target_type = self.knowledge_target_type.currentData()
+        target_id = self.knowledge_target_id.text().strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", target_id):
+            self.knowledge_status.setText("Nejdřív zadej platné stabilní ID cíle.")
+            return
+        headers = self.local_operation_headers("server.registry")
+        if not is_host_management_mode(self.app_mode) or not headers:
+            self.knowledge_status.setText("Uložení vyžaduje správu hostitele a PAM oprávnění.")
+            return
+        notes = []
+        for row in range(self.knowledge_table.rowCount()):
+            values = [
+                self.knowledge_table.item(row, column).text().strip()
+                if self.knowledge_table.item(row, column) else ""
+                for column in range(3)
+            ]
+            if any(not value for value in values):
+                self.knowledge_status.setText("Každý řádek musí mít nadpis, platformu a postup.")
+                return
+            notes.append({"title": values[0], "platform": values[1], "body": values[2]})
+        try:
+            response = requests.put(
+                f"{self.host_management_api_url()}/notes/{target_type}/{target_id}",
+                json={"notes": notes}, headers=headers, timeout=8,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            self.render_knowledge_notes(payload.get("notes", []))
+            self.knowledge_status.setText(payload.get("message", "Poznámky byly uloženy."))
+            self.refresh_knowledge_targets()
+        except Exception as error:
+            self.knowledge_status.setText(f"Uložení poznámek selhalo: {error}")
+
+    def update_knowledge_editability(self):
+        if not hasattr(self, "knowledge_table"):
+            return
+        allowed = is_host_management_mode(self.app_mode) and bool(
+            self.local_operation_headers("server.registry")
+        )
+        self.knowledge_table.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
+            if allowed else QAbstractItemView.NoEditTriggers
+        )
+        self.knowledge_add.setEnabled(allowed)
+        self.knowledge_remove.setEnabled(allowed)
+        self.knowledge_save.setEnabled(allowed)
 
     def launcher_api_url(self):
         if is_host_management_mode(self.app_mode):
@@ -2604,6 +2828,7 @@ class GameMover(QWidget):
         ):
             field.setReadOnly(server_mode or tunnel_mode or not connection_editing)
         self.update_management_action_availability()
+        self.update_knowledge_editability()
         if hasattr(self, "security_status_label"):
             self.update_security_mode_ui()
         if hasattr(self, "security_tunnel_panel"):
@@ -3264,6 +3489,67 @@ class GameMover(QWidget):
             "delete_status": delete_status,
             "delete_progress": delete_progress,
         }
+
+        notes_page = QWidget(sections)
+        notes_layout = QVBoxLayout(notes_page)
+        notes_help = QLabel(
+            "Vlastní ověřené postupy pro tuto hru nebo server. Platforma určuje, "
+            "pro jaký systém, launcher či grafické prostředí tip platí.",
+            notes_page,
+        )
+        notes_help.setWordWrap(True)
+        notes_layout.addWidget(notes_help)
+        notes_status = QLabel("", notes_page)
+        notes_status.setWordWrap(True)
+        notes_status.setStyleSheet("color: #aab7c0;")
+        notes_layout.addWidget(notes_status)
+        notes_table = QTableWidget(notes_page)
+        notes_table.setColumnCount(3)
+        notes_table.setHorizontalHeaderLabels(["Nadpis", "Platforma / prostředí", "Postup"])
+        notes_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        notes_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        notes_table.setAlternatingRowColors(True)
+        notes_table.setWordWrap(True)
+        notes_table.verticalHeader().setVisible(False)
+        notes_header = notes_table.horizontalHeader()
+        notes_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        notes_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        notes_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        notes_layout.addWidget(notes_table)
+        notes_actions = QHBoxLayout()
+        note_add = QPushButton("Přidat poznámku", notes_page)
+        note_add.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.add_server_note_row(selected_id)
+        )
+        notes_actions.addWidget(note_add)
+        note_remove = QPushButton("Odebrat vybranou", notes_page)
+        note_remove.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.remove_selected_server_note(selected_id)
+        )
+        notes_actions.addWidget(note_remove)
+        note_save = QPushButton("Uložit poznámky", notes_page)
+        note_save.clicked.connect(
+            lambda _checked=False, selected_id=server_id:
+            self.save_server_notes(selected_id)
+        )
+        notes_actions.addWidget(note_save)
+        notes_actions.addStretch()
+        notes_layout.addLayout(notes_actions)
+        sections.addTab(notes_page, "Poznámky")
+        entry.update({
+            "notes_status": notes_status,
+            "notes_table": notes_table,
+            "note_add": note_add,
+            "note_remove": note_remove,
+            "note_save": note_save,
+            "notes_dirty": False,
+        })
+        notes_table.itemChanged.connect(
+            lambda _item, selected_id=server_id: self.mark_server_notes_dirty(selected_id)
+        )
+        self.render_server_notes(entry, server.get("notes", []))
 
         logs_page = QWidget(sections)
         logs_layout = QVBoxLayout(logs_page)
@@ -3977,6 +4263,103 @@ class GameMover(QWidget):
         if is_host_management_mode(self.app_mode) and self.timekpr_token:
             self.load_security_policies()
 
+    def render_server_notes(self, entry, notes):
+        table = entry.get("notes_table")
+        if table is None or entry.get("notes_dirty"):
+            return
+        notes = notes if isinstance(notes, list) else []
+        table.blockSignals(True)
+        table.setRowCount(0)
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            row = table.rowCount()
+            table.insertRow(row)
+            for column, value in enumerate((
+                note.get("title", ""), note.get("platform", "Obecné"),
+                note.get("body", ""),
+            )):
+                table.setItem(row, column, QTableWidgetItem(str(value)))
+        table.resizeRowsToContents()
+        table.blockSignals(False)
+        entry["notes_status"].setText(
+            f"Uloženo {table.rowCount()} poznámek."
+            if table.rowCount() else "Pro tento cíl zatím nejsou uložené žádné poznámky."
+        )
+
+    def mark_server_notes_dirty(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_table" not in entry:
+            return
+        entry["notes_dirty"] = True
+        entry["notes_status"].setText("Poznámky mají neuložené změny.")
+
+    def add_server_note_row(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_table" not in entry:
+            return
+        table = entry["notes_table"]
+        row = table.rowCount()
+        table.insertRow(row)
+        for column, value in enumerate(("Nový tip", "Obecné", "Popiš ověřený postup…")):
+            table.setItem(row, column, QTableWidgetItem(value))
+        table.setCurrentCell(row, 0)
+        table.editItem(table.item(row, 0))
+
+    def remove_selected_server_note(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_table" not in entry:
+            return
+        table = entry["notes_table"]
+        rows = sorted({item.row() for item in table.selectedItems()}, reverse=True)
+        for row in rows:
+            table.removeRow(row)
+        if rows:
+            self.mark_server_notes_dirty(server_id)
+
+    def save_server_notes(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_table" not in entry:
+            return
+        headers = self.local_operation_headers("server.registry")
+        if not is_host_management_mode(self.app_mode) or not headers:
+            QMessageBox.warning(
+                self, "Poznámky",
+                "Uložení poznámek vyžaduje správu hostitele a oprávnění k registru serverů.",
+            )
+            return
+        table = entry["notes_table"]
+        notes = []
+        for row in range(table.rowCount()):
+            values = [
+                table.item(row, column).text().strip()
+                if table.item(row, column) else ""
+                for column in range(3)
+            ]
+            title, platform, body = values
+            if not title or not platform or not body:
+                QMessageBox.warning(
+                    self, "Poznámky",
+                    "Každá poznámka musí mít nadpis, platformu/prostředí a postup.",
+                )
+                table.setCurrentCell(row, values.index("") if "" in values else 0)
+                return
+            notes.append({"title": title, "platform": platform, "body": body})
+        try:
+            response = requests.put(
+                f"{self.host_management_api_url()}/notes/server/{server_id}",
+                json={"notes": notes}, headers=headers, timeout=8,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            entry["notes_dirty"] = False
+            self.render_server_notes(entry, payload.get("notes", []))
+            entry["notes_status"].setText(payload.get("message", "Poznámky byly uloženy."))
+            self.refresh_server_statuses()
+        except Exception as error:
+            entry["notes_status"].setText(f"Uložení poznámek selhalo: {error}")
+
     def update_server_management_page(self, server):
         entry = self.server_management_pages.get(server.get("id"))
         if not entry:
@@ -4014,6 +4397,7 @@ class GameMover(QWidget):
             )
         entry["players"].setText(self.server_players_text(server))
         entry["runtime"].setText(server.get("runtime_label", server.get("service", "—")))
+        self.render_server_notes(entry, server.get("notes", []))
         entry["edit_endpoints"].setEnabled(
             is_host_management_mode(self.app_mode)
             and bool(self.local_operation_headers("server.registry"))
@@ -4026,6 +4410,16 @@ class GameMover(QWidget):
         )
         entry["permissions"].setText(summary or "Pro tento server nejsou definované provozní akce")
         management = is_host_management_mode(self.app_mode)
+        notes_allowed = management and bool(
+            self.local_operation_headers("server.registry")
+        )
+        entry["notes_table"].setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
+            if notes_allowed else QAbstractItemView.NoEditTriggers
+        )
+        entry["note_add"].setEnabled(notes_allowed)
+        entry["note_remove"].setEnabled(notes_allowed)
+        entry["note_save"].setEnabled(notes_allowed)
         enabled_states = {
             "start": ("inactive", "failed"),
             "stop": ("active", "activating"),
