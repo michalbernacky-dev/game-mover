@@ -185,6 +185,10 @@ tab; it is never silently retried with broader credentials.
 The Timekpr user selector is built from the managed host's live interactive login
 accounts, not from directory names left under `/home`. System/service identities
 are hidden, while the editable field still permits an exceptional manual target.
+Timekpr uses the same contextual **Unlock PAM** dialog as the other management
+tabs; its UI only notes that the authenticating account must belong to `wheel`.
+The **Security** tab also offers **Lock now**, which revokes the token on the host
+immediately instead of waiting for its normal expiry.
 
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
@@ -650,6 +654,10 @@ nikdy nezkouší potichu opakovat s širšími oprávněními.
 Výběr uživatele v Timekpr se po ověření skládá z živých interaktivních účtů
 spravovaného hostitele, nikoli ze zbytků adresářů v `/home`. Servisní účty se
 skrývají; editovatelné pole nadále dovoluje výjimečný ručně zadaný cíl.
+Timekpr používá stejný dialog **Odemknout PAM** jako ostatní správcovské záložky;
+v kartě zůstává pouze upozornění, že ověřující účet musí patřit do `wheel`.
+Záložka **Zabezpečení** nabízí také **Uzamknout nyní**, které token okamžitě
+zneplatní na hostiteli bez čekání na běžné vypršení relace.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se

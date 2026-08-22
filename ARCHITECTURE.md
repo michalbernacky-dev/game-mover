@@ -174,6 +174,8 @@ control. All of them use the same short-lived backend session token; credentials
 exist only for the authentication request and are never retained by the GUI.
 The authentication response also supplies the host's filtered interactive-user
 catalog so Timekpr never mistakes orphaned home directories for active accounts.
+An explicit Security-tab lock calls the loopback-only logout endpoint, revokes the
+presented token server-side, and clears all corresponding GUI state.
 
 The Minecraft installer opens **Minecraft: Modpacks** as a single closable,
 contextual tab instead of making Minecraft-specific discovery part of the

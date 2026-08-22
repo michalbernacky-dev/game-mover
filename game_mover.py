@@ -1666,20 +1666,14 @@ class GameMover(QWidget):
         layout.addWidget(self.timekpr_status_label)
 
         auth_row = QHBoxLayout()
-        auth_row.addWidget(QLabel("Přihlásit jako (wheel):"))
-        self.timekpr_auth_user_combo = QComboBox(self)
-        self.timekpr_auth_user_combo.setEditable(True)
-        wheel_users = list_wheel_users()
-        if self.user not in wheel_users:
-            wheel_users.insert(0, self.user)
-        self.timekpr_auth_user_combo.addItems(wheel_users)
-        auth_row.addWidget(self.timekpr_auth_user_combo)
-        self.timekpr_auth_pass = QLineEdit(self)
-        self.timekpr_auth_pass.setEchoMode(QLineEdit.Password)
-        self.timekpr_auth_pass.setPlaceholderText("heslo wheel uživatele")
-        auth_row.addWidget(self.timekpr_auth_pass)
-        self.timekpr_unlock_button = QPushButton("Ověřit", self)
-        self.timekpr_unlock_button.clicked.connect(self.unlock_timekpr)
+        self.timekpr_wheel_note = QLabel(
+            "Ověření vyžaduje účet ve skupině wheel.", tab,
+        )
+        self.timekpr_wheel_note.setStyleSheet("color: #aab7c0;")
+        auth_row.addWidget(self.timekpr_wheel_note, 1)
+        self.timekpr_unlock_button = self.create_host_pam_button(
+            "správu Timekpr", tab, self.on_timekpr_pam_unlocked,
+        )
         auth_row.addWidget(self.timekpr_unlock_button)
         layout.addLayout(auth_row)
 
@@ -1879,13 +1873,20 @@ class GameMover(QWidget):
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
+        host_pam_row = QHBoxLayout()
+        self.security_host_pam_status = QLabel("PAM relace hostitele: uzamčeno", content)
+        self.security_host_pam_status.setStyleSheet("color: #aab7c0;")
+        host_pam_row.addWidget(self.security_host_pam_status, 1)
+        host_pam_row.addWidget(
+            self.create_host_pam_button("bezpečnostní zásady hostitele", content)
+        )
+        self.security_host_pam_lock_button = QPushButton("Uzamknout nyní", content)
+        self.security_host_pam_lock_button.clicked.connect(self.lock_host_pam_session)
+        host_pam_row.addWidget(self.security_host_pam_lock_button)
+        layout.addLayout(host_pam_row)
         self.security_status_label = QLabel("Zásady zatím nejsou načtené.", content)
         self.security_status_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.security_status_label)
-        layout.addWidget(
-            self.create_host_pam_button("bezpečnostní zásady hostitele", content),
-            0, Qt.AlignLeft,
-        )
 
         layout.addWidget(QLabel("Vzdálená správa hostitele:", content))
         tunnel_unlock_row = QHBoxLayout()
@@ -2356,6 +2357,14 @@ class GameMover(QWidget):
             self.security_load_button, self.security_save_button,
         ):
             widget.setEnabled(enabled)
+        self.security_host_pam_lock_button.setEnabled(enabled)
+        self.security_host_pam_status.setText(
+            "PAM relace hostitele: odemčeno"
+            if enabled else "PAM relace hostitele: uzamčeno"
+        )
+        self.security_host_pam_status.setStyleSheet(
+            "color: #69db7c; font-weight: bold;" if enabled else "color: #aab7c0;"
+        )
         if not is_host_management_mode(self.app_mode):
             text = (
                 "Zásady hostitele jsou dostupné v místním režimu Server nebo po otevření "
@@ -3194,12 +3203,43 @@ class GameMover(QWidget):
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
 
-    def create_host_pam_button(self, context, parent=None):
+    def lock_host_pam_session(self, _checked=False):
+        """Revoke the backend PAM session and always discard its local copy."""
+        if not self.timekpr_token:
+            return
+        headers = self.local_pam_headers()
+        warning = ""
+        try:
+            response = requests.post(
+                f"{self.host_management_api_url()}/timekpr/logout",
+                headers=headers, timeout=8,
+            )
+            if response.status_code != 200:
+                warning = f"hostitel odpověděl HTTP {response.status_code}"
+        except Exception as error:
+            warning = str(error)
+        finally:
+            self.timekpr_token = ""
+            self.timekpra_mode = None
+            self.timekpra_add_flag = None
+            self.original_hours_today = {}
+            self.security_payload = None
+            self.set_timekpr_controls_enabled(False)
+            self.update_server_mode_ui()
+        if warning:
+            QMessageBox.warning(
+                self, "PAM",
+                "Místní relace je uzamčená. Backendovou relaci se nepodařilo "
+                f"výslovně zneplatnit; sama vyprší. ({warning})",
+            )
+
+    def create_host_pam_button(self, context, parent=None, on_unlocked=None):
         """Create a contextual control backed by the shared host PAM session."""
         button = QPushButton("Odemknout PAM…", parent or self)
         button.setProperty("pam_context", context)
         button.clicked.connect(
-            lambda _checked=False, target=context: self.show_host_pam_dialog(target)
+            lambda _checked=False, target=context, callback=on_unlocked:
+            self.show_host_pam_dialog(target, callback)
         )
         self.host_pam_buttons.append(button)
         self.update_host_pam_buttons()
@@ -3289,7 +3329,7 @@ class GameMover(QWidget):
             self.timekpr_user_combo.setCurrentText(preferred)
         self.timekpr_user_combo.blockSignals(False)
 
-    def show_host_pam_dialog(self, context="správu hostitele"):
+    def show_host_pam_dialog(self, context="správu hostitele", on_unlocked=None):
         if not is_host_management_mode(self.app_mode):
             QMessageBox.warning(
                 self, "PAM",
@@ -3335,7 +3375,9 @@ class GameMover(QWidget):
             QMessageBox.warning(self, "PAM", "Zadej wheel uživatele a heslo.")
             return
         try:
-            self.authenticate_host_pam(pam_user, pam_password)
+            payload = self.authenticate_host_pam(pam_user, pam_password)
+            if callable(on_unlocked):
+                on_unlocked(payload)
         except requests.ConnectionError:
             guidance = (
                 "Zkontroluj spuštěný SSH tunel."
@@ -3348,6 +3390,17 @@ class GameMover(QWidget):
             )
         except Exception as error:
             QMessageBox.critical(self, "PAM", str(error))
+
+    def on_timekpr_pam_unlocked(self, payload):
+        if self.timekpra_mode in ("settimeleft", "addflag") and self.timekpr_token:
+            self.fetch_day_plan()
+            return
+        detail = payload.get("error") or "server nevrátil podporovaný mód"
+        QMessageBox.warning(
+            self, "Timekpr",
+            "PAM je odemčený pro ostatní správu, ale Timekpr není "
+            f"použitelný: {detail}",
+        )
 
     def host_pam_session_expired(self, detail=""):
         """Fail closed immediately when the host rejects a cached PAM session."""
@@ -6656,44 +6709,6 @@ class GameMover(QWidget):
             color = "#ff6666" if free else "#66cc66"
             segments.append(f'<span style="color:{color}">{start_str} - {end_str}</span>')
         return " | ".join(segments)
-
-    def unlock_timekpr(self):
-        """Ověří wheel uživatele a použije společnou PAM relaci také pro Timekpr."""
-        username = self.timekpr_auth_user_combo.currentText()
-        password = self.timekpr_auth_pass.text()
-        if not username or not password:
-            QMessageBox.warning(self, "Timekpr", "Zadej uživatele a heslo (wheel).")
-            return
-        try:
-            data = self.authenticate_host_pam(username, password)
-            if self.timekpra_mode in ("settimeleft", "addflag") and self.timekpr_token:
-                self.fetch_day_plan()
-            else:
-                detail = data.get("error") or "server nevrátil podporovaný mód"
-                QMessageBox.warning(
-                    self, "Timekpr",
-                    "PAM je odemčený pro ostatní správu, ale Timekpr není "
-                    f"použitelný: {detail}",
-                )
-        except requests.ConnectionError:
-            backend_url = self.timekpr_api_url()
-            guidance = (
-                "Zkontroluj spuštěný SSH tunel."
-                if self.app_mode == "ssh_tunnel"
-                else "Spusť jej příkazem: sudo systemctl enable --now game_mover.service"
-            )
-            QMessageBox.critical(
-                self, "Timekpr",
-                f"Game Mover backend na {backend_url} není dostupný.\n{guidance}",
-            )
-            self.set_timekpr_controls_enabled(False)
-            self.update_server_mode_ui()
-        except Exception as e:
-            QMessageBox.critical(self, "Timekpr", str(e))
-            self.set_timekpr_controls_enabled(False)
-            self.update_server_mode_ui()
-        finally:
-            self.timekpr_auth_pass.setText("")
 
     def load_timekpr_status(self):
         """Načte schopnosti timekpra z Flasku běžícího jako root, požaduje tajný klíč."""

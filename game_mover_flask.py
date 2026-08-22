@@ -1291,6 +1291,16 @@ def require_token(req):
         return None
     return user
 
+
+def revoke_token(req):
+    """Invalidate the exact PAM session presented by a loopback client."""
+    payload = req.get_json(silent=True) or {}
+    token = req.headers.get("X-Timekpr-Token") or payload.get("token")
+    if not token or not require_token(req):
+        return False
+    TIMEKPRA_TOKENS.pop(token, None)
+    return True
+
 def require_local_pam_session(req):
     return req.remote_addr in ("127.0.0.1", "::1") and bool(require_token(req))
 
@@ -3193,6 +3203,13 @@ def managed_dns_config():
 # ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
+@app.route("/timekpr/logout", methods=["POST"])
+def timekpr_logout():
+    if request.remote_addr not in ("127.0.0.1", "::1") or not revoke_token(request):
+        return jsonify({"message": "Unauthorized"}), 403
+    return jsonify({"message": "PAM relace byla okamžitě uzamčena"})
+
+
 @app.route("/timekpr/status", methods=["GET"])
 def timekpr_status():
     user = require_token(request)

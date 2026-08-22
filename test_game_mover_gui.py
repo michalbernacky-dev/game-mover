@@ -344,7 +344,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.timekpr_user_combo.itemText(index)
             for index in range(self.window.timekpr_user_combo.count())
         ], ["dave", "alice", "bob", "carol"])
-        self.assertEqual(len(self.window.host_pam_buttons), 6)
+        self.assertEqual(len(self.window.host_pam_buttons), 7)
         self.assertTrue(all(
             button.text() == "PAM odemčeno" and not button.isEnabled()
             for button in self.window.host_pam_buttons
@@ -354,6 +354,12 @@ class ServerManagementGuiTest(unittest.TestCase):
             json={"username": "admin", "password": "secret"}, timeout=8,
         )
 
+    def test_timekpr_uses_shared_pam_control_without_inline_password(self):
+        self.assertIn("wheel", self.window.timekpr_wheel_note.text())
+        self.assertIn(self.window.timekpr_unlock_button, self.window.host_pam_buttons)
+        self.assertFalse(hasattr(self.window, "timekpr_auth_pass"))
+        self.assertFalse(hasattr(self.window, "timekpr_auth_user_combo"))
+
     def test_host_pam_controls_stay_locked_in_read_only_client_mode(self):
         self.window.app_mode = "client"
         self.window.timekpr_token = ""
@@ -362,6 +368,24 @@ class ServerManagementGuiTest(unittest.TestCase):
             button.text() == "Odemknout PAM…" and not button.isEnabled()
             for button in self.window.host_pam_buttons
         ))
+
+    def test_security_tab_can_immediately_revoke_shared_pam_session(self):
+        self.window.app_mode = "server"
+        self.window.timekpr_token = "temporary-host-token"
+        self.window.update_security_mode_ui()
+        self.assertTrue(self.window.security_host_pam_lock_button.isEnabled())
+        self.assertIn("odemčeno", self.window.security_host_pam_status.text())
+        response = MagicMock(status_code=200)
+        with (
+            patch.object(game_mover.requests, "post", return_value=response) as post,
+            patch.object(self.window, "update_server_mode_ui"),
+        ):
+            self.window.lock_host_pam_session()
+        self.assertEqual(self.window.timekpr_token, "")
+        post.assert_called_once_with(
+            "http://127.0.0.1:5000/timekpr/logout",
+            headers={"X-Timekpr-Token": "temporary-host-token"}, timeout=8,
+        )
 
     def test_modpack_catalog_renders_projects_and_server_pack_install_action(self):
         self.window.open_modpack_catalog(version="1.20.1", loader="fabric")

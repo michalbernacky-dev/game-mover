@@ -111,6 +111,17 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_pam_logout_immediately_revokes_presented_session(self):
+        response = self.client.post(
+            "/timekpr/logout", **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("test-session", backend.TIMEKPRA_TOKENS)
+        denied = self.client.get(
+            "/timekpr/status", **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def save_servers(self):
         response = self.client.put(
             "/servers/config", json={"servers": self.servers},
