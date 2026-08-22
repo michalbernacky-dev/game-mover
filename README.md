@@ -134,7 +134,12 @@ start/stop/restart/backup policies for every registered server. `silent` uses
 the host-local `api.token`, `pam` requires a valid wheel-user session, and
 `disabled` rejects the operation in the backend. In SSH tunnel mode the PAM
 session may also authorize a `silent` operation, so `api.token` never leaves the
-host. Timekpr administration and changes to the security registry itself are
+host. Mover actions (`game.move`, `game.link`, `library.permissions`,
+`steam.cache`), knowledge edits (`knowledge.manage`) and legacy dnsmasq shutdown
+(`dnsmasq.stop`) have independent rows instead of inheriting an unrelated
+server or DNS setting. Local Mover actions always read the workstation's own
+policy registry and never reuse a managed remote host's token. Timekpr
+administration and changes to the security registry itself are
 shown in the same table style as fixed, disabled controls with the only policy
 **Requires PAM**; they cannot be weakened in the GUI or API.
 
@@ -142,10 +147,10 @@ Policies are stored atomically in `/etc/game_mover/security.json`. On the first
 load, per-server values are migrated in memory from legacy `permissions` or
 `control_auth` fields in `/etc/game_mover/servers.json`; saving the Security tab
 creates the central file. The service registry no longer edits authorization.
-The same tab contains the otherwise hidden managed-tunnel controls. Revealing
-them requires PAM against the notebook's local Game Mover service; opening the
-tunnel does not reuse that token for the host. A second host PAM login is always
-required for administrative API operations.
+The same tab contains the otherwise hidden local-PAM and managed-tunnel controls.
+Local PAM authorizes protected Mover actions and creation of the SSH tunnel;
+opening the tunnel does not reuse that token for the host. A second host PAM
+login is always required for administrative API operations.
 
 ### Per-server management tabs
 

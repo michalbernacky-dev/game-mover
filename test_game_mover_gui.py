@@ -40,6 +40,7 @@ class ServerManagementGuiTest(unittest.TestCase):
     def setUp(self):
         no_op_methods = (
             "refresh_server_statuses",
+            "refresh_local_operation_policies",
             "refresh_cache_status",
             "refresh_dnsmasq_status",
             "refresh_launcher_statuses",
@@ -57,6 +58,30 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.window = game_mover.GameMover()
         self.window.last_server_statuses = [dict(SAMPLE_SERVER)]
         self.window.render_server_cards(self.window.last_server_statuses)
+
+    def test_mover_uses_only_local_policy_and_credentials(self):
+        self.window.local_admin_token = "silent-token"
+        self.window.local_operation_policies["game.move"] = "silent"
+        with patch.object(
+            game_mover, "load_local_admin_token", return_value="silent-token",
+        ):
+            self.assertEqual(
+                self.window.local_mover_operation_headers("game.move"),
+                {game_mover.LOCAL_ADMIN_TOKEN_HEADER: "silent-token"},
+            )
+
+        self.window.app_mode = "client"
+        self.window.timekpr_token = "remote-host-token"
+        self.window.local_security_token = "local-pam-token"
+        self.window.local_operation_policies["game.move"] = "pam"
+        self.assertEqual(
+            self.window.local_mover_operation_headers("game.move"),
+            {"X-Timekpr-Token": "local-pam-token"},
+        )
+        self.window.local_operation_policies["game.move"] = "disabled"
+        self.assertEqual(
+            self.window.local_mover_operation_headers("game.move"), {},
+        )
 
     def test_launcher_tab_renders_outdated_and_missing_items(self):
         self.window.on_launcher_statuses_loaded({

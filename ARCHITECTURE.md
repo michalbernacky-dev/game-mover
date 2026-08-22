@@ -179,7 +179,12 @@ presented token server-side, and clears all corresponding GUI state.
 Server-scoped knowledge uses the same compact master-detail interaction as the
 global knowledge view so long procedures never determine table-row height.
 Legacy system `dnsmasq` conflict handling belongs to Network rather than Mover;
-its stop action uses the same `dns.config` policy as other managed DNS mutations.
+its stop action has an independent `dnsmasq.stop` policy. Mover mutations
+(`game.move`, `game.link`, `library.permissions`, and `steam.cache`) and edits to
+the shared knowledge base (`knowledge.manage`) are likewise independently
+configurable as silent, PAM-protected, or disabled. The GUI reads Mover policy
+state from the local backend even while a different host is managed over SSH,
+so credentials and authorization decisions cannot cross those boundaries.
 
 The Minecraft installer opens **Minecraft: Modpacks** as a single closable,
 contextual tab instead of making Minecraft-specific discovery part of the

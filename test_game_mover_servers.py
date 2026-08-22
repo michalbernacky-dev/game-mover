@@ -135,6 +135,91 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         stop.assert_called_once_with("dnsmasq")
 
+    def test_local_policy_catalog_is_local_only(self):
+        response = self.client.get(
+            "/security/local-policies", **self.local_options(),
+        )
+        self.assertEqual(response.status_code, 200)
+        policies = response.get_json()["operation_policies"]
+        self.assertEqual(policies["game.move"], "silent")
+        self.assertEqual(policies["knowledge.manage"], "pam")
+
+        denied = self.client.get(
+            "/security/local-policies",
+            environ_base={"REMOTE_ADDR": "192.0.2.20"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+    def test_new_local_operations_can_be_disabled_before_side_effects(self):
+        response = self.client.get(
+            "/security/policies", **self.local_options(self.pam_headers),
+        )
+        policies = response.get_json()["policies"]
+        operations = {
+            "game.move": ("/move_game", {"platform": "steam"}),
+            "game.link": ("/create_symlink", {"platform": "steam"}),
+            "library.permissions": ("/fix_perms", {"path": self.temp_dir.name}),
+            "steam.cache": ("/set_steam_cache", {"user": "tester"}),
+        }
+        for operation in operations:
+            policies["global"][operation] = "disabled"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        with patch.object(backend, "set_group_perms") as set_perms:
+            for operation, (path, payload) in operations.items():
+                with self.subTest(operation=operation):
+                    response = self.client.post(
+                        path, json=payload,
+                        **self.local_options(self.pam_headers),
+                    )
+                    self.assertEqual(response.status_code, 403)
+        set_perms.assert_not_called()
+
+    def test_mover_policy_accepts_silent_token_and_pam_mode(self):
+        response = self.client.get(
+            "/security/policies", **self.local_options(self.pam_headers),
+        )
+        policies = response.get_json()["policies"]
+        policies["global"]["library.permissions"] = "silent"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        with (
+            patch.object(backend, "load_local_admin_token", return_value="local-secret"),
+            patch.object(backend, "set_group_perms") as set_perms,
+        ):
+            response = self.client.post(
+                "/fix_perms", json={"path": self.temp_dir.name},
+                **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(response.status_code, 200)
+        set_perms.assert_called_once_with(self.temp_dir.name)
+
+        policies["global"]["library.permissions"] = "pam"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        with patch.object(backend, "set_group_perms") as set_perms:
+            denied = self.client.post(
+                "/fix_perms", json={"path": self.temp_dir.name},
+                **self.local_options(self.admin_headers),
+            )
+            allowed = self.client.post(
+                "/fix_perms", json={"path": self.temp_dir.name},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        set_perms.assert_called_once_with(self.temp_dir.name)
+
     def save_servers(self):
         response = self.client.put(
             "/servers/config", json={"servers": self.servers},
@@ -208,6 +293,38 @@ class ServerRegistryTest(unittest.TestCase):
         response = self.client.get("/notes", **self.local_options())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["notes"][0]["target_id"], "forge")
+
+    def test_knowledge_policy_is_independent_from_server_registry(self):
+        response = self.client.get(
+            "/security/policies", **self.local_options(self.pam_headers),
+        )
+        policies = response.get_json()["policies"]
+        policies["global"]["server.registry"] = "silent"
+        policies["global"]["knowledge.manage"] = "disabled"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        with patch.object(backend, "load_local_admin_token", return_value="local-secret"):
+            denied = self.client.put(
+                "/notes/game/example", json={"notes": []},
+                **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(denied.status_code, 403)
+
+        policies["global"]["knowledge.manage"] = "silent"
+        response = self.client.put(
+            "/security/policies", json={"policies": policies},
+            **self.local_options(self.pam_headers),
+        )
+        self.assertEqual(response.status_code, 200)
+        with patch.object(backend, "load_local_admin_token", return_value="local-secret"):
+            allowed = self.client.put(
+                "/notes/game/example", json={"notes": []},
+                **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(allowed.status_code, 200)
 
     def test_security_registry_requires_local_pam_and_applies_immediately(self):
         self.save_servers()

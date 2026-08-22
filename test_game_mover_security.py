@@ -66,6 +66,12 @@ class SecurityPolicyTest(unittest.TestCase):
         global_catalog = {item["id"]: item for item in payload["catalog"]["global"]}
         self.assertEqual(global_catalog["minecraft.delete"]["default"], "pam")
         self.assertEqual(global_catalog["launcher.update"]["default"], "pam")
+        self.assertEqual(global_catalog["game.move"]["default"], "silent")
+        self.assertEqual(global_catalog["game.link"]["default"], "silent")
+        self.assertEqual(global_catalog["library.permissions"]["default"], "silent")
+        self.assertEqual(global_catalog["steam.cache"]["default"], "silent")
+        self.assertEqual(global_catalog["knowledge.manage"]["default"], "pam")
+        self.assertEqual(global_catalog["dnsmasq.stop"]["default"], "pam")
         fixed = {item["id"]: item for item in payload["catalog"]["fixed"]}
         self.assertEqual(fixed["timekpr.manage"]["policy"], "pam")
         self.assertEqual(fixed["security.manage"]["policy"], "pam")

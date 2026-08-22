@@ -1456,7 +1456,7 @@ def api_list_shared():
 
 @app.route("/move_game", methods=["POST"])
 def move_game():
-    if not require_local_admin(request):
+    if not require_local_operation(request, "game.move"):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     platform = data.get("platform")
@@ -1500,7 +1500,7 @@ def move_game():
 
 @app.route("/create_symlink", methods=["POST"])
 def create_symlink():
-    if not require_local_admin(request):
+    if not require_local_operation(request, "game.link"):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     platform = data.get("platform")
@@ -1579,7 +1579,7 @@ def create_symlink():
 
 @app.route("/fix_perms", methods=["POST"])
 def fix_perms():
-    if not require_local_admin(request):
+    if not require_local_operation(request, "library.permissions"):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.json
     path = data.get("path")
@@ -1644,7 +1644,7 @@ def steam_cache_status():
 
 @app.route("/set_steam_cache", methods=["POST"])
 def set_steam_cache():
-    if not require_local_admin(request):
+    if not require_local_operation(request, "steam.cache"):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.json or {}
     user = data.get("user")
@@ -1743,6 +1743,14 @@ def servers_status():
     })
 
 
+@app.route("/security/local-policies", methods=["GET"])
+def local_operation_policies():
+    """Expose this workstation's policy modes to its local GUI."""
+    return jsonify({
+        "operation_policies": dict(load_security_config()["global"]),
+    })
+
+
 @app.route("/notes", methods=["GET"])
 def notes_catalog():
     try:
@@ -1777,7 +1785,7 @@ def target_notes(target_type, target_id):
                 "target_id": target_id,
                 "notes": list_notes(NOTES_DB_PATH, target_type, target_id),
             })
-        if not require_local_operation(request, "server.registry"):
+        if not require_local_operation(request, "knowledge.manage"):
             return jsonify({"message": "Unauthorized"}), 403
         notes = replace_notes(
             NOTES_DB_PATH, target_type, target_id,
@@ -3142,7 +3150,7 @@ def dnsmasq_status():
 
 @app.route("/dnsmasq/stop", methods=["POST"])
 def dnsmasq_stop():
-    if not require_local_operation(request, "dns.config"):
+    if not require_local_operation(request, "dnsmasq.stop"):
         return jsonify({"message": "Unauthorized"}), 403
     rc, status, err = systemctl_is_active("dnsmasq")
     if rc == 127:

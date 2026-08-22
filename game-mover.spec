@@ -178,7 +178,8 @@ fi
 - Keep the wheel-account requirement visible next to the contextual unlock control
 - Add immediate host-side PAM session revocation from the Security tab
 - Replace oversized server-note rows with a compact master-detail editor
-- Move dnsmasq status and shutdown from Mover to Network and protect it by DNS policy
+- Move dnsmasq status and shutdown from Mover to Network
+- Add independent silent, PAM, or disabled policies for Mover actions, notes, and dnsmasq
 
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.1-1
 - List only real interactive login accounts in Timekpr instead of every home directory

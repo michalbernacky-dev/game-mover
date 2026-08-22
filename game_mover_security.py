@@ -1,6 +1,6 @@
 """Security policy catalog and persistent configuration normalization."""
 
-SECURITY_CONFIG_VERSION = 1
+SECURITY_CONFIG_VERSION = 2
 POLICY_MODES = ("silent", "pam", "disabled")
 
 SERVER_ACTION_DEFINITIONS = (
@@ -11,6 +11,36 @@ SERVER_ACTION_DEFINITIONS = (
 )
 
 GLOBAL_OPERATION_DEFINITIONS = (
+    {
+        "id": "game.move",
+        "label": "Přesun herních dat",
+        "description": "Přesun hry do sdílené knihovny a vytvoření navazujících symlinků.",
+        "default": "silent",
+    },
+    {
+        "id": "game.link",
+        "label": "Připojení sdílené hry",
+        "description": "Vytvoření symlinku nebo kopie Wine prefixu pro vybraného uživatele.",
+        "default": "silent",
+    },
+    {
+        "id": "library.permissions",
+        "label": "Oprava oprávnění knihovny",
+        "description": "Rekurzivní úprava skupiny a oprávnění ve sdílené herní knihovně.",
+        "default": "silent",
+    },
+    {
+        "id": "steam.cache",
+        "label": "Sdílená Steam cache",
+        "description": "Přesun rozpracovaných Steam downloadů a vytvoření sdíleného symlinku.",
+        "default": "silent",
+    },
+    {
+        "id": "knowledge.manage",
+        "label": "Tipy a poznámky",
+        "description": "Přidávání, úpravy a mazání sdílených postupů ve znalostní bázi.",
+        "default": "pam",
+    },
     {
         "id": "server.registry",
         "label": "Registr serverů",
@@ -87,6 +117,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "id": "dns.config",
         "label": "Konfigurace herního DNS",
         "description": "Změny privátní DNS zóny, adres a vestavěného DNS provideru.",
+        "default": "pam",
+    },
+    {
+        "id": "dnsmasq.stop",
+        "label": "Vypnutí systémového dnsmasq",
+        "description": "Zastavení samostatné služby dnsmasq při konfliktu o DNS port 53.",
         "default": "pam",
     },
     {

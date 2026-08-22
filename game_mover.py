@@ -790,6 +790,7 @@ class GameMover(QWidget):
         self.launcher_update_policy = "pam"
         self.last_server_statuses = []
         self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
+        self.local_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
         self.security_payload = None
         self.ssh_tunnel_probe_timer = QTimer(self)
         self.ssh_tunnel_probe_timer.setInterval(250)
@@ -857,6 +858,7 @@ class GameMover(QWidget):
         self.setWindowTitle('Game Mover')
         self.setMinimumSize(720, 500)
         self.resize(960, 720)
+        self.refresh_local_operation_policies()
         self.refresh_cache_status()
         self.refresh_network_status()
         self.operation_refresh_timer = QTimer(self)
@@ -917,6 +919,9 @@ class GameMover(QWidget):
         self.label_move = QLabel('Hry k přesunu do sdílené knihovny:')
         layout.addWidget(self.label_move)
         self.game_combo_move = QComboBox(self)
+        self.game_combo_move.currentIndexChanged.connect(
+            self.update_mover_action_availability
+        )
         layout.addWidget(self.game_combo_move)
 
         self.move_button = QPushButton('Přesunout hru', self)
@@ -937,6 +942,9 @@ class GameMover(QWidget):
         self.symlink_list = QListWidget(self)
         self.symlink_list.setSelectionMode(QListWidget.SingleSelection)
         self.symlink_list.setMaximumHeight(200)
+        self.symlink_list.currentItemChanged.connect(
+            self.update_mover_action_availability
+        )
         layout.addWidget(self.symlink_list)
 
         self.label_source_user = QLabel('Zdrojový uživatel prefixu (pro GOG/Epic/Ubisoft):')
@@ -1455,9 +1463,9 @@ class GameMover(QWidget):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", target_id):
             self.knowledge_status.setText("Nejdřív zadej platné stabilní ID cíle.")
             return
-        headers = self.local_operation_headers("server.registry")
+        headers = self.local_operation_headers("knowledge.manage")
         if not is_host_management_mode(self.app_mode) or not headers:
-            self.knowledge_status.setText("Uložení vyžaduje správu hostitele a PAM oprávnění.")
+            self.knowledge_status.setText("Uložení poznámek není podle zásady povolené.")
             return
         notes = []
         for row in range(self.knowledge_table.rowCount()):
@@ -1495,7 +1503,7 @@ class GameMover(QWidget):
         if not hasattr(self, "knowledge_table"):
             return
         allowed = is_host_management_mode(self.app_mode) and bool(
-            self.local_operation_headers("server.registry")
+            self.local_operation_headers("knowledge.manage")
         )
         self.knowledge_table.setEditTriggers(
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
@@ -1878,10 +1886,11 @@ class GameMover(QWidget):
         self.security_status_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.security_status_label)
 
-        layout.addWidget(QLabel("Vzdálená správa hostitele:", content))
+        layout.addWidget(QLabel("Místní PAM a vzdálená správa hostitele:", content))
         tunnel_unlock_row = QHBoxLayout()
         self.security_tunnel_lock_status = QLabel(
-            "Nastavení spravovaného SSH tunelu je uzamčené.", content,
+            "Místní PAM operace a nastavení spravovaného SSH tunelu jsou uzamčené.",
+            content,
         )
         self.security_tunnel_lock_status.setStyleSheet("color: #aab7c0;")
         tunnel_unlock_row.addWidget(self.security_tunnel_lock_status, 1)
@@ -2003,12 +2012,13 @@ class GameMover(QWidget):
 
     def unlock_tunnel_management(self):
         dialog = QDialog(self)
-        dialog.setWindowTitle("Odemknout vzdálenou správu")
+        dialog.setWindowTitle("Odemknout místní chráněné operace")
         dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
         explanation = QLabel(
-            "Toto místní PAM ověření pouze zpřístupní vytvoření SSH tunelu. "
-            "Po jeho otevření bude správa hostitele vyžadovat samostatné PAM ověření.",
+            "Toto místní PAM ověření zpřístupní chráněné operace Moveru a vytvoření "
+            "SSH tunelu. Po otevření tunelu bude správa vzdáleného hostitele vyžadovat "
+            "samostatné PAM ověření.",
             dialog,
         )
         explanation.setWordWrap(True)
@@ -2051,9 +2061,10 @@ class GameMover(QWidget):
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
             self.local_security_token = payload["token"]
             self.security_tunnel_lock_status.setText(
-                f"Správa tunelu je místním PAM odemčená pro {local_user}."
+                f"Místní chráněné operace jsou PAM odemčené pro {local_user}."
             )
             self.update_security_tunnel_ui()
+            self.update_mover_action_availability()
         except requests.ConnectionError:
             QMessageBox.critical(
                 self, "Zabezpečení",
@@ -2071,9 +2082,10 @@ class GameMover(QWidget):
             return
         self.local_security_token = ""
         self.security_tunnel_lock_status.setText(
-            "Nastavení spravovaného SSH tunelu je uzamčené."
+            "Místní PAM operace a nastavení spravovaného SSH tunelu jsou uzamčené."
         )
         self.update_security_tunnel_ui()
+        self.update_mover_action_availability()
 
     def managed_ssh_tunnel_running(self):
         return bool(
@@ -2443,6 +2455,8 @@ class GameMover(QWidget):
         self.global_operation_policies = {
             **GLOBAL_OPERATION_DEFAULTS, **global_policies,
         }
+        if self.app_mode == "server":
+            self.local_operation_policies = dict(self.global_operation_policies)
         self.update_security_mode_ui()
         self.update_management_action_availability()
 
@@ -3216,9 +3230,66 @@ class GameMover(QWidget):
             )
         if self.server_management_pages:
             self.update_open_server_management_pages()
+        self.update_mover_action_availability()
 
     def local_pam_headers(self):
         return {"X-Timekpr-Token": self.timekpr_token} if self.timekpr_token else {}
+
+    def local_mover_operation_headers(self, operation):
+        """Authorize operations that always target this workstation's game library."""
+        policy = self.local_operation_policies.get(
+            operation, GLOBAL_OPERATION_DEFAULTS.get(operation, "disabled"),
+        )
+        if policy == "silent":
+            return self.local_admin_headers()
+        if policy == "pam":
+            if self.local_security_token:
+                return self.local_security_headers()
+            if self.app_mode == "server":
+                return self.local_pam_headers()
+            return {}
+        return {}
+
+    def refresh_local_operation_policies(self):
+        """Read policies from the local backend, independently of a managed host."""
+        try:
+            response = requests.get(
+                f"{LOCAL_API_URL}/security/local-policies", timeout=5,
+            )
+            payload = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
+            policies = payload.get("operation_policies")
+            if isinstance(policies, dict):
+                self.local_operation_policies = {
+                    **GLOBAL_OPERATION_DEFAULTS, **policies,
+                }
+        except (requests.RequestException, ValueError, RuntimeError):
+            # Defaults preserve the legacy local behavior; the backend remains
+            # authoritative and will reject an action if its registry differs.
+            self.local_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
+        self.update_mover_action_availability()
+
+    def update_mover_action_availability(self):
+        if not hasattr(self, "move_button"):
+            return
+        selected_game = self.game_combo_move.currentText()
+        selected_link = self.symlink_list.currentItem()
+        self.move_button.setEnabled(
+            bool(selected_game and not selected_game.startswith("Žádné"))
+            and bool(self.local_mover_operation_headers("game.move"))
+        )
+        self.link_button.setEnabled(
+            bool(selected_link and not selected_link.text().startswith("Žádné"))
+            and bool(self.local_mover_operation_headers("game.link"))
+        )
+        self.fix_perms_button.setEnabled(
+            bool(self.local_mover_operation_headers("library.permissions"))
+        )
+        self.cache_button.setEnabled(
+            self.platform == "steam"
+            and bool(self.local_mover_operation_headers("steam.cache"))
+        )
 
     def lock_host_pam_session(self, _checked=False):
         """Revoke the backend PAM session and always discard its local copy."""
@@ -4935,11 +5006,11 @@ class GameMover(QWidget):
         entry = self.server_management_pages.get(server_id)
         if not entry or "notes_table" not in entry:
             return
-        headers = self.local_operation_headers("server.registry")
+        headers = self.local_operation_headers("knowledge.manage")
         if not is_host_management_mode(self.app_mode) or not headers:
             QMessageBox.warning(
                 self, "Poznámky",
-                "Uložení poznámek vyžaduje správu hostitele a oprávnění k registru serverů.",
+                "Uložení poznámek není podle bezpečnostní zásady povolené.",
             )
             return
         table = entry["notes_table"]
@@ -5031,7 +5102,7 @@ class GameMover(QWidget):
         entry["permissions"].setText(summary or "Pro tento server nejsou definované provozní akce")
         management = is_host_management_mode(self.app_mode)
         notes_allowed = management and bool(
-            self.local_operation_headers("server.registry")
+            self.local_operation_headers("knowledge.manage")
         )
         entry["notes_table"].setEditTriggers(
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
@@ -5725,6 +5796,10 @@ class GameMover(QWidget):
             self.global_operation_policies = {
                 **GLOBAL_OPERATION_DEFAULTS, **operation_policies,
             }
+            if self.app_mode == "server":
+                self.local_operation_policies = dict(
+                    self.global_operation_policies
+                )
             self.update_management_action_availability()
         servers = list(data.get("servers", []))
         self.last_server_statuses = list(servers)
@@ -6510,7 +6585,7 @@ class GameMover(QWidget):
             message = data.get("message", "Neznámý stav")
             self.dnsmasq_status_label.setText(f"Stav: {message}")
             self.dnsmasq_stop_button.setEnabled(
-                status == "active" and bool(self.local_operation_headers("dns.config"))
+                status == "active" and bool(self.local_operation_headers("dnsmasq.stop"))
             )
         except Exception as e:
             self.dnsmasq_status_label.setText(f"Stav: chyba ({e})")
@@ -6528,10 +6603,11 @@ class GameMover(QWidget):
             return
         if not is_host_management_mode(self.app_mode):
             return
-        headers = self.local_operation_headers("dns.config")
+        headers = self.local_operation_headers("dnsmasq.stop")
         if not headers:
             QMessageBox.warning(
-                self, "DNSmasq", "Vypnutí dnsmasq vyžaduje oprávnění pro nastavení DNS.",
+                self, "DNSmasq",
+                "Vypnutí dnsmasq není podle bezpečnostní zásady povolené.",
             )
             return
         try:
@@ -6610,6 +6686,7 @@ class GameMover(QWidget):
 
         # update disk bars
         self.update_disk_bars()
+        self.update_mover_action_availability()
 
     def set_timekpr_controls_enabled(self, enabled):
         widgets = [
@@ -7013,13 +7090,17 @@ class GameMover(QWidget):
             f"QPushButton:disabled {{ background-color: #888888; color: #AAAAAA; border: 2px solid {border}; }}"
         )
         self.cache_button.setToolTip(tooltip)
+        self.update_mover_action_availability()
 
     def set_shared_cache(self):
         if self.platform != "steam":
             return
-        headers = self.local_admin_headers()
+        headers = self.local_mover_operation_headers("steam.cache")
         if not headers:
-            QMessageBox.warning(self, "Steam cache", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            QMessageBox.warning(
+                self, "Steam cache",
+                "Operace není povolená, nebo vyžaduje místní PAM odemčení v Zabezpečení.",
+            )
             return
 
         try:
@@ -7046,9 +7127,12 @@ class GameMover(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
-        headers = self.local_admin_headers()
+        headers = self.local_mover_operation_headers("library.permissions")
         if not headers:
-            QMessageBox.warning(self, "Opravit oprávnění", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            QMessageBox.warning(
+                self, "Opravit oprávnění",
+                "Operace není povolená, nebo vyžaduje místní PAM odemčení v Zabezpečení.",
+            )
             return
 
         try:
@@ -7083,13 +7167,15 @@ class GameMover(QWidget):
         self.progress_bar.setRange(0, 0)
         self.move_button.setEnabled(False)
         self.link_button.setEnabled(False)
-        headers = self.local_admin_headers()
+        headers = self.local_mover_operation_headers("game.move")
         if not headers:
-            QMessageBox.warning(self, "Výsledek", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            QMessageBox.warning(
+                self, "Výsledek",
+                "Operace není povolená, nebo vyžaduje místní PAM odemčení v Zabezpečení.",
+            )
             self.progress_bar.setVisible(False)
             self.progress_bar.setRange(0, 100)
-            self.move_button.setEnabled(True)
-            self.link_button.setEnabled(True)
+            self.update_mover_action_availability()
             return
         self.thread = MoveThread(self.platform, game, self.user, headers)
         self.thread.finished.connect(self.move_finished)
@@ -7099,8 +7185,7 @@ class GameMover(QWidget):
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.move_button.setEnabled(True)
-        self.link_button.setEnabled(True)
+        self.update_mover_action_availability()
         QMessageBox.information(self, "Výsledek", data.get("message", ""))
         self.refresh_game_lists()
 
@@ -7109,9 +7194,12 @@ class GameMover(QWidget):
         if not item or item.text().startswith("Žádné"):
             return
         game = item.text()
-        headers = self.local_admin_headers()
+        headers = self.local_mover_operation_headers("game.link")
         if not headers:
-            QMessageBox.warning(self, "Chyba", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            QMessageBox.warning(
+                self, "Chyba",
+                "Operace není povolená, nebo vyžaduje místní PAM odemčení v Zabezpečení.",
+            )
             return
         payload = {"platform": self.platform, "game_name": game, "user": self.user}
         if self.platform in ("gog", "epic", "ubisoft"):
