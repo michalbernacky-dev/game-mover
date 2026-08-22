@@ -21,7 +21,7 @@ regression tests have been reviewed.
 
 | ID | Severity | Status | Finding |
 |---|---|---|---|
-| GM-SA-2026-001 | Critical | Open | Arbitrary recursive permission changes by the root API |
+| GM-SA-2026-001 | Critical | Fixed | Arbitrary recursive permission changes by the root API |
 | GM-SA-2026-002 | High | Open | Path traversal in privileged Game Mover operations |
 | GM-SA-2026-003 | High | Open | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Open | PAM authentication has no application-level rate limiting |
@@ -33,7 +33,7 @@ regression tests have been reviewed.
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 
 - Severity: **Critical**
-- Status: **Open**
+- Status: **Fixed** (working tree, deployment pending)
 - Relevant weakness classes: CWE-73, CWE-732
 - Affected component: `POST /fix_perms`
 
@@ -67,6 +67,23 @@ and may lead to complete local root compromise.
 3. Resolve and validate the canonical target before every mutation.
 4. Reject symlink targets and any target outside the explicit allowlist.
 5. Add regression tests covering `/etc`, path traversal, and symlink escapes.
+
+### Resolution
+
+Resolved on 2026-08-23. The API now accepts only the fixed
+`steam-library` target identifier and maps it server-side to
+`/var/Games/steam`. The backend verifies that the configured root and target
+are real directories beneath the managed game root and rejects symbolic-link
+targets. Recursive permission changes use directory-relative file descriptors
+with `O_NOFOLLOW`; symbolic links and non-regular filesystem objects are not
+modified. The GUI and CLI no longer transmit filesystem paths.
+
+Regression coverage verifies rejection of an arbitrary `/etc` path, rejection
+of unknown and symbolic-link targets, enforcement of silent/PAM policy, and
+that a file symlink inside the library does not change its external target.
+The targeted security tests and the complete suite of 221 tests passed. The
+fixed code still needs to be packaged and deployed before the installed hosts
+are protected.
 
 ## GM-SA-2026-002: Path traversal in privileged Game Mover operations
 

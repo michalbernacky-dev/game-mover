@@ -7667,10 +7667,9 @@ class GameMover(QWidget):
             return
 
         try:
-            path = "/var/Games/steam"
             resp = requests.post(
                 f"{FLASK_URL}/fix_perms",
-                json={"path": path},
+                json={"target": "steam-library"},
                 headers=headers,
                 timeout=30,
             )

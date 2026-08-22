@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import ipaddress
 import socket
+import stat
 import psutil
 from concurrent.futures import ThreadPoolExecutor
 
@@ -116,6 +117,9 @@ app = Flask(__name__)
 # ------------------------------------------------------------
 GAMES_ROOT = "/var/Games"
 GROUP_NAME = "gemers"
+PERMISSION_TARGETS = {
+    "steam-library": os.path.join(GAMES_ROOT, "steam"),
+}
 LOCAL_ADMIN_TOKEN_DIR = "/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "api.token")
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
@@ -658,18 +662,57 @@ def steamapps_candidates(user):
 def steamapps_dir(user) -> Optional[str]:
     return first_existing(steamapps_candidates(user))
 
+def permission_target_path(target_id):
+    """Resolve a fixed permission target without trusting a client path."""
+    path = PERMISSION_TARGETS.get(target_id)
+    if path is None:
+        raise ValueError("Unknown permission target")
+    if os.path.islink(GAMES_ROOT) or os.path.islink(path):
+        raise ValueError("Permission target must not be a symbolic link")
+
+    games_root = os.path.realpath(GAMES_ROOT)
+    resolved = os.path.realpath(path)
+    if os.path.commonpath([resolved, games_root]) != games_root:
+        raise ValueError("Permission target escapes the game library")
+    if not os.path.isdir(resolved):
+        raise FileNotFoundError("Permission target does not exist")
+    return resolved
+
+
+def _set_group_perms_fd(directory_fd, gid):
+    """Apply shared-library modes using descriptors and never follow symlinks."""
+    os.fchown(directory_fd, -1, gid)
+    os.fchmod(directory_fd, 0o2775)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+
+    for name in os.listdir(directory_fd):
+        entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if stat.S_ISLNK(entry.st_mode):
+            continue
+        if stat.S_ISDIR(entry.st_mode):
+            child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+            try:
+                _set_group_perms_fd(child_fd, gid)
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(entry.st_mode):
+            file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+            try:
+                os.fchown(file_fd, -1, gid)
+                os.fchmod(file_fd, 0o664)
+            finally:
+                os.close(file_fd)
+
+
 def set_group_perms(path):
+    gid = grp.getgrnam(GROUP_NAME).gr_gid
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    directory_fd = os.open(path, flags)
     try:
-        gid = grp.getgrnam(GROUP_NAME).gr_gid
-        for root, dirs, files in os.walk(path):
-            os.chown(root, -1, gid)
-            os.chmod(root, 0o2775)
-            for f in files:
-                fp = os.path.join(root, f)
-                os.chown(fp, -1, gid)
-                os.chmod(fp, 0o664)
-    except Exception as e:
-        print(f"Permission fix error: {e}")
+        _set_group_perms_fd(directory_fd, gid)
+    finally:
+        os.close(directory_fd)
 
 
 def ensure_local_admin_token():
@@ -1492,13 +1535,16 @@ def create_symlink():
 def fix_perms():
     if not require_local_operation(request, "library.permissions"):
         return jsonify({"message": "Unauthorized"}), 403
-    data = request.json
-    path = data.get("path")
-    if not path or not os.path.exists(path):
-        return jsonify({"message": "Invalid path"}), 400
+    data = request.get_json(silent=True) or {}
+    target_id = data.get("target")
+    if not target_id or "path" in data:
+        return jsonify({"message": "Invalid permission target"}), 400
     try:
+        path = permission_target_path(target_id)
         set_group_perms(path)
         return jsonify({"message": f"Permissions fixed for {path}"})
+    except (ValueError, FileNotFoundError) as e:
+        return jsonify({"message": str(e)}), 400
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -188,7 +189,7 @@ class ServerRegistryTest(unittest.TestCase):
         operations = {
             "game.move": ("/move_game", {"platform": "steam"}),
             "game.link": ("/create_symlink", {"platform": "steam"}),
-            "library.permissions": ("/fix_perms", {"path": self.temp_dir.name}),
+            "library.permissions": ("/fix_perms", {"target": "steam-library"}),
             "steam.cache": ("/set_steam_cache", {"user": "tester"}),
         }
         for operation in operations:
@@ -222,10 +223,13 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         with (
             patch.object(backend, "load_local_admin_token", return_value="local-secret"),
+            patch.object(
+                backend, "permission_target_path", return_value=self.temp_dir.name,
+            ),
             patch.object(backend, "set_group_perms") as set_perms,
         ):
             response = self.client.post(
-                "/fix_perms", json={"path": self.temp_dir.name},
+                "/fix_perms", json={"target": "steam-library"},
                 **self.local_options(self.admin_headers),
             )
         self.assertEqual(response.status_code, 200)
@@ -237,18 +241,73 @@ class ServerRegistryTest(unittest.TestCase):
             **self.local_options(self.pam_headers),
         )
         self.assertEqual(response.status_code, 200)
-        with patch.object(backend, "set_group_perms") as set_perms:
+        with (
+            patch.object(
+                backend, "permission_target_path", return_value=self.temp_dir.name,
+            ),
+            patch.object(backend, "set_group_perms") as set_perms,
+        ):
             denied = self.client.post(
-                "/fix_perms", json={"path": self.temp_dir.name},
+                "/fix_perms", json={"target": "steam-library"},
                 **self.local_options(self.admin_headers),
             )
             allowed = self.client.post(
-                "/fix_perms", json={"path": self.temp_dir.name},
+                "/fix_perms", json={"target": "steam-library"},
                 **self.local_options(self.pam_headers),
             )
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(allowed.status_code, 200)
         set_perms.assert_called_once_with(self.temp_dir.name)
+
+    def test_fix_permissions_rejects_client_paths_and_unknown_targets(self):
+        with patch.object(backend, "set_group_perms") as set_perms:
+            arbitrary_path = self.client.post(
+                "/fix_perms", json={"path": "/etc"},
+                **self.local_options(self.pam_headers),
+            )
+            unknown_target = self.client.post(
+                "/fix_perms", json={"target": "system-configuration"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(arbitrary_path.status_code, 400)
+        self.assertEqual(unknown_target.status_code, 400)
+        set_perms.assert_not_called()
+
+    def test_permission_target_rejects_symbolic_link(self):
+        games_root = Path(self.temp_dir.name) / "games"
+        outside = Path(self.temp_dir.name) / "outside"
+        games_root.mkdir()
+        outside.mkdir()
+        (games_root / "steam").symlink_to(outside, target_is_directory=True)
+
+        with (
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.dict(
+                backend.PERMISSION_TARGETS,
+                {"steam-library": str(games_root / "steam")},
+                clear=True,
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                backend.permission_target_path("steam-library")
+
+    def test_group_permission_fix_does_not_follow_file_symlinks(self):
+        library = Path(self.temp_dir.name) / "library"
+        library.mkdir()
+        (library / "game.dat").write_text("game", encoding="utf-8")
+        outside = Path(self.temp_dir.name) / "outside.conf"
+        outside.write_text("outside", encoding="utf-8")
+        outside.chmod(0o600)
+        (library / "outside-link").symlink_to(outside)
+
+        with patch.object(
+            backend.grp, "getgrnam", return_value=Mock(gr_gid=os.getgid()),
+        ):
+            backend.set_group_perms(str(library))
+
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((library / "game.dat").stat().st_mode & 0o777, 0o664)
 
     def save_servers(self):
         response = self.client.put(

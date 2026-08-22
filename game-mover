@@ -5,7 +5,7 @@
 #   game-mover list-user <platform> <user>
 #   game-mover move <platform> <game_name> <user>
 #   game-mover link <platform> <game_name> <user>
-#   game-mover fix <path>
+#   game-mover fix
 #   Timekpr:
 #     game-mover timekpr-auth <wheel_user>
 #     game-mover timekpr-userinfo <user> <token>
@@ -201,8 +201,8 @@ show_help() {
   echo "  game-mover link <platform> <game_name> <user>"
   echo "      → vytvoří symlink z uživatelské knihovny do sdílené"
   echo ""
-  echo "  game-mover fix <path>"
-  echo "      → opraví oprávnění složky (skupina: gemers)"
+  echo "  game-mover fix"
+  echo "      → opraví oprávnění spravované Steam knihovny"
   echo ""
   echo "  game-mover timekpr-auth <wheel_user>"
   echo "      → získá token pro práci s timekpr (dotáže se na heslo)"
@@ -220,7 +220,7 @@ show_help() {
   echo "  game-mover list-user steam alice"
   echo "  game-mover move steam \"For Honor\" alice"
   echo "  game-mover link steam \"For Honor\" alice"
-  echo "  game-mover fix /var/Games/steam/For\\ Honor"
+  echo "  game-mover fix"
   echo "  game-mover timekpr-auth root"
   echo "  game-mover timekpr-userinfo bob <TOKEN>"
   echo "  game-mover timekpr-set-hours bob \"13;14;15\" <TOKEN>"
@@ -272,12 +272,11 @@ case "$cmd" in
     ;;
 
   fix)
-    path="$1"
     token="$(require_local_admin_token)"
     curl -s -X POST "$FLASK_URL/fix_perms" \
       -H "Content-Type: application/json" \
       -H "${LOCAL_ADMIN_TOKEN_HEADER}: ${token}" \
-      -d "{\"path\":\"$path\"}" | jq
+      -d '{"target":"steam-library"}' | jq
     ;;
 
   timekpr-auth)
