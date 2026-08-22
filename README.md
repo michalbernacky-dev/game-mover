@@ -13,7 +13,7 @@ official x86_64 RPM, validates its identity (and GitHub digest when available),
 then installs it through DNF under the `launcher.update` security policy, which
 requires PAM by default. Heroic must be closed first.
 
-The **Knowledge Base** tab stores verified, platform-specific procedures in the
+The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
 Entries can target a game, server, or launcher. Authenticated remote clients can
 read them; editing is restricted to host-management mode under the server
@@ -21,6 +21,18 @@ registry policy. Server-specific entries also appear directly in the server's
 **Notes** tab. A fresh RPM or `install.sh` deployment creates and migrates the
 database automatically; `requirements.txt` needs no SQLite package because the
 Python `sqlite3` module is part of the standard library.
+Notes may also contain safe declarative checks evaluated only on the viewing
+client. The UI can show whether a game is installed and whether a documented
+setting is already satisfied, without executing database-provided commands or
+sending local results back to the host. Steam checks use AppIDs and scan every
+library listed in `libraryfolders.vdf`, including secondary disks.
+On first opening, the tab asks the local Game Mover backend for an installed-game
+inventory. It combines shared `/var/Games` data, Steam manifests and Game Mover
+symlinks, Heroic metadata, Lutris' local catalog, and CurseForge instances. The
+catalog shows platforms, users, approximate allocated size, and flags installs
+below 32 MiB as possible remnants. Launcher-only records are excluded. Existing
+SQLite notes are attached through stable aliases; games without notes are ready
+to receive a new entry without manually inventing an ID.
 
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
 
@@ -468,7 +480,7 @@ Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jed
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 
-Záložka **Znalostní báze** ukládá vlastní ověřené postupy podle hry, serveru
+Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi
 `/var/lib/game-platform/game-mover-notes.sqlite3`. Ověření vzdálení klienti je
 mohou číst, úpravy vyžadují režim správy hostitele a oprávnění k registru
@@ -476,6 +488,17 @@ serverů. Poznámky přiřazené serveru se zobrazují také přímo v jeho zál
 **Poznámky**. Čistá instalace přes RPM nebo `install.sh` databázi automaticky
 vytvoří či migruje; `sqlite3` je součást standardní knihovny Pythonu a nepatří
 proto do `requirements.txt`.
+Tip může navíc obsahovat bezpečné deklarativní kontroly, které se vyhodnocují
+výhradně na počítači čtenáře. Rozhraní tak ukáže, zda je hra nainstalovaná a zda
+už doporučené nastavení platí; nespouští přitom příkazy z databáze ani neposílá
+výsledky hostiteli. Kontrola Steamu používá AppID a prochází všechny knihovny z
+`libraryfolders.vdf`, tedy i další disky.
+Při prvním otevření si záložka od místního backendu vyžádá inventuru her. Sloučí
+sdílené instalace v `/var/Games`, manifesty a symlinky Steamu, metadata Heroicu,
+místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele,
+přibližnou alokovanou velikost a instalace pod 32 MiB označí jako možný
+pozůstatek. Samotné launchery do seznamu nezařazuje. Existující SQLite tip se
+připojí přes stabilní alias; hra bez tipu je rovnou připravená k jeho založení.
 
 ## Bezpečnostní model
 

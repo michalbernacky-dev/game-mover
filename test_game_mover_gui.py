@@ -81,18 +81,47 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertFalse(self.window.launcher_cards["lutris"]["card"].isEnabled())
 
     def test_knowledge_base_supports_game_notes_with_platform_metadata(self):
+        self.assertEqual(
+            self.window.tabs.tabText(self.window.knowledge_tab_index), "Tipy a poznámky",
+        )
         self.window.set_knowledge_target("game", "gta-v-enhanced")
         self.window.render_knowledge_notes([{
             "title": "Epic vlastnictví přes Rockstar Launcher",
             "platform": "Fedora · Heroic · Epic · Rockstar",
             "body": "Použij alternativní fix.bat a vypni UMU.",
+            "checks": [{"type": "path_exists", "category": "installation",
+                        "label": "Instalace", "paths": ["/definitely/missing/game"]}],
         }])
 
         self.assertEqual(self.window.knowledge_target_type.currentData(), "game")
         self.assertEqual(self.window.knowledge_target_id.text(), "gta-v-enhanced")
         self.assertEqual(self.window.knowledge_table.rowCount(), 1)
         self.assertIn("Heroic", self.window.knowledge_table.item(0, 1).text())
-        self.assertIn("fix.bat", self.window.knowledge_table.item(0, 2).text())
+        self.assertIn("nenalezeno", self.window.knowledge_table.item(0, 2).text())
+        self.assertIn("fix.bat", self.window.knowledge_table.item(0, 3).text())
+
+    def test_installed_game_catalog_attaches_existing_tip_alias_and_users(self):
+        self.window.knowledge_saved_targets = {
+            ("game", "gta-v-enhanced"),
+            ("server", "prominence-2-hasturian-era"),
+        }
+        self.window.on_installed_knowledge_games({"games": [{
+            "id": "grand-theft-auto-v-enhanced",
+            "name": "Grand Theft Auto V Enhanced",
+            "platforms": ["epic"], "users": ["alice", "son"],
+            "paths": ["/var/Games/Heroic/GTAVEnhanced"],
+            "knowledge_aliases": ["grand-theft-auto-v-enhanced", "gta-v-enhanced"],
+            "size_bytes": 100 * 1024**3, "possible_residue": False,
+        }]})
+
+        self.assertEqual(self.window.knowledge_known_targets.count(), 3)
+        self.assertEqual(
+            self.window.knowledge_known_targets.itemData(1),
+            ("game", "gta-v-enhanced"),
+        )
+        label = self.window.knowledge_known_targets.itemText(1)
+        self.assertIn("alice, son", label)
+        self.assertIn("💡 tip", label)
 
     def tearDown(self):
         self.window.close()

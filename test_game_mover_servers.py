@@ -91,6 +91,26 @@ class ServerRegistryTest(unittest.TestCase):
             )
         workload_backend.logs.assert_called_once()
 
+    def test_local_installed_games_catalog_uses_inventory_scanner(self):
+        game = {
+            "id": "the-forest", "name": "The Forest", "platforms": ["steam"],
+            "users": ["alice"], "paths": ["/var/Games/steam/The Forest"],
+            "app_ids": ["242760"], "knowledge_aliases": ["the-forest"],
+            "size_bytes": 1024, "possible_residue": True,
+        }
+        with patch.object(backend, "scan_installed_games", return_value=[game]) as scan:
+            response = self.client.get(
+                "/games/installed?force=1", **self.local_options(),
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["games"][0]["app_ids"], ["242760"])
+        scan.assert_called_once_with()
+
+        denied = self.client.get(
+            "/games/installed", environ_base={"REMOTE_ADDR": "192.0.2.20"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
     def save_servers(self):
         response = self.client.put(
             "/servers/config", json={"servers": self.servers},

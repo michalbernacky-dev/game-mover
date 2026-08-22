@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.24.1
+Version:        0.25.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -61,6 +61,8 @@ install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover
 install -Dpm0644 game_mover_logs.py %{buildroot}/opt/game_mover/game_mover_logs.py
 install -Dpm0644 game_mover_launchers.py %{buildroot}/opt/game_mover/game_mover_launchers.py
 install -Dpm0644 game_mover_notes.py %{buildroot}/opt/game_mover/game_mover_notes.py
+install -Dpm0644 game_mover_tip_checks.py %{buildroot}/opt/game_mover/game_mover_tip_checks.py
+install -Dpm0644 game_mover_game_inventory.py %{buildroot}/opt/game_mover/game_mover_game_inventory.py
 install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
 install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
@@ -152,6 +154,8 @@ fi
 /opt/game_mover/game_mover_logs.py
 /opt/game_mover/game_mover_launchers.py
 /opt/game_mover/game_mover_notes.py
+/opt/game_mover/game_mover_tip_checks.py
+/opt/game_mover/game_mover_game_inventory.py
 /opt/game_mover/game_mover_operators.py
 /opt/game_mover/game_mover_whitelist.py
 /opt/game_mover/game_mover_version.py
@@ -165,6 +169,28 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.1-1
+- Discover manually installed GOG, Ubisoft, Rockstar, Epic and EA games in common Wine paths
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.0-1
+- Build the tips catalog from locally installed games across known platforms
+- Merge users, platforms, paths and sizes and flag tiny possible remnants
+- Attach existing notes through stable game aliases without listing launchers
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.24.5-1
+- Support bounded checks of larger CurseForge instance metadata
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.24.4-1
+- Keep local checks responsive by requiring exact paths instead of recursive globs
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.24.3-1
+- Add local installation and configuration checks to knowledge-base tips
+- Detect Steam games by AppID across all configured Steam libraries
+
+* Fri Aug 21 2026 Game Mover Packager <packager@example.invalid> - 0.24.2-1
+- Rename the global knowledge tab to Tipy a poznámky
+- Load all game, server, and launcher note targets when the tab is first opened
+
 * Fri Aug 21 2026 Game Mover Packager <packager@example.invalid> - 0.24.1-1
 - Initialize and migrate the SQLite knowledge base during a fresh host install
 - Keep service startup as a fallback schema initializer

@@ -20,6 +20,7 @@ from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
+from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
     DEFAULT_SSH_PORT,
     DEFAULT_SSH_TUNNEL_PORT,
@@ -695,6 +696,27 @@ class LauncherUpdateThread(QThread):
         except Exception as error:
             self.completed.emit({"launcher_id": self.launcher_id, "error": str(error)})
 
+
+class InstalledGamesThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, force=False):
+        super().__init__()
+        self.force = force
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{LOCAL_API_URL}/games/installed",
+                params={"force": "1"} if self.force else {}, timeout=120,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit(data)
+        except Exception as error:
+            self.loaded.emit({"error": str(error)})
+
 # ------------------------------------------------------------
 # GUI
 # ------------------------------------------------------------
@@ -759,6 +781,8 @@ class GameMover(QWidget):
         self.minecraft_install_thread = None
         self.launcher_status_thread = None
         self.launcher_update_thread = None
+        self.installed_games_thread = None
+        self.knowledge_saved_targets = set()
         self.launcher_cards = {}
         self.launcher_update_policy = "pam"
         self.last_server_statuses = []
@@ -819,6 +843,7 @@ class GameMover(QWidget):
         self.fixed_tab_count = self.tabs.count()
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self.close_server_management_tab)
+        self.tabs.currentChanged.connect(self.on_main_tab_changed)
         for index in range(self.fixed_tab_count):
             self.tabs.tabBar().setTabButton(index, QTabBar.LeftSide, None)
             self.tabs.tabBar().setTabButton(index, QTabBar.RightSide, None)
@@ -996,6 +1021,11 @@ class GameMover(QWidget):
         layout.addWidget(help_label)
         target_row = QHBoxLayout()
         self.knowledge_known_targets = QComboBox(tab)
+        self.knowledge_known_targets.setEditable(True)
+        self.knowledge_known_targets.setInsertPolicy(QComboBox.NoInsert)
+        self.knowledge_known_targets.setMaxVisibleItems(25)
+        self.knowledge_known_targets.completer().setCaseSensitivity(Qt.CaseInsensitive)
+        self.knowledge_known_targets.completer().setFilterMode(Qt.MatchContains)
         self.knowledge_known_targets.setMinimumWidth(240)
         self.knowledge_known_targets.currentIndexChanged.connect(
             self.on_knowledge_known_target_selected
@@ -1005,6 +1035,9 @@ class GameMover(QWidget):
         self.knowledge_refresh = QPushButton("Obnovit seznam", tab)
         self.knowledge_refresh.clicked.connect(self.refresh_knowledge_targets)
         target_row.addWidget(self.knowledge_refresh)
+        self.knowledge_local_refresh = QPushButton("Znovu ověřit tento PC", tab)
+        self.knowledge_local_refresh.clicked.connect(self.refresh_knowledge_local_checks)
+        target_row.addWidget(self.knowledge_local_refresh)
         layout.addLayout(target_row)
         editor_row = QHBoxLayout()
         self.knowledge_target_type = QComboBox(tab)
@@ -1024,9 +1057,9 @@ class GameMover(QWidget):
         self.knowledge_status.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.knowledge_status)
         self.knowledge_table = QTableWidget(tab)
-        self.knowledge_table.setColumnCount(3)
+        self.knowledge_table.setColumnCount(4)
         self.knowledge_table.setHorizontalHeaderLabels([
-            "Nadpis", "Platforma / prostředí", "Ověřený postup",
+            "Nadpis", "Platforma / prostředí", "Stav na tomto PC", "Ověřený postup",
         ])
         self.knowledge_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.knowledge_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1036,7 +1069,8 @@ class GameMover(QWidget):
         header = self.knowledge_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.Stretch)
         self.knowledge_table.itemChanged.connect(self.mark_knowledge_dirty)
         layout.addWidget(self.knowledge_table)
         actions = QHBoxLayout()
@@ -1052,9 +1086,22 @@ class GameMover(QWidget):
         actions.addStretch()
         layout.addLayout(actions)
         self.knowledge_dirty = False
+        self.knowledge_loaded = False
         self.knowledge_tab = tab
-        self.tabs.addTab(tab, "Znalostní báze")
+        self.knowledge_tab_index = self.tabs.addTab(tab, "Tipy a poznámky")
+        self.tabs.setTabToolTip(
+            self.knowledge_tab_index,
+            "Sdílené postupy pro hry, servery a launchery",
+        )
         self.update_knowledge_editability()
+
+    def on_main_tab_changed(self, index):
+        if (
+            hasattr(self, "knowledge_tab_index")
+            and index == self.knowledge_tab_index
+            and not self.knowledge_loaded
+        ):
+            self.refresh_knowledge_targets()
 
     def knowledge_request_target(self):
         return self.server_request_target()
@@ -1073,19 +1120,82 @@ class GameMover(QWidget):
                 (str(note.get("target_type", "")), str(note.get("target_id", "")))
                 for note in payload.get("notes", []) if isinstance(note, dict)
             })
-            self.knowledge_known_targets.blockSignals(True)
-            self.knowledge_known_targets.clear()
-            self.knowledge_known_targets.addItem("— vyber uložený cíl —", None)
-            for target_type, target_id in targets:
-                self.knowledge_known_targets.addItem(
-                    f"{target_type} · {target_id}", (target_type, target_id),
-                )
-            self.knowledge_known_targets.blockSignals(False)
-            self.knowledge_status.setText(f"Databáze obsahuje {len(targets)} cílů.")
+            self.knowledge_saved_targets = set(targets)
+            self.knowledge_loaded = True
+            self.knowledge_status.setText("Prohledávám nainstalované hry na tomto PC…")
             if current[1]:
                 self.set_knowledge_target(*current)
+            self.scan_installed_knowledge_games(force=True)
         except Exception as error:
             self.knowledge_status.setText(f"Načtení znalostní báze selhalo: {error}")
+
+    def scan_installed_knowledge_games(self, force=False):
+        if self.installed_games_thread and self.installed_games_thread.isRunning():
+            return
+        self.knowledge_refresh.setEnabled(False)
+        self.installed_games_thread = InstalledGamesThread(force=force)
+        self.installed_games_thread.loaded.connect(self.on_installed_knowledge_games)
+        self.installed_games_thread.start()
+
+    @staticmethod
+    def format_game_size(size_bytes):
+        size = float(max(0, size_bytes or 0))
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if size < 1024 or unit == "TiB":
+                return f"{size:.0f} {unit}" if unit in ("B", "KiB", "MiB") else f"{size:.1f} {unit}"
+            size /= 1024
+
+    def on_installed_knowledge_games(self, payload):
+        self.knowledge_refresh.setEnabled(True)
+        if payload.get("error"):
+            self.knowledge_status.setText(f"Sken nainstalovaných her selhal: {payload['error']}")
+            return
+        games = payload.get("games", []) if isinstance(payload.get("games"), list) else []
+        current = (
+            self.knowledge_target_type.currentData(), self.knowledge_target_id.text().strip(),
+        )
+        attached = set()
+        self.knowledge_known_targets.blockSignals(True)
+        self.knowledge_known_targets.clear()
+        self.knowledge_known_targets.addItem("— vyber nalezenou hru —", None)
+        for game in games:
+            if not isinstance(game, dict):
+                continue
+            aliases = game.get("knowledge_aliases", [game.get("id", "")])
+            matches = [
+                target for target in self.knowledge_saved_targets
+                if target[1] in aliases and target[0] in ("game", "server")
+            ]
+            target = next((match for match in matches if match[0] == "game"), None)
+            target = target or (matches[0] if matches else ("game", str(game.get("id", ""))))
+            attached.update(matches)
+            platforms = ", ".join(game.get("platforms", [])) or "neznámá platforma"
+            users = ", ".join(game.get("users", [])) or "bez uživatelského odkazu"
+            size = self.format_game_size(game.get("size_bytes", 0))
+            marker = "⚠ možný pozůstatek" if game.get("possible_residue") else "● nainstalováno"
+            tip = " · 💡 tip" if matches else ""
+            self.knowledge_known_targets.addItem(
+                f"{game.get('name', game.get('id'))} · {platforms} · {size} · {users} · {marker}{tip}",
+                target,
+            )
+            index = self.knowledge_known_targets.count() - 1
+            self.knowledge_known_targets.setItemData(
+                index, "\n".join(game.get("paths", [])), Qt.ToolTipRole,
+            )
+        for target_type, target_id in sorted(self.knowledge_saved_targets - attached):
+            if target_type == "launcher":
+                continue
+            self.knowledge_known_targets.addItem(
+                f"{target_id} · 💡 uložený tip, instalace nenalezena",
+                (target_type, target_id),
+            )
+        self.knowledge_known_targets.blockSignals(False)
+        residues = sum(bool(game.get("possible_residue")) for game in games if isinstance(game, dict))
+        self.knowledge_status.setText(
+            f"Nalezeno {len(games)} her; {residues} malých instalací je označeno jako možný pozůstatek."
+        )
+        if current[1]:
+            self.set_knowledge_target(*current)
 
     def on_knowledge_known_target_selected(self, index):
         target = self.knowledge_known_targets.itemData(index)
@@ -1124,10 +1234,19 @@ class GameMover(QWidget):
                 continue
             row = self.knowledge_table.rowCount()
             self.knowledge_table.insertRow(row)
+            checks = note.get("checks", []) if isinstance(note.get("checks", []), list) else []
+            status, tooltip = self.knowledge_local_status(checks)
             for column, value in enumerate((
-                note.get("title", ""), note.get("platform", "Obecné"), note.get("body", ""),
+                note.get("title", ""), note.get("platform", "Obecné"), status,
+                note.get("body", ""),
             )):
-                self.knowledge_table.setItem(row, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(Qt.UserRole, checks)
+                if column == 2:
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                    item.setToolTip(tooltip)
+                self.knowledge_table.setItem(row, column, item)
         self.knowledge_table.resizeRowsToContents()
         self.knowledge_table.blockSignals(False)
         self.knowledge_dirty = False
@@ -1136,15 +1255,67 @@ class GameMover(QWidget):
             if self.knowledge_table.rowCount() else "Tento cíl zatím nemá poznámky."
         )
 
+    def knowledge_local_status(self, checks):
+        results = evaluate_checks(checks)
+        if not results:
+            return "— bez kontrol", "Tento tip zatím nemá definované automatické kontroly."
+        installation = [result for result in results if result["category"] == "installation"]
+        configuration = [result for result in results if result["category"] == "configuration"]
+        parts = []
+        if installation:
+            if any(result["status"] == "ok" for result in installation):
+                parts.append("● nainstalováno")
+            elif any(result["status"] == "unknown" for result in installation):
+                parts.append("? instalace nejasná")
+            else:
+                parts.append("○ nenalezeno")
+        if configuration:
+            ok_count = sum(result["status"] == "ok" for result in configuration)
+            if ok_count == len(configuration):
+                parts.append("✓ nastaveno")
+            elif any(result["status"] == "unknown" for result in configuration):
+                parts.append(f"? {ok_count}/{len(configuration)} splněno")
+            else:
+                parts.append(f"⚠ {ok_count}/{len(configuration)} splněno")
+        icons = {"ok": "✓", "missing": "✗", "unknown": "?"}
+        tooltip = "\n".join(
+            f"{icons[result['status']]} {result['label']}: {result['detail']}"
+            for result in results
+        )
+        return " · ".join(parts), tooltip
+
+    def refresh_knowledge_local_checks(self):
+        self.knowledge_table.blockSignals(True)
+        for row in range(self.knowledge_table.rowCount()):
+            title_item = self.knowledge_table.item(row, 0)
+            checks = title_item.data(Qt.UserRole) if title_item else []
+            status, tooltip = self.knowledge_local_status(
+                checks if isinstance(checks, list) else []
+            )
+            item = self.knowledge_table.item(row, 2) or QTableWidgetItem()
+            item.setText(status)
+            item.setToolTip(tooltip)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.knowledge_table.setItem(row, 2, item)
+        self.knowledge_table.blockSignals(False)
+        self.knowledge_table.resizeRowsToContents()
+
     def mark_knowledge_dirty(self, _item=None):
+        if _item is not None and _item.column() == 2:
+            return
         self.knowledge_dirty = True
         self.knowledge_status.setText("Cíl má neuložené změny.")
 
     def add_knowledge_row(self):
         row = self.knowledge_table.rowCount()
         self.knowledge_table.insertRow(row)
-        for column, value in enumerate(("Nový tip", "Obecné", "Popiš ověřený postup…")):
-            self.knowledge_table.setItem(row, column, QTableWidgetItem(value))
+        for column, value in enumerate(("Nový tip", "Obecné", "— bez kontrol", "Popiš ověřený postup…")):
+            item = QTableWidgetItem(value)
+            if column == 0:
+                item.setData(Qt.UserRole, [])
+            if column == 2:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            self.knowledge_table.setItem(row, column, item)
         self.knowledge_table.setCurrentCell(row, 0)
         self.knowledge_table.editItem(self.knowledge_table.item(row, 0))
 
@@ -1170,12 +1341,17 @@ class GameMover(QWidget):
             values = [
                 self.knowledge_table.item(row, column).text().strip()
                 if self.knowledge_table.item(row, column) else ""
-                for column in range(3)
+                for column in (0, 1, 3)
             ]
             if any(not value for value in values):
                 self.knowledge_status.setText("Každý řádek musí mít nadpis, platformu a postup.")
                 return
-            notes.append({"title": values[0], "platform": values[1], "body": values[2]})
+            title_item = self.knowledge_table.item(row, 0)
+            checks = title_item.data(Qt.UserRole) if title_item else []
+            notes.append({
+                "title": values[0], "platform": values[1], "body": values[2],
+                "checks": checks if isinstance(checks, list) else [],
+            })
         try:
             response = requests.put(
                 f"{self.host_management_api_url()}/notes/{target_type}/{target_id}",
@@ -4279,7 +4455,13 @@ class GameMover(QWidget):
                 note.get("title", ""), note.get("platform", "Obecné"),
                 note.get("body", ""),
             )):
-                table.setItem(row, column, QTableWidgetItem(str(value)))
+                item = QTableWidgetItem(str(value))
+                if column == 0:
+                    item.setData(
+                        Qt.UserRole,
+                        note.get("checks", []) if isinstance(note.get("checks", []), list) else [],
+                    )
+                table.setItem(row, column, item)
         table.resizeRowsToContents()
         table.blockSignals(False)
         entry["notes_status"].setText(
@@ -4302,7 +4484,10 @@ class GameMover(QWidget):
         row = table.rowCount()
         table.insertRow(row)
         for column, value in enumerate(("Nový tip", "Obecné", "Popiš ověřený postup…")):
-            table.setItem(row, column, QTableWidgetItem(value))
+            item = QTableWidgetItem(value)
+            if column == 0:
+                item.setData(Qt.UserRole, [])
+            table.setItem(row, column, item)
         table.setCurrentCell(row, 0)
         table.editItem(table.item(row, 0))
 
@@ -4344,7 +4529,12 @@ class GameMover(QWidget):
                 )
                 table.setCurrentCell(row, values.index("") if "" in values else 0)
                 return
-            notes.append({"title": title, "platform": platform, "body": body})
+            title_item = table.item(row, 0)
+            checks = title_item.data(Qt.UserRole) if title_item else []
+            notes.append({
+                "title": title, "platform": platform, "body": body,
+                "checks": checks if isinstance(checks, list) else [],
+            })
         try:
             response = requests.put(
                 f"{self.host_management_api_url()}/notes/server/{server_id}",

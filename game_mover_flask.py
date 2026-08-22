@@ -78,6 +78,7 @@ from game_mover_whitelist import (
 )
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
+from game_mover_game_inventory import scan_installed_games
 from game_mover_notes import (
     NotesError, delete_target_notes, initialize_notes_database, list_all_notes,
     list_notes, replace_notes,
@@ -159,6 +160,9 @@ MINECRAFT_STATUS_CACHE = {}
 MINECRAFT_STATUS_INFLIGHT = set()
 MINECRAFT_STATUS_LOCK = threading.Lock()
 MINECRAFT_STATUS_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+GAME_INVENTORY_CACHE = {"updated": 0.0, "games": []}
+GAME_INVENTORY_LOCK = threading.Lock()
+GAME_INVENTORY_CACHE_SECONDS = 300
 SECURITY_CONFIG_LOCK = threading.Lock()
 DNS_CONFIG_LOCK = threading.Lock()
 CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
@@ -1744,6 +1748,23 @@ def notes_catalog():
         return jsonify({"notes": list_all_notes(NOTES_DB_PATH)})
     except (OSError, sqlite3.Error) as error:
         return jsonify({"message": f"Databázi poznámek nelze použít: {error}"}), 500
+
+
+@app.route("/games/installed", methods=["GET"])
+def installed_games_catalog():
+    """Scan this machine; this endpoint is intentionally local-only."""
+    force = request.args.get("force") == "1"
+    now = time.monotonic()
+    with GAME_INVENTORY_LOCK:
+        if force or now - GAME_INVENTORY_CACHE["updated"] > GAME_INVENTORY_CACHE_SECONDS:
+            GAME_INVENTORY_CACHE["games"] = scan_installed_games()
+            GAME_INVENTORY_CACHE["updated"] = now
+        games = [dict(game) for game in GAME_INVENTORY_CACHE["games"]]
+    return jsonify({
+        "games": games,
+        "small_install_threshold_bytes": 32 * 1024 * 1024,
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
 
 
 @app.route("/notes/<target_type>/<target_id>", methods=["GET", "PUT"])

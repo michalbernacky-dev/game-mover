@@ -92,6 +92,21 @@ in the contextual server page, while the fixed knowledge-base tab also covers
 desktop games and launchers. This keeps locally verified compatibility fixes
 shareable between family clients without turning `servers.json` into a document
 store.
+Notes can carry an allowlisted declarative check profile. Checks are evaluated
+locally by each GUI client and return only `ok`, `missing`, or `unknown` plus a
+sanitized explanation. They cannot execute shell commands, and results are not
+uploaded. Installation checks include ordinary path candidates and Steam AppID
+manifest discovery across all configured Steam libraries; configuration checks
+cover bounded file markers and JSON values (including nested JSON strings used
+by CurseForge).
+The knowledge tab's target picker is populated from a local installed-game
+inventory rather than from launchers. Provider scanners combine `/var/Games`,
+Steam manifests/symlinks, Heroic metadata, Lutris SQLite and CurseForge
+instances, deduplicate paths, and aggregate the users that reference each game.
+Directory allocation is measured once per real path and very small entries are
+presented as possible remnants, never silently deleted. The local-only inventory
+endpoint is cached briefly; remote knowledge notes remain a separate data source
+and are joined in the GUI through stable aliases.
 
 The fixed **Launchers** tab is a provider-backed inventory of native desktop game
 launchers. Missing launchers remain visible but muted, installed versions are

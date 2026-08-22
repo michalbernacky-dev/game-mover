@@ -1,6 +1,7 @@
 """SQLite-backed notes shared by Game Mover clients."""
 
 import datetime
+import json
 import os
 import re
 import sqlite3
@@ -13,6 +14,13 @@ MAX_NOTES_PER_TARGET = 32
 MAX_TITLE_LENGTH = 120
 MAX_PLATFORM_LENGTH = 120
 MAX_BODY_LENGTH = 8000
+MAX_CHECKS_PER_NOTE = 24
+MAX_CHECK_LABEL_LENGTH = 160
+CHECK_TYPES = frozenset({
+    "path_exists", "path_absent", "file_contains",
+    "json_value", "steam_app",
+})
+CHECK_CATEGORIES = frozenset({"installation", "configuration"})
 
 
 class NotesError(ValueError):
@@ -44,8 +52,69 @@ def normalize_notes(raw_notes):
             or len(body) > MAX_BODY_LENGTH
         ):
             raise NotesError("Poznámka nemá platný nadpis nebo text")
-        notes.append({"title": title, "platform": platform, "body": body})
+        checks = normalize_checks(raw_note.get("checks", []))
+        notes.append({"title": title, "platform": platform, "body": body, "checks": checks})
     return notes
+
+
+def normalize_checks(raw_checks):
+    """Validate the small declarative language understood by local clients."""
+    if not isinstance(raw_checks, list) or len(raw_checks) > MAX_CHECKS_PER_NOTE:
+        raise NotesError("Neplatný seznam místních kontrol")
+    checks = []
+    for raw in raw_checks:
+        if not isinstance(raw, dict):
+            raise NotesError("Neplatná místní kontrola")
+        check_type = str(raw.get("type", ""))
+        category = str(raw.get("category", "configuration"))
+        label = str(raw.get("label", "")).strip()
+        if check_type not in CHECK_TYPES or category not in CHECK_CATEGORIES:
+            raise NotesError("Nepodporovaný typ místní kontroly")
+        if not label or len(label) > MAX_CHECK_LABEL_LENGTH:
+            raise NotesError("Místní kontrola nemá platný popis")
+        check = {"type": check_type, "category": category, "label": label}
+        if check_type == "steam_app":
+            app_id = str(raw.get("app_id", ""))
+            if not app_id.isdigit() or len(app_id) > 12:
+                raise NotesError("Neplatné Steam AppID")
+            check["app_id"] = app_id
+        elif check_type == "path_exists":
+            paths = raw.get("paths", [raw.get("path", "")])
+            if not isinstance(paths, list) or not paths or len(paths) > 12:
+                raise NotesError("Neplatné cesty místní kontroly")
+            check["paths"] = [_validate_check_path(path) for path in paths]
+        elif check_type in {"path_absent", "file_contains", "json_value"}:
+            check["path"] = _validate_check_path(raw.get("path", ""))
+        if check_type == "file_contains":
+            needles = raw.get("all", [])
+            if not isinstance(needles, list) or not needles or len(needles) > 12:
+                raise NotesError("Neplatný obsah místní kontroly")
+            check["all"] = [_validate_short_value(value) for value in needles]
+        elif check_type == "json_value":
+            keys = raw.get("keys", [])
+            if not isinstance(keys, list) or len(keys) > 16:
+                raise NotesError("Neplatná JSON cesta místní kontroly")
+            check["keys"] = [_validate_short_value(key) for key in keys]
+            expected = raw.get("equals")
+            if not isinstance(expected, (str, int, float, bool, type(None))):
+                raise NotesError("Neplatná očekávaná JSON hodnota")
+            check["equals"] = expected
+        checks.append(check)
+    return checks
+
+
+def _validate_check_path(value):
+    value = str(value).strip()
+    if not value or len(value) > 512 or "\x00" in value:
+        raise NotesError("Neplatná cesta místní kontroly")
+    return value
+
+
+def _validate_short_value(value):
+    value = str(value)
+    if not value or len(value) > 512 or "\x00" in value:
+        raise NotesError("Neplatná hodnota místní kontroly")
+    return value
 
 
 def _connect(path):
@@ -67,6 +136,7 @@ def _connect(path):
             title TEXT NOT NULL,
             platform TEXT NOT NULL DEFAULT 'Obecné',
             body TEXT NOT NULL,
+            checks_json TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             UNIQUE (target_type, target_id, sort_order)
@@ -79,6 +149,10 @@ def _connect(path):
     if "platform" not in columns:
         connection.execute(
             "ALTER TABLE notes ADD COLUMN platform TEXT NOT NULL DEFAULT 'Obecné'"
+        )
+    if "checks_json" not in columns:
+        connection.execute(
+            "ALTER TABLE notes ADD COLUMN checks_json TEXT NOT NULL DEFAULT '[]'"
         )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS notes_target_idx "
@@ -108,21 +182,31 @@ def list_notes(path, target_type, target_id):
     target_type, target_id = validate_target(target_type, target_id)
     with _database(path) as connection:
         rows = connection.execute(
-            "SELECT id, title, platform, body, created_at, updated_at FROM notes "
+            "SELECT id, title, platform, body, checks_json, created_at, updated_at FROM notes "
             "WHERE target_type = ? AND target_id = ? ORDER BY sort_order, id",
             (target_type, target_id),
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_row_to_note(row) for row in rows]
 
 
 def list_all_notes(path):
     with _database(path) as connection:
         rows = connection.execute(
-            "SELECT id, target_type, target_id, title, platform, body, "
+            "SELECT id, target_type, target_id, title, platform, body, checks_json, "
             "created_at, updated_at FROM notes "
             "ORDER BY target_type, target_id, sort_order, id"
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_row_to_note(row) for row in rows]
+
+
+def _row_to_note(row):
+    note = dict(row)
+    try:
+        note["checks"] = json.loads(note.pop("checks_json", "[]"))
+    except (TypeError, json.JSONDecodeError):
+        note.pop("checks_json", None)
+        note["checks"] = []
+    return note
 
 
 def replace_notes(path, target_type, target_id, raw_notes):
@@ -136,12 +220,12 @@ def replace_notes(path, target_type, target_id, raw_notes):
         )
         connection.executemany(
             "INSERT INTO notes "
-            "(target_type, target_id, sort_order, title, platform, body, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(target_type, target_id, sort_order, title, platform, body, checks_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     target_type, target_id, index, note["title"], note["platform"],
-                    note["body"], now, now,
+                    note["body"], json.dumps(note["checks"], ensure_ascii=False), now, now,
                 )
                 for index, note in enumerate(notes)
             ],
