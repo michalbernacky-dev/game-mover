@@ -142,6 +142,184 @@ class ServerRegistryTest(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 400)
 
+    def test_list_user_games_has_no_directory_creation_side_effect(self):
+        home = Path(self.temp_dir.name) / "home"
+        home.mkdir()
+        with patch.object(backend, "interactive_user_home", return_value=str(home)):
+            response = self.client.get(
+                "/list_user_games",
+                query_string={"platform": "steam", "user": "alice"},
+                **self.local_options(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["games"], [])
+        self.assertEqual(list(home.iterdir()), [])
+
+    def test_mover_rejects_user_and_game_path_traversal(self):
+        home = Path(self.temp_dir.name) / "home"
+        common = home / ".local/share/Steam/steamapps/common"
+        common.mkdir(parents=True)
+        games_root = Path(self.temp_dir.name) / "games"
+        links_root = Path(self.temp_dir.name) / "links"
+        games_root.mkdir()
+        links_root.mkdir()
+        (common / "Safe Game").mkdir()
+
+        def user_home(username):
+            if username != "alice":
+                raise ValueError("Unknown interactive user")
+            return str(home)
+
+        with (
+            patch.object(backend, "interactive_user_home", side_effect=user_home),
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.object(backend, "GAMES_LINKS_ROOT", str(links_root)),
+            patch.object(backend, "set_group_perms") as set_perms,
+        ):
+            bad_game = self.client.post(
+                "/move_game",
+                json={"platform": "steam", "game_name": "../outside", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+            bad_user = self.client.post(
+                "/move_game",
+                json={"platform": "steam", "game_name": "Safe Game", "user": "../../etc"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(bad_game.status_code, 400)
+        self.assertEqual(bad_user.status_code, 400)
+        self.assertTrue((common / "Safe Game").is_dir())
+        set_perms.assert_not_called()
+
+    def test_mover_rejects_source_symlink_escape(self):
+        home = Path(self.temp_dir.name) / "home"
+        common = home / ".local/share/Steam/steamapps/common"
+        common.mkdir(parents=True)
+        outside = Path(self.temp_dir.name) / "outside"
+        outside.mkdir()
+        (common / "Linked Game").symlink_to(outside, target_is_directory=True)
+        games_root = Path(self.temp_dir.name) / "games"
+        links_root = Path(self.temp_dir.name) / "links"
+        games_root.mkdir()
+        links_root.mkdir()
+
+        with (
+            patch.object(backend, "interactive_user_home", return_value=str(home)),
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.object(backend, "GAMES_LINKS_ROOT", str(links_root)),
+        ):
+            response = self.client.post(
+                "/move_game",
+                json={"platform": "steam", "game_name": "Linked Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue((common / "Linked Game").is_symlink())
+        self.assertTrue(outside.is_dir())
+
+    def test_valid_mover_paths_still_move_and_link_game(self):
+        home = Path(self.temp_dir.name) / "home"
+        common = home / ".local/share/Steam/steamapps/common"
+        common.mkdir(parents=True)
+        source = common / "Safe Game"
+        source.mkdir()
+        (source / "payload.bin").write_bytes(b"game")
+        games_root = Path(self.temp_dir.name) / "games"
+        links_root = Path(self.temp_dir.name) / "links"
+        games_root.mkdir()
+        links_root.mkdir()
+
+        with (
+            patch.object(backend, "interactive_user_home", return_value=str(home)),
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.object(backend, "GAMES_LINKS_ROOT", str(links_root)),
+            patch.object(
+                backend.grp, "getgrnam", return_value=Mock(gr_gid=os.getgid()),
+            ),
+        ):
+            moved = self.client.post(
+                "/move_game",
+                json={"platform": "steam", "game_name": "Safe Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        shared = games_root / "steam/Safe Game"
+        proxy = links_root / "alice/steam/Safe Game"
+        self.assertEqual(moved.status_code, 200, moved.get_data(as_text=True))
+        self.assertTrue(shared.is_dir())
+        self.assertEqual(proxy.resolve(), shared)
+        self.assertEqual(source.resolve(), shared)
+
+    def test_create_symlink_uses_only_validated_roots(self):
+        home = Path(self.temp_dir.name) / "home"
+        common = home / ".local/share/Steam/steamapps/common"
+        common.mkdir(parents=True)
+        games_root = Path(self.temp_dir.name) / "games"
+        shared = games_root / "steam/Shared Game"
+        shared.mkdir(parents=True)
+        links_root = Path(self.temp_dir.name) / "links"
+        links_root.mkdir()
+
+        with (
+            patch.object(backend, "interactive_user_home", return_value=str(home)),
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.object(backend, "GAMES_LINKS_ROOT", str(links_root)),
+        ):
+            linked = self.client.post(
+                "/create_symlink",
+                json={"platform": "steam", "game_name": "Shared Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+            traversal = self.client.post(
+                "/create_symlink",
+                json={"platform": "steam", "game_name": "../../etc", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        source = common / "Shared Game"
+        proxy = links_root / "alice/steam/Shared Game"
+        self.assertEqual(linked.status_code, 200, linked.get_data(as_text=True))
+        self.assertEqual(source.resolve(), shared)
+        self.assertEqual(proxy.resolve(), shared)
+        self.assertEqual(traversal.status_code, 400)
+
+    def test_steam_cache_rejects_invalid_user_and_shared_symlink(self):
+        home = Path(self.temp_dir.name) / "home"
+        steamapps = home / ".local/share/Steam/steamapps"
+        steamapps.mkdir(parents=True)
+        games_root = Path(self.temp_dir.name) / "games"
+        cache_root = games_root / "steam-cache"
+        cache_root.mkdir(parents=True)
+        outside = Path(self.temp_dir.name) / "outside-cache"
+        outside.mkdir()
+        (cache_root / "downloading").symlink_to(outside, target_is_directory=True)
+
+        def user_home(username):
+            if username != "alice":
+                raise ValueError("Unknown interactive user")
+            return str(home)
+
+        with (
+            patch.object(backend, "interactive_user_home", side_effect=user_home),
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+        ):
+            invalid_user = self.client.post(
+                "/set_steam_cache", json={"user": "../../etc"},
+                **self.local_options(self.pam_headers),
+            )
+            unsafe_cache = self.client.post(
+                "/set_steam_cache", json={"user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(invalid_user.status_code, 400)
+        self.assertEqual(unsafe_cache.status_code, 400)
+        self.assertTrue((cache_root / "downloading").is_symlink())
+        self.assertTrue(outside.is_dir())
+
     def test_pam_logout_immediately_revokes_presented_session(self):
         response = self.client.post(
             "/timekpr/logout", **self.local_options(self.pam_headers),

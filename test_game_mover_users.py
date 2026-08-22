@@ -3,7 +3,9 @@ import pwd
 import tempfile
 import unittest
 
-from game_mover_users import interactive_usernames, login_uid_range
+from game_mover_users import (
+    interactive_user_home, interactive_usernames, login_uid_range,
+)
 
 
 def passwd_entry(name, uid, home=None, shell="/bin/bash", gecos=""):
@@ -13,6 +15,29 @@ def passwd_entry(name, uid, home=None, shell="/bin/bash", gecos=""):
 
 
 class InteractiveUsersTest(unittest.TestCase):
+    def test_interactive_user_home_accepts_only_matching_human_account(self):
+        alice = passwd_entry("alice", 1000)
+        self.assertEqual(
+            interactive_user_home(
+                "alice", passwd_lookup=lambda _name: alice,
+                home_exists=lambda _path: True, uid_range=(1000, 60000),
+            ),
+            "/home/alice",
+        )
+
+        service = passwd_entry("minecraft-srv", 1001)
+        with self.assertRaisesRegex(ValueError, "Invalid interactive user"):
+            interactive_user_home(
+                "minecraft-srv", passwd_lookup=lambda _name: service,
+                home_exists=lambda _path: True, uid_range=(1000, 60000),
+            )
+
+        with self.assertRaisesRegex(ValueError, "Unknown interactive user"):
+            interactive_user_home(
+                "../../etc", passwd_lookup=lambda _name: (_ for _ in ()).throw(KeyError()),
+                home_exists=lambda _path: True, uid_range=(1000, 60000),
+            )
+
     def test_uses_configured_login_uid_range(self):
         with tempfile.NamedTemporaryFile("w", delete=False) as handle:
             handle.write("UID_MIN 1500\nUID_MAX 2500\n")

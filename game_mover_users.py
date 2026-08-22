@@ -47,3 +47,31 @@ def interactive_usernames(passwd_entries=None, home_exists=os.path.isdir, uid_ra
             continue
         users.append(username)
     return sorted(set(users), key=str.casefold)
+
+
+def interactive_user_home(username, passwd_lookup=None, home_exists=os.path.isdir,
+                          uid_range=None):
+    """Return the canonical home of a real interactive account or reject it."""
+    if not isinstance(username, str) or not username or "\x00" in username:
+        raise ValueError("Invalid interactive user")
+    lookup = passwd_lookup or pwd.getpwnam
+    try:
+        entry = lookup(username)
+    except KeyError as error:
+        raise ValueError("Unknown interactive user") from error
+
+    uid_min, uid_max = uid_range or login_uid_range()
+    expected_home = f"/home/{entry.pw_name}"
+    if (
+        entry.pw_name != username
+        or not uid_min <= entry.pw_uid <= uid_max
+        or entry.pw_dir != expected_home
+        or not home_exists(expected_home)
+        or entry.pw_shell in NON_INTERACTIVE_SHELLS
+        or not entry.pw_shell
+        or SERVICE_ACCOUNT_RE.search(username)
+        or os.path.islink(expected_home)
+        or os.path.realpath(expected_home) != expected_home
+    ):
+        raise ValueError("Invalid interactive user")
+    return expected_home

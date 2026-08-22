@@ -43,7 +43,7 @@ from game_mover_dns import (
 )
 from game_mover_pihole import PiholeAdapterError, sync_pihole_records
 from game_mover_mods import scan_mod_directory
-from game_mover_users import interactive_usernames
+from game_mover_users import interactive_user_home, interactive_usernames
 from game_mover_security import (
     POLICY_MODES,
     SERVER_ACTION_IDS,
@@ -116,6 +116,7 @@ app = Flask(__name__)
 # KONFIGURACE
 # ------------------------------------------------------------
 GAMES_ROOT = "/var/Games"
+GAMES_LINKS_ROOT = "/var/Games_links"
 GROUP_NAME = "gemers"
 PERMISSION_TARGETS = {
     "steam-library": os.path.join(GAMES_ROOT, "steam"),
@@ -609,10 +610,10 @@ TIMEKPRA_TOKENS = {}  # token -> (username, expiry)
 # ------------------------------------------------------------
 # Platform user common
 # ------------------------------------------------------------
-def steam_common_candidates(user):
+def steam_common_candidates(home):
     return [
-        f"/home/{user}/.steam/steam/steamapps/common",
-        f"/home/{user}/.local/share/Steam/steamapps/common",
+        os.path.join(home, ".local/share/Steam/steamapps/common"),
+        os.path.join(home, ".steam/steam/steamapps/common"),
     ]
 
 PLATFORMS = {
@@ -636,31 +637,78 @@ def get_disk_usage(path="/var/Games"):
     percent = int((usage.total - usage.free) / usage.total * 100)
     return used_gb, total_gb, percent
 
-def user_common_dir(platform, user, fallback_ok=True):
+def safe_path_component(value, label="path component"):
+    if (
+        not isinstance(value, str)
+        or not value
+        or value in (".", "..")
+        or value != value.strip()
+        or "/" in value
+        or "\\" in value
+        or "\x00" in value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ValueError(f"Invalid {label}")
+    return value
+
+
+def resolve_beneath(root, candidate, *, allow_leaf_symlink=False):
+    """Resolve an existing or prospective child and keep it below root."""
+    root_path = os.path.abspath(root)
+    if os.path.islink(root_path):
+        raise ValueError("Managed root must not be a symbolic link")
+    resolved_root = os.path.realpath(root_path)
+    candidate_path = os.path.abspath(candidate)
+    resolved_candidate = os.path.realpath(candidate_path)
+    if os.path.commonpath([resolved_candidate, resolved_root]) != resolved_root:
+        raise ValueError("Path escapes its managed root")
+    if not allow_leaf_symlink and os.path.islink(candidate_path):
+        raise ValueError("Symbolic-link path is not allowed")
+    return resolved_candidate
+
+
+def ensure_managed_directory(root, *components):
+    """Create fixed/safe path components without accepting symlink redirects."""
+    if not os.path.isdir(root) or os.path.islink(root):
+        raise ValueError("Managed root is unavailable or unsafe")
+    current = os.path.realpath(root)
+    for component in components:
+        safe_path_component(component)
+        child = os.path.join(current, component)
+        if os.path.lexists(child):
+            if os.path.islink(child) or not os.path.isdir(child):
+                raise ValueError("Managed directory is unsafe")
+        else:
+            os.mkdir(child)
+        current = resolve_beneath(root, child)
+    return current
+
+
+def user_common_dir(platform, user):
     if platform not in PLATFORMS:
         raise ValueError(f"Unsupported platform '{platform}'")
-    cands = PLATFORMS[platform]["user_common"](user)
-    existent = first_existing(cands)
-    if existent:
-        return existent
-    if fallback_ok and cands:
-        os.makedirs(cands[0], exist_ok=True)
-        return cands[0]
-    fallback = os.path.join(f"/home/{user}/Games", platform.capitalize())
-    os.makedirs(fallback, exist_ok=True)
-    return fallback
+    home = interactive_user_home(user)
+    candidates = PLATFORMS[platform]["user_common"](home)
+    existent = first_existing(candidates)
+    if not existent:
+        return None
+    return resolve_beneath(home, existent)
 
 def shared_game_path(platform, game):
     return os.path.join(GAMES_ROOT, platform, game)
 
-def steamapps_candidates(user):
+def steamapps_candidates(home):
     return [
-        f"/home/{user}/.steam/steam/steamapps",
-        f"/home/{user}/.local/share/Steam/steamapps",
+        os.path.join(home, ".local/share/Steam/steamapps"),
+        os.path.join(home, ".steam/steam/steamapps"),
     ]
 
 def steamapps_dir(user) -> Optional[str]:
-    return first_existing(steamapps_candidates(user))
+    home = interactive_user_home(user)
+    existent = first_existing(steamapps_candidates(home))
+    if not existent:
+        return None
+    return resolve_beneath(home, existent)
 
 def permission_target_path(target_id):
     """Resolve a fixed permission target without trusting a client path."""
@@ -1411,8 +1459,8 @@ def api_list_user_games():
         return jsonify({"message": f"Unsupported platform '{platform}'"}), 400
 
     try:
-        common = user_common_dir(platform, user, fallback_ok=True)
-        if not os.path.isdir(common):
+        common = user_common_dir(platform, user)
+        if not common:
             return jsonify({"platform": platform, "games": []})
 
         games = [
@@ -1422,6 +1470,8 @@ def api_list_user_games():
             and not is_excluded_game(platform, d)
         ]
         return jsonify({"platform": platform, "user": user, "games": sorted(games)})
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -1433,17 +1483,19 @@ def api_list_shared():
     if platform not in PLATFORMS:
         return jsonify({"message": f"Unsupported platform '{platform}'"}), 400
 
-    base = os.path.join(GAMES_ROOT, platform)
-    if not os.path.isdir(base):
-        return jsonify({"platform": platform, "games": []})
-
     try:
+        base = resolve_beneath(GAMES_ROOT, os.path.join(GAMES_ROOT, platform))
+        if not os.path.isdir(base):
+            return jsonify({"platform": platform, "games": []})
         games = [
             d for d in os.listdir(base)
             if os.path.isdir(os.path.join(base, d))
+            and not os.path.islink(os.path.join(base, d))
             and not is_excluded_game(platform, d)
         ]
         return jsonify({"platform": platform, "games": sorted(games)})
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
     except Exception as e:
         return jsonify({"message": str(e)}), 500
 
@@ -1451,7 +1503,7 @@ def api_list_shared():
 def move_game():
     if not require_local_operation(request, "game.move"):
         return jsonify({"message": "Unauthorized"}), 403
-    data = request.json
+    data = request.get_json(silent=True) or {}
     platform = data.get("platform")
     game_name = data.get("game_name")
     user = data.get("user")
@@ -1461,42 +1513,40 @@ def move_game():
     if platform != "steam":
         return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
-    if platform == "steam":
+    try:
+        safe_path_component(game_name, "game name")
         source_common = user_common_dir(platform, user)
-        source_path = os.path.join(source_common, game_name)
-        target_base = os.path.join(GAMES_ROOT, platform)
-        target_path = os.path.join(target_base, game_name)
-
-        if not os.path.exists(source_path):
+        if not source_common:
+            return jsonify({"message": "Steam library not found for user"}), 404
+        source_path = resolve_beneath(
+            source_common, os.path.join(source_common, game_name),
+        )
+        if not os.path.isdir(source_path):
             return jsonify({"message": "Game not found in source"}), 404
+        target_base = ensure_managed_directory(GAMES_ROOT, platform)
+        target_path = resolve_beneath(
+            target_base, os.path.join(target_base, game_name),
+        )
+        proxy_base = ensure_managed_directory(GAMES_LINKS_ROOT, user, platform)
+        proxy_path = os.path.join(proxy_base, game_name)
+        if os.path.lexists(target_path) or os.path.lexists(proxy_path):
+            return jsonify({"message": "Target or proxy path already exists"}), 409
 
-        os.makedirs(target_base, exist_ok=True)
-
-        try:
-            shutil.move(source_path, target_path)
-            set_group_perms(target_path)
-
-            # proxy symlink
-            proxy_base = f"/var/Games_links/{user}/{platform}"
-            os.makedirs(proxy_base, exist_ok=True)
-            proxy_path = os.path.join(proxy_base, game_name)
-            if not os.path.exists(proxy_path):
-                os.symlink(target_path, proxy_path)
-
-            # symlink v common → proxy
-            os.symlink(proxy_path, source_path)
-
-            return jsonify({"message": f"Game '{game_name}' moved to shared, proxy and symlink created"})
-        except Exception as e:
-            return jsonify({"message": str(e)}), 500
-
-    return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+        shutil.move(source_path, target_path)
+        set_group_perms(target_path)
+        os.symlink(target_path, proxy_path)
+        os.symlink(proxy_path, source_path)
+        return jsonify({"message": f"Game '{game_name}' moved to shared, proxy and symlink created"})
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 @app.route("/create_symlink", methods=["POST"])
 def create_symlink():
     if not require_local_operation(request, "game.link"):
         return jsonify({"message": "Unauthorized"}), 403
-    data = request.json
+    data = request.get_json(silent=True) or {}
     platform = data.get("platform")
     game_name = data.get("game_name")
     user = data.get("user")
@@ -1506,30 +1556,40 @@ def create_symlink():
     if platform != "steam":
         return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
-    target_path = os.path.join(GAMES_ROOT, platform, game_name)
-    if not os.path.exists(target_path):
-        return jsonify({"message": "Target path does not exist"}), 404
-
-    if platform == "steam":
+    try:
+        safe_path_component(game_name, "game name")
+        target_base = resolve_beneath(
+            GAMES_ROOT, os.path.join(GAMES_ROOT, platform),
+        )
+        target_path = resolve_beneath(
+            target_base, os.path.join(target_base, game_name),
+        )
+        if not os.path.isdir(target_path):
+            return jsonify({"message": "Target path does not exist"}), 404
         source_common = user_common_dir(platform, user)
-        source_path = os.path.join(source_common, game_name)
+        if not source_common:
+            return jsonify({"message": "Steam library not found for user"}), 404
+        source_path = resolve_beneath(
+            source_common, os.path.join(source_common, game_name),
+        )
 
-        if os.path.exists(source_path):
+        if os.path.lexists(source_path):
             return jsonify({"message": "Symlink already exists"}), 400
 
-        try:
-            proxy_base = f"/var/Games_links/{user}/{platform}"
-            os.makedirs(proxy_base, exist_ok=True)
-            proxy_path = os.path.join(proxy_base, game_name)
-            if not os.path.exists(proxy_path):
-                os.symlink(target_path, proxy_path)
+        proxy_base = ensure_managed_directory(GAMES_LINKS_ROOT, user, platform)
+        proxy_path = os.path.join(proxy_base, game_name)
+        if os.path.lexists(proxy_path):
+            if not os.path.islink(proxy_path) or os.path.realpath(proxy_path) != target_path:
+                return jsonify({"message": "Proxy path conflicts with shared game"}), 409
+        else:
+            os.symlink(target_path, proxy_path)
 
-            os.symlink(proxy_path, source_path)
-            return jsonify({"message": "Steam symlink created via proxy"})
-        except Exception as e:
-            return jsonify({"message": str(e)}), 500
-
-    return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+        os.symlink(proxy_path, source_path)
+        return jsonify({"message": "Steam symlink created via proxy"})
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
 
 @app.route("/fix_perms", methods=["POST"])
 def fix_perms():
@@ -1554,7 +1614,10 @@ def steam_cache_status():
     if not user:
         return jsonify({"message": "Missing user"}), 400
 
-    steamapps = steamapps_dir(user)
+    try:
+        steamapps = steamapps_dir(user)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
     if not steamapps:
         return jsonify({"message": "Steam knihovna nenalezena", "status": "missing"}), 404
 
@@ -1603,21 +1666,24 @@ def steam_cache_status():
 def set_steam_cache():
     if not require_local_operation(request, "steam.cache"):
         return jsonify({"message": "Unauthorized"}), 403
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     user = data.get("user")
     if not user:
         return jsonify({"message": "Missing user"}), 400
 
-    steamapps = steamapps_dir(user)
+    try:
+        steamapps = steamapps_dir(user)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
     if not steamapps:
         return jsonify({"message": "Steam knihovna nenalezena"}), 404
 
     try:
         download_path = os.path.join(steamapps, "downloading")
-        shared_base = os.path.join(GAMES_ROOT, "steam-cache")
+        shared_base = ensure_managed_directory(GAMES_ROOT, "steam-cache")
         shared_downloading = os.path.join(shared_base, "downloading")
-
-        os.makedirs(shared_base, exist_ok=True)
+        if os.path.islink(shared_downloading):
+            return jsonify({"message": "Sdílená Steam cache nesmí být symlink"}), 400
         try:
             gid = grp.getgrnam(GROUP_NAME).gr_gid
             os.chown(shared_base, -1, gid)
@@ -1631,10 +1697,10 @@ def set_steam_cache():
                 return jsonify({"message": "Steam cache už je sdílená", "status": "shared"})
             os.unlink(download_path)
         elif os.path.isdir(download_path):
-            if os.path.exists(shared_downloading):
+            if os.path.lexists(shared_downloading):
                 return jsonify({"message": f"Cílový {shared_downloading} už existuje, nejprve jej odstraň nebo přesuň"}), 409
             shutil.move(download_path, shared_downloading)
-        elif os.path.exists(download_path):
+        elif os.path.lexists(download_path):
             return jsonify({"message": f"{download_path} není adresář ani symlink"}), 400
         else:
             os.makedirs(shared_downloading, exist_ok=True)

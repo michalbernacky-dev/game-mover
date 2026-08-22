@@ -22,7 +22,7 @@ regression tests have been reviewed.
 | ID | Severity | Status | Finding |
 |---|---|---|---|
 | GM-SA-2026-001 | Critical | Fixed | Arbitrary recursive permission changes by the root API |
-| GM-SA-2026-002 | High | Open | Path traversal in privileged Game Mover operations |
+| GM-SA-2026-002 | High | Fixed | Path traversal in privileged Game Mover operations |
 | GM-SA-2026-003 | High | Open | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Open | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Open | Mutable CI dependencies and incomplete security verification |
@@ -33,7 +33,7 @@ regression tests have been reviewed.
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 
 - Severity: **Critical**
-- Status: **Fixed** (working tree, deployment pending)
+- Status: **Fixed** (deployment verified)
 - Relevant weakness classes: CWE-73, CWE-732
 - Affected component: `POST /fix_perms`
 
@@ -82,13 +82,12 @@ Regression coverage verifies rejection of an arbitrary `/etc` path, rejection
 of unknown and symbolic-link targets, enforcement of silent/PAM policy, and
 that a file symlink inside the library does not change its external target.
 The targeted security tests and the complete suite of 221 tests passed. The
-fixed code still needs to be packaged and deployed before the installed hosts
-are protected.
+packaged deployment was subsequently verified without a functional regression.
 
 ## GM-SA-2026-002: Path traversal in privileged Game Mover operations
 
 - Severity: **High**
-- Status: **Open**
+- Status: **Fixed** (working tree, deployment pending)
 - Relevant weakness classes: CWE-22, CWE-23, CWE-59
 - Affected components: `/move_game`, `/create_symlink`, `/set_steam_cache`,
   `/list_user_games`
@@ -119,6 +118,26 @@ directories and symlinks outside the intended game-library hierarchy.
    escapes.
 5. Remove filesystem creation from GET requests.
 6. Add regression tests for every affected endpoint.
+
+### Resolution
+
+Resolved on 2026-08-23. Usernames are now resolved through the system password
+database and must identify an existing interactive account with its canonical
+`/home/<user>` directory. Game names must be exactly one safe path component.
+All derived source and destination paths are resolved beneath their approved
+home, shared-library, or proxy root, and unsafe root or leaf symlinks are
+rejected.
+
+Managed directory creation validates every component instead of following an
+existing redirect. `/list_user_games` is now side-effect free and returns an
+empty catalog when the user's Steam library does not exist. Move, link, and
+Steam-cache operations reject path traversal, conflicting proxy paths, source
+symlink escapes, and a symlink in place of the managed shared cache.
+
+Regression coverage exercises invalid users, `../` game names, source and
+cache symlink escapes, a side-effect-free GET, and successful normal move and
+link workflows. The complete suite of 228 tests passed. The fixed code still
+needs to be packaged and deployed before installed hosts are protected.
 
 ## GM-SA-2026-003: Excessive privileges and insufficient service isolation
 
