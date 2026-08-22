@@ -3,12 +3,13 @@
 # game-mover
 Local-first game data manager for trusted local users on a single Linux machine.
 
-The **Mover** tab hides launcher runtimes and other support payloads. Steam
-directories without a matching local app manifest and incomplete GOG
-directories are hidden as possible remnants by default; an explicit checkbox
-shows them again for recovery or manually managed installations. Recognition is
-based on launcher/install metadata and manifest payload completeness, not a
-fixed minimum game size.
+The mutable **Mover** tab supports Steam only: moving payloads into
+`/var/Games/steam`, creating per-user symlinks, sharing the download cache, and
+repairing Steam-library permissions. It hides Steam runtimes and possible stale
+installations by default, with an explicit checkbox for recovery. Heroic owns
+GOG and Epic payload/prefix management. Other launchers remain read-only
+inventory providers until their storage workflows are explicitly implemented
+and tested. Existing legacy data is never removed by this scope restriction.
 
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -510,11 +511,13 @@ Behavior:
 # game-mover
 Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jednom Linux stroji.
 
-Záložka **Mover** skrývá runtime launcherů a další servisní obsah. Steam adresáře
-bez odpovídajícího místního manifestu a neúplné GOG adresáře jsou ve výchozím
-stavu skryté jako možné pozůstatky; samostatné zaškrtávací pole je znovu ukáže
-pro obnovu nebo ručně spravované instalace. Rozpoznání nepoužívá minimální
-velikost hry, ale metadata launcheru, instalace a úplnost obsahu vůči manifestu.
+Mutující záložka **Mover** podporuje pouze Steam: přesun dat do
+`/var/Games/steam`, uživatelské symlinky, sdílenou download cache a opravu
+oprávnění Steam knihovny. Runtime a možné staré instalace ve výchozím stavu
+skrývá, ale samostatný přepínač je zpřístupní pro obnovu. GOG a Epic včetně
+prefixů vlastní Heroic. Ostatní launchery zůstávají jen zdrojem read-only
+inventury, dokud jejich úložiště výslovně neimplementujeme a neotestujeme.
+Existující starší data zúžení rozsahu nikdy automaticky nemaže.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 

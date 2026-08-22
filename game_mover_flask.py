@@ -6,7 +6,6 @@ import os
 import shutil
 import grp
 import subprocess
-import fileinput
 import configparser
 from typing import Optional
 from dataclasses import dataclass
@@ -611,44 +610,8 @@ def steam_common_candidates(user):
         f"/home/{user}/.local/share/Steam/steamapps/common",
     ]
 
-def gog_common_candidates(user):
-    base = f"/home/{user}/Games/gog"
-    commons = []
-    if os.path.isdir(base):
-        for prefix in os.listdir(base):
-            gog_path = os.path.join(base, prefix, "drive_c", "GOG Games")
-            if os.path.isdir(gog_path):
-                commons.append(gog_path)
-    if not commons:
-        commons.append(f"/home/{user}/GOG Games")
-    return commons
-
-def epic_common_candidates(user):
-    return [
-        f"/home/{user}/Games/Epic",
-        f"/home/{user}/Epic Games",
-        f"/home/{user}/Games/Heroic/Epic",
-    ]
-
-def ubisoft_common_candidates(user):
-    return [
-        f"/home/{user}/Ubisoft Game Launcher/games",
-        f"/home/{user}/Games/Ubisoft Connect",
-        f"/home/{user}/Games/Ubisoft",
-    ]
-
-def rockstar_common_candidates(user):
-    return [
-        f"/home/{user}/Rockstar Games",
-        f"/home/{user}/Games/Rockstar Games",
-    ]
-
 PLATFORMS = {
     "steam": {"user_common": steam_common_candidates},
-    "gog": {"user_common": gog_common_candidates},
-    "epic": {"user_common": epic_common_candidates},
-    "ubisoft": {"user_common": ubisoft_common_candidates},
-    "rockstar": {"user_common": rockstar_common_candidates},
 }
 
 # ------------------------------------------------------------
@@ -765,20 +728,6 @@ def load_read_token():
 
 
 ensure_read_token()
-
-def find_gog_prefix_dir(user, game_name):
-    """
-    Najde prefix (~/Games/gog/<prefix>) podle hry, která je uvnitř drive_c/GOG Games/<game_name>
-    """
-    base = f"/home/{user}/Games/gog"
-    if not os.path.isdir(base):
-        return None
-    for prefix in os.listdir(base):
-        gog_path = os.path.join(base, prefix, "drive_c", "GOG Games", game_name)
-        if os.path.isdir(gog_path):
-            return os.path.join(base, prefix)
-    return None
-
 
 def require_local_admin(req):
     payload = req.get_json(silent=True) or {}
@@ -1465,6 +1414,8 @@ def move_game():
 
     if not platform or not game_name or not user:
         return jsonify({"message": "Missing parameters"}), 400
+    if platform != "steam":
+        return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
     if platform == "steam":
         source_common = user_common_dir(platform, user)
@@ -1495,8 +1446,7 @@ def move_game():
         except Exception as e:
             return jsonify({"message": str(e)}), 500
 
-    # TODO: move logic for gog/epic/ubisoft/rockstar pokud bude potřeba
-    return jsonify({"message": f"Move not supported for {platform}"}), 400
+    return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
 @app.route("/create_symlink", methods=["POST"])
 def create_symlink():
@@ -1506,10 +1456,11 @@ def create_symlink():
     platform = data.get("platform")
     game_name = data.get("game_name")
     user = data.get("user")
-    source_user = data.get("source_user")  # jen pro gog/epic/ubisoft
 
     if not platform or not game_name or not user:
         return jsonify({"message": "Missing parameters"}), 400
+    if platform != "steam":
+        return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
     target_path = os.path.join(GAMES_ROOT, platform, game_name)
     if not os.path.exists(target_path):
@@ -1534,48 +1485,7 @@ def create_symlink():
         except Exception as e:
             return jsonify({"message": str(e)}), 500
 
-    if platform in ("gog", "epic", "ubisoft"):
-        if not source_user:
-            return jsonify({"message": "Missing source_user"}), 400
-
-        src_prefix = find_gog_prefix_dir(source_user, game_name)
-        if not src_prefix:
-            return jsonify({"message": f"Source prefix for {game_name} not found"}), 404
-
-        dst_base = f"/home/{user}/Games/{platform}"
-        dst_prefix = os.path.join(dst_base, os.path.basename(src_prefix))
-
-        if os.path.exists(dst_prefix):
-            return jsonify({"message": "Prefix already exists"}), 400
-
-        try:
-            os.makedirs(dst_base, exist_ok=True)
-            subprocess.check_call([
-                "rsync", "-aH",
-                src_prefix + "/", dst_prefix + "/"
-            ])
-
-            # opravíme reg soubory
-            reg_files = [
-                os.path.join(dst_prefix, "system.reg"),
-                os.path.join(dst_prefix, "user.reg"),
-                os.path.join(dst_prefix, "userdef.reg"),
-            ]
-            old_home = f"/home/{source_user}"
-            new_home = f"/home/{user}"
-            for reg_file in reg_files:
-                if os.path.isfile(reg_file):
-                    with fileinput.FileInput(reg_file, inplace=True, backup=".bak") as f:
-                        for line in f:
-                            print(line.replace(old_home, new_home), end="")
-
-            return jsonify({"message": f"Prefix copied from {source_user} to {user} and registry updated"})
-        except subprocess.CalledProcessError as e:
-            return jsonify({"message": f"rsync error: {e}"}), 500
-        except Exception as e:
-            return jsonify({"message": str(e)}), 500
-
-    return jsonify({"message": f"Unsupported platform {platform}"}), 400
+    return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
 
 @app.route("/fix_perms", methods=["POST"])
 def fix_perms():

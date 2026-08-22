@@ -30,6 +30,22 @@ Game-specific protocols such as Minecraft status, RCON, Steam query ports or
 Satisfactory reliable messaging remain capabilities layered on this neutral
 network model.
 
+## Desktop game-data ownership
+
+The mutable **Mover** workflow deliberately supports only Steam. It moves Steam
+payloads into `/var/Games/steam`, creates per-user proxy symlinks and manages the
+shared Steam download cache and library permissions. The UI and local API do not
+offer move or link operations for any other launcher.
+
+GOG and Epic installation data belong to Heroic, which already separates a
+game's payload from its per-user Wine prefix and presents that relationship to
+the user. Game Mover does not copy Heroic prefixes, rewrite Wine registries or
+maintain competing installation metadata. Other launchers remain read-only
+inventory/knowledge providers until their storage and lifecycle have been
+implemented and tested explicitly. Existing legacy directories below
+`/var/Games` are preserved; narrowing the supported workflow never deletes or
+migrates them automatically.
+
 Adapters may discover endpoints from an authoritative game/runtime source and
 merge them with optional registry entries. Minecraft reads `server.properties`
 or Podman publication metadata. The Satisfactory systemd adapter reads the
@@ -104,8 +120,9 @@ inventory rather than from launchers. Provider scanners combine `/var/Games`,
 Steam manifests/symlinks, Heroic metadata, Lutris SQLite and CurseForge
 instances, deduplicate paths, and aggregate the users that reference each game.
 Logical directory size is measured once per real path. Entries up to and
-including 1 GiB are treated as remnants and omitted from the catalog, but never
-deleted. The local-only inventory
+including 1 GiB are marked as possible remnants only when no launcher or
+installation metadata confirms them. Confirmed small games remain in the
+catalog, while the GUI hides possible remnants behind an explicit filter. The local-only inventory
 endpoint is cached briefly; remote knowledge notes remain a separate data source
 and are joined in the GUI through stable aliases.
 

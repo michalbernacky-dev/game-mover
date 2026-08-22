@@ -111,6 +111,17 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_mover_api_exposes_only_steam_without_touching_legacy_data(self):
+        self.assertEqual(set(backend.PLATFORMS), {"steam"})
+        for endpoint in ("/list_user_games", "/list_shared"):
+            with self.subTest(endpoint=endpoint):
+                response = self.client.get(
+                    endpoint,
+                    query_string={"platform": "gog", "user": "tester"},
+                    **self.local_options(),
+                )
+                self.assertEqual(response.status_code, 400)
+
     def test_pam_logout_immediately_revokes_presented_session(self):
         response = self.client.post(
             "/timekpr/logout", **self.local_options(self.pam_headers),

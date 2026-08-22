@@ -70,7 +70,6 @@ SERVER_READ_TOKEN_PATH = os.getenv(
     CLIENT_CONFIG.get("server_read_token_path", "/etc/game_mover/read.token"),
 )
 SERVER_READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
-PLATFORMS = ["steam", "gog", "epic", "ubisoft", "rockstar"]
 DAY_NAMES = {
     1: "Po",
     2: "Út",
@@ -106,45 +105,12 @@ def list_wheel_users():
         return []
 
 def user_common_candidates(platform, user):
-    if platform == "steam":
-        return [
-            f"/home/{user}/.steam/steam/steamapps/common",
-            f"/home/{user}/.local/share/Steam/steamapps/common",
-        ]
-
-    elif platform == "gog":
-        base = f"/home/{user}/Games/gog"
-        commons = []
-        if os.path.isdir(base):
-            for prefix in os.listdir(base):
-                gog_path = os.path.join(base, prefix, "drive_c", "GOG Games")
-                if os.path.isdir(gog_path):
-                    commons.append(gog_path)
-        if not commons:
-            commons.append(f"/home/{user}/GOG Games")
-        return commons
-
-    elif platform == "epic":
-        return [
-            f"/home/{user}/Games/Epic",
-            f"/home/{user}/Epic Games",
-            f"/home/{user}/Games/Heroic/Epic",
-        ]
-
-    elif platform == "ubisoft":
-        return [
-            f"/home/{user}/Ubisoft Game Launcher/games",
-            f"/home/{user}/Games/Ubisoft Connect",
-            f"/home/{user}/Games/Ubisoft",
-        ]
-
-    elif platform == "rockstar":
-        return [
-            f"/home/{user}/Rockstar Games",
-            f"/home/{user}/Games/Rockstar Games",
-        ]
-
-    return []
+    if platform != "steam":
+        return []
+    return [
+        f"/home/{user}/.steam/steam/steamapps/common",
+        f"/home/{user}/.local/share/Steam/steamapps/common",
+    ]
 
 def resolve_user_common(platform, user):
     for path in user_common_candidates(platform, user):
@@ -909,21 +875,23 @@ class GameMover(QWidget):
         except Exception:
             pass
 
-        self.platform_combo = QComboBox(self)
-        self.platform_combo.addItems(PLATFORMS)
-        self.platform_combo.currentIndexChanged.connect(self.on_platform_changed)
-        layout.addWidget(QLabel("Platforma:"))
-        layout.addWidget(self.platform_combo)
+        self.mover_scope_label = QLabel(
+            "Sdílení herních dat zajišťuje Game Mover pouze pro Steam. "
+            "GOG a Epic spravuje Heroic; ostatní launchery jsou zatím pouze rozpoznávané.",
+            self,
+        )
+        self.mover_scope_label.setWordWrap(True)
+        layout.addWidget(self.mover_scope_label)
 
         self.cache_button = QPushButton('Nastav sdílenou Steam cache', self)
         self.cache_button.clicked.connect(self.set_shared_cache)
         layout.addWidget(self.cache_button)
 
-        self.fix_perms_button = QPushButton('Opravit oprávnění /var/Games', self)
+        self.fix_perms_button = QPushButton('Opravit oprávnění Steam knihovny', self)
         self.fix_perms_button.clicked.connect(self.fix_shared_permissions)
         layout.addWidget(self.fix_perms_button)
 
-        self.label_move = QLabel('Hry k přesunu do sdílené knihovny:')
+        self.label_move = QLabel('Steam hry k přesunu do sdílené knihovny:')
         layout.addWidget(self.label_move)
         self.game_combo_move = QComboBox(self)
         self.game_combo_move.currentIndexChanged.connect(
@@ -955,7 +923,7 @@ class GameMover(QWidget):
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
 
-        self.label_symlink = QLabel('Hry v /var/Games dostupné pro symlink:')
+        self.label_symlink = QLabel('Steam hry ve sdílené knihovně dostupné pro symlink:')
         layout.addWidget(self.label_symlink)
 
         self.symlink_list = QListWidget(self)
@@ -965,16 +933,6 @@ class GameMover(QWidget):
             self.update_mover_action_availability
         )
         layout.addWidget(self.symlink_list)
-
-        self.label_source_user = QLabel('Zdrojový uživatel prefixu (pro GOG/Epic/Ubisoft):')
-        layout.addWidget(self.label_source_user)
-
-        self.source_user_combo = QComboBox(self)
-        self.source_user_combo.addItems(list_system_users())
-        layout.addWidget(self.source_user_combo)
-
-        self.label_source_user.setVisible(False)
-        self.source_user_combo.setVisible(False)
 
         self.link_button = QPushButton('Vytvořit symlink', self)
         self.link_button.clicked.connect(self.create_symlink)
@@ -6925,17 +6883,6 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "DNSmasq", f"Chyba: {e}")
         self.refresh_dnsmasq_status()
 
-    def on_platform_changed(self, idx):
-        self.platform = self.platform_combo.currentText()
-        if self.platform == "steam":
-            self.label_source_user.setVisible(False)
-            self.source_user_combo.setVisible(False)
-        else:
-            self.label_source_user.setVisible(True)
-            self.source_user_combo.setVisible(True)
-        self.refresh_cache_status()
-        self.refresh_game_lists()
-
     def get_game_candidates(self):
         common = resolve_user_common(self.platform, self.user)
         if common and os.path.exists(common):
@@ -7452,8 +7399,8 @@ class GameMover(QWidget):
     def fix_shared_permissions(self):
         reply = QMessageBox.question(
             self,
-            "Opravit oprávnění",
-            "Opravdu chceš opravit oprávnění pro /var/Games?",
+            "Opravit oprávnění Steam knihovny",
+            "Opravdu chceš opravit oprávnění pro /var/Games/steam?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -7468,7 +7415,7 @@ class GameMover(QWidget):
             return
 
         try:
-            path = "/var/Games"
+            path = "/var/Games/steam"
             resp = requests.post(
                 f"{FLASK_URL}/fix_perms",
                 json={"path": path},
@@ -7534,13 +7481,6 @@ class GameMover(QWidget):
             )
             return
         payload = {"platform": self.platform, "game_name": game, "user": self.user}
-        if self.platform in ("gog", "epic", "ubisoft"):
-            source_user = self.source_user_combo.currentText()
-            if not source_user:
-                QMessageBox.warning(self, "Chyba", "Musíš vybrat zdrojového uživatele pro Lutris prefix")
-                return
-            payload["source_user"] = source_user
-
         try:
             resp = requests.post(f"{FLASK_URL}/create_symlink", json=payload, headers=headers)
             QMessageBox.information(self, "Výsledek", resp.json().get("message", ""))

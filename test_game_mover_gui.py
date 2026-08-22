@@ -139,6 +139,14 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(len(self.window.local_pam_buttons), 1)
 
+    def test_mover_exposes_only_the_supported_steam_workflow(self):
+        self.assertEqual(self.window.platform, "steam")
+        self.assertFalse(hasattr(self.window, "platform_combo"))
+        self.assertFalse(hasattr(self.window, "source_user_combo"))
+        self.assertIn("pouze pro Steam", self.window.mover_scope_label.text())
+        self.assertIn("Steam hry", self.window.label_move.text())
+        self.assertIn("Steam hry", self.window.label_symlink.text())
+
     def test_launcher_tab_renders_outdated_and_missing_items(self):
         self.window.on_launcher_statuses_loaded({
             "update_policy": "pam",

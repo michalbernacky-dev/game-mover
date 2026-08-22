@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.28.0
+Version:        0.29.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -174,6 +174,12 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.29.0-1
+- Narrow mutable Mover operations to the tested Steam shared-library workflow
+- Delegate GOG and Epic payload/prefix ownership to Heroic
+- Remove untested prefix copying and registry rewriting from the local API
+- Preserve other launcher data as read-only inventory without deleting legacy paths
+
 * Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.28.0-1
 - Include small games when Lutris or another launcher confirms their installation
 - Resolve DOSBox, ScummVM, native Linux, Wine, and Steam paths from Lutris YAML
