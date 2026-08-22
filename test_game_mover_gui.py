@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -321,6 +321,42 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.server_management_pages["mc-test"]["properties_status"].text(),
         )
         update_ui.assert_called_once()
+
+    def test_host_pam_authentication_unlocks_every_contextual_control(self):
+        self.window.app_mode = "server"
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "token": "shared-host-token",
+            "mode": "settimeleft",
+            "disable_seconds": 3600,
+        }
+        with (
+            patch.object(game_mover.requests, "post", return_value=response) as post,
+            patch.object(self.window, "update_server_mode_ui"),
+            patch.object(self.window, "refresh_server_statuses"),
+        ):
+            self.window.authenticate_host_pam("admin", "secret")
+
+        self.window.update_host_pam_buttons()
+        self.assertEqual(self.window.timekpr_token, "shared-host-token")
+        self.assertEqual(len(self.window.host_pam_buttons), 6)
+        self.assertTrue(all(
+            button.text() == "PAM odemčeno" and not button.isEnabled()
+            for button in self.window.host_pam_buttons
+        ))
+        post.assert_called_once_with(
+            "http://127.0.0.1:5000/timekpr/auth",
+            json={"username": "admin", "password": "secret"}, timeout=8,
+        )
+
+    def test_host_pam_controls_stay_locked_in_read_only_client_mode(self):
+        self.window.app_mode = "client"
+        self.window.timekpr_token = ""
+        self.window.update_host_pam_buttons()
+        self.assertTrue(all(
+            button.text() == "Odemknout PAM…" and not button.isEnabled()
+            for button in self.window.host_pam_buttons
+        ))
 
     def test_modpack_catalog_renders_projects_and_server_pack_install_action(self):
         self.window.open_modpack_catalog(version="1.20.1", loader="fabric")

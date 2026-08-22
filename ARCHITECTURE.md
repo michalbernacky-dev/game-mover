@@ -169,6 +169,10 @@ the same model without allowing those protections to be weakened. Remote SSH
 administration is absent from Connections and remains hidden in Security until
 local PAM authentication.
 
+Every fixed tab that exposes host-protected actions has a contextual PAM unlock
+control. All of them use the same short-lived backend session token; credentials
+exist only for the authentication request and are never retained by the GUI.
+
 The Minecraft installer opens **Minecraft: Modpacks** as a single closable,
 contextual tab instead of making Minecraft-specific discovery part of the
 platform's fixed top-level navigation. Its first provider is CurseForge and
@@ -221,7 +225,8 @@ tunnel controls require a local wheel/PAM session; the SSH process uses only a
 key or agent, strict host-key checking, no password input, and no agent
 forwarding. The GUI verifies that this SSH PID owns the listener before using
 it. A separate host wheel/PAM session remains mandatory for the remote
-administrative API, and the host `api.token` is never copied to the client.
+administrative API, and can be opened from any relevant tab. The host `api.token`
+is never copied to the client.
 This is transport-level access through an existing SSH account, not a remotely
 exposed administrative HTTP API. The Podman socket, RCON passwords, and API
 tokens never leave the host API and must not appear in logs or responses.

@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.25.5
+Version:        0.26.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -171,6 +171,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.0-1
+- Offer one shared host PAM unlock directly in every tab with protected operations
+- Reuse the same short-lived backend token without storing the user's password
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.5-1
 - Make game metadata columns resizable and give each cell a contextual tooltip
 

@@ -100,8 +100,9 @@ or Server mode for local administration. It no longer exposes an SSH management
 mode. Remote host administration is opened from the **Security** tab after local
 wheel/PAM authentication. Game Mover then owns a key-only SSH process and a local
 forward while keeping the administrative HTTP API on loopback at both ends. Once
-the tunnel is ready, authenticate separately as a wheel user of the host in the
-**Timekpr** tab, then edit the host service registry. Each row has an
+the tunnel is ready, use **Unlock PAM** in any tab containing protected actions.
+The short-lived host session is shared by those tabs without storing the password;
+then edit the host service registry. Each row has an
 ID, display name, systemd unit, type (`generic` or `minecraft`), and absolute
 data and `mods` directories for Minecraft services. The
 game port is discovered from the workload at runtime. Multiple Minecraft
@@ -178,8 +179,8 @@ through the installer. In-place restore will be added later as a separate
 destructive, policy-controlled operation.
 
 When a host PAM session expires, the first rejected protected request immediately
-locks the host-management controls and tells the user to authenticate again in
-the Timekpr tab; it is never silently retried with broader credentials.
+locks the host-management controls and offers authentication again in the current
+tab; it is never silently retried with broader credentials.
 
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
@@ -564,7 +565,9 @@ nezpřístupňuje. Vzdálená správa hostitele se otevírá v záložce **Zabez
 po místním wheel/PAM ověření. Game Mover následně vlastní SSH proces používající
 jen klíč a místní forward; administrativní HTTP API tak na obou koncích zůstává
 pouze na loopbacku. Po připravení tunelu se samostatně ověř jako wheel uživatel
-hostitele v záložce **Timekpr** a poté uprav registr služeb. Každý řádek obsahuje
+hostitele tlačítkem **Odemknout PAM** v libovolné záložce s chráněnými akcemi.
+Krátkodobá relace je mezi těmito záložkami sdílená a heslo se neukládá. Poté lze
+upravit registr služeb. Každý řádek obsahuje
 ID, zobrazovaný název, systemd jednotku, typ (`generic` nebo `minecraft`) a u
 Minecraftu absolutní cestu k datovému adresáři a adresáři `mods`. Herní port se zjišťuje automaticky z běžícího workloadu. Forge a Pixelmon
 tak mají vlastní cestu i porovnání modů; například Pixelmon může používat jednotku
@@ -637,7 +640,7 @@ workload. In-place obnova přibude později jako samostatná destruktivní opera
 vlastní bezpečnostní zásadou.
 
 Při vypršení PAM relace hostitele první odmítnutá chráněná operace okamžitě zamkne
-ovládací prvky správy a vyzve k novému ověření v záložce Timekpr. Aplikace ji
+ovládací prvky správy a nabídne nové ověření přímo v aktuální záložce. Aplikace ji
 nikdy nezkouší potichu opakovat s širšími oprávněními.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
