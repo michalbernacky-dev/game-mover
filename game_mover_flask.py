@@ -3142,7 +3142,7 @@ def dnsmasq_status():
 
 @app.route("/dnsmasq/stop", methods=["POST"])
 def dnsmasq_stop():
-    if not require_local_admin(request):
+    if not require_local_operation(request, "dns.config"):
         return jsonify({"message": "Unauthorized"}), 403
     rc, status, err = systemctl_is_active("dnsmasq")
     if rc == 127:

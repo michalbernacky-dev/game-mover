@@ -858,8 +858,7 @@ class GameMover(QWidget):
         self.setMinimumSize(720, 500)
         self.resize(960, 720)
         self.refresh_cache_status()
-        self.refresh_dnsmasq_status()
-        self.refresh_managed_dns_status()
+        self.refresh_network_status()
         self.operation_refresh_timer = QTimer(self)
         self.operation_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.refresh_server_statuses()
@@ -914,15 +913,6 @@ class GameMover(QWidget):
         self.fix_perms_button = QPushButton('Opravit oprávnění /var/Games', self)
         self.fix_perms_button.clicked.connect(self.fix_shared_permissions)
         layout.addWidget(self.fix_perms_button)
-
-        layout.addWidget(QLabel("DNSmasq:"))
-        dnsmasq_row = QHBoxLayout()
-        self.dnsmasq_status_label = QLabel("Stav: —")
-        dnsmasq_row.addWidget(self.dnsmasq_status_label)
-        self.dnsmasq_stop_button = QPushButton("Vypnout dnsmasq", self)
-        self.dnsmasq_stop_button.clicked.connect(self.stop_dnsmasq)
-        dnsmasq_row.addWidget(self.dnsmasq_stop_button)
-        layout.addLayout(dnsmasq_row)
 
         self.label_move = QLabel('Hry k přesunu do sdílené knihovny:')
         layout.addWidget(self.label_move)
@@ -2554,10 +2544,32 @@ class GameMover(QWidget):
 
     def init_network_tab(self):
         tab = QWidget(self)
+        self.network_tab = tab
         layout = QVBoxLayout(tab)
         title = QLabel("Síťové služby", tab)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
+        dnsmasq_title = QLabel("Systémový dnsmasq", tab)
+        dnsmasq_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(dnsmasq_title)
+        dnsmasq_help = QLabel(
+            "Samostatný dnsmasq může obsadit port 53 a kolidovat s herním DNS. "
+            "Zde jej lze na spravovaném hostiteli bezpečně zastavit.", tab,
+        )
+        dnsmasq_help.setWordWrap(True)
+        layout.addWidget(dnsmasq_help)
+        dnsmasq_row = QHBoxLayout()
+        self.dnsmasq_status_label = QLabel("Stav: —", tab)
+        dnsmasq_row.addWidget(self.dnsmasq_status_label, 1)
+        self.dnsmasq_stop_button = QPushButton("Vypnout dnsmasq", tab)
+        self.dnsmasq_stop_button.clicked.connect(self.stop_dnsmasq)
+        dnsmasq_row.addWidget(self.dnsmasq_stop_button)
+        layout.addLayout(dnsmasq_row)
+
+        dns_separator = QFrame(tab)
+        dns_separator.setFrameShape(QFrame.HLine)
+        dns_separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(dns_separator)
         description = QLabel(
             "Privátní autoritativní DNS převádí konkrétní hostname Gate tras na adresu "
             "herního ingressu. DNS integrace jsou volitelné a ve výchozím stavu vypnuté; "
@@ -2603,11 +2615,15 @@ class GameMover(QWidget):
         self.managed_dns_config_button.clicked.connect(self.open_managed_dns_config)
         actions.addWidget(self.managed_dns_config_button)
         refresh = QPushButton("Obnovit stav", tab)
-        refresh.clicked.connect(self.refresh_managed_dns_status)
+        refresh.clicked.connect(self.refresh_network_status)
         actions.addWidget(refresh)
         actions.addWidget(self.create_host_pam_button("nastavení sítě", tab))
         layout.addLayout(actions)
         self.tabs.addTab(tab, "Síť")
+
+    def refresh_network_status(self):
+        self.refresh_dnsmasq_status()
+        self.refresh_managed_dns_status()
 
     def refresh_managed_dns_status(self):
         try:
@@ -3112,6 +3128,7 @@ class GameMover(QWidget):
         self.update_server_mode_ui()
         self.refresh_server_statuses()
         self.refresh_launcher_statuses()
+        self.refresh_network_status()
 
     def host_management_api_url(self):
         return management_api_url(self.app_mode, self.ssh_tunnel_port)
@@ -4049,18 +4066,24 @@ class GameMover(QWidget):
         notes_status.setStyleSheet("color: #aab7c0;")
         notes_layout.addWidget(notes_status)
         notes_table = QTableWidget(notes_page)
-        notes_table.setColumnCount(3)
-        notes_table.setHorizontalHeaderLabels(["Nadpis", "Platforma / prostředí", "Postup"])
+        notes_table.setColumnCount(2)
+        notes_table.setHorizontalHeaderLabels(["Nadpis", "Platforma / prostředí"])
         notes_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         notes_table.setSelectionMode(QAbstractItemView.SingleSelection)
         notes_table.setAlternatingRowColors(True)
-        notes_table.setWordWrap(True)
+        notes_table.setWordWrap(False)
         notes_table.verticalHeader().setVisible(False)
+        notes_table.verticalHeader().setDefaultSectionSize(26)
+        notes_table.setMaximumHeight(135)
         notes_header = notes_table.horizontalHeader()
-        notes_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        notes_header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        notes_header.setSectionResizeMode(2, QHeaderView.Stretch)
+        notes_header.setSectionResizeMode(0, QHeaderView.Stretch)
+        notes_header.setSectionResizeMode(1, QHeaderView.Interactive)
+        notes_table.setColumnWidth(1, 300)
         notes_layout.addWidget(notes_table)
+        notes_layout.addWidget(QLabel("Ověřený postup:", notes_page))
+        notes_body = QPlainTextEdit(notes_page)
+        notes_body.setPlaceholderText("Vyber poznámku nebo přidej nový ověřený postup…")
+        notes_layout.addWidget(notes_body, 1)
         notes_actions = QHBoxLayout()
         note_add = QPushButton("Přidat poznámku", notes_page)
         note_add.clicked.connect(
@@ -4086,6 +4109,7 @@ class GameMover(QWidget):
         entry.update({
             "notes_status": notes_status,
             "notes_table": notes_table,
+            "notes_body": notes_body,
             "note_add": note_add,
             "note_remove": note_remove,
             "note_save": note_save,
@@ -4093,6 +4117,12 @@ class GameMover(QWidget):
         })
         notes_table.itemChanged.connect(
             lambda _item, selected_id=server_id: self.mark_server_notes_dirty(selected_id)
+        )
+        notes_table.itemSelectionChanged.connect(
+            lambda selected_id=server_id: self.on_server_note_selected(selected_id)
+        )
+        notes_body.textChanged.connect(
+            lambda selected_id=server_id: self.on_server_note_body_changed(selected_id)
         )
         self.render_server_notes(entry, server.get("notes", []))
 
@@ -4822,7 +4852,6 @@ class GameMover(QWidget):
             table.insertRow(row)
             for column, value in enumerate((
                 note.get("title", ""), note.get("platform", "Obecné"),
-                note.get("body", ""),
             )):
                 item = QTableWidgetItem(str(value))
                 if column == 0:
@@ -4830,9 +4859,17 @@ class GameMover(QWidget):
                         Qt.UserRole,
                         note.get("checks", []) if isinstance(note.get("checks", []), list) else [],
                     )
+                    item.setData(Qt.UserRole + 1, str(note.get("body", "")))
                 table.setItem(row, column, item)
-        table.resizeRowsToContents()
+        if table.rowCount():
+            table.selectRow(0)
         table.blockSignals(False)
+        body = entry.get("notes_body")
+        if body is not None:
+            body.blockSignals(True)
+            first = table.item(0, 0) if table.rowCount() else None
+            body.setPlainText(str(first.data(Qt.UserRole + 1) or "") if first else "")
+            body.blockSignals(False)
         entry["notes_status"].setText(
             f"Uloženo {table.rowCount()} poznámek."
             if table.rowCount() else "Pro tento cíl zatím nejsou uložené žádné poznámky."
@@ -4845,6 +4882,27 @@ class GameMover(QWidget):
         entry["notes_dirty"] = True
         entry["notes_status"].setText("Poznámky mají neuložené změny.")
 
+    def on_server_note_selected(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_body" not in entry:
+            return
+        item = entry["notes_table"].item(entry["notes_table"].currentRow(), 0)
+        entry["notes_body"].blockSignals(True)
+        entry["notes_body"].setPlainText(
+            str(item.data(Qt.UserRole + 1) or "") if item else ""
+        )
+        entry["notes_body"].blockSignals(False)
+
+    def on_server_note_body_changed(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "notes_body" not in entry:
+            return
+        item = entry["notes_table"].item(entry["notes_table"].currentRow(), 0)
+        if item is None:
+            return
+        item.setData(Qt.UserRole + 1, entry["notes_body"].toPlainText())
+        self.mark_server_notes_dirty(server_id)
+
     def add_server_note_row(self, server_id):
         entry = self.server_management_pages.get(server_id)
         if not entry or "notes_table" not in entry:
@@ -4852,12 +4910,13 @@ class GameMover(QWidget):
         table = entry["notes_table"]
         row = table.rowCount()
         table.insertRow(row)
-        for column, value in enumerate(("Nový tip", "Obecné", "Popiš ověřený postup…")):
+        for column, value in enumerate(("Nový tip", "Obecné")):
             item = QTableWidgetItem(value)
             if column == 0:
                 item.setData(Qt.UserRole, [])
+                item.setData(Qt.UserRole + 1, "")
             table.setItem(row, column, item)
-        table.setCurrentCell(row, 0)
+        table.selectRow(row)
         table.editItem(table.item(row, 0))
 
     def remove_selected_server_note(self, server_id):
@@ -4870,6 +4929,7 @@ class GameMover(QWidget):
             table.removeRow(row)
         if rows:
             self.mark_server_notes_dirty(server_id)
+            self.on_server_note_selected(server_id)
 
     def save_server_notes(self, server_id):
         entry = self.server_management_pages.get(server_id)
@@ -4888,9 +4948,11 @@ class GameMover(QWidget):
             values = [
                 table.item(row, column).text().strip()
                 if table.item(row, column) else ""
-                for column in range(3)
+                for column in range(2)
             ]
-            title, platform, body = values
+            title, platform = values
+            title_item = table.item(row, 0)
+            body = str(title_item.data(Qt.UserRole + 1) or "").strip() if title_item else ""
             if not title or not platform or not body:
                 QMessageBox.warning(
                     self, "Poznámky",
@@ -4898,7 +4960,6 @@ class GameMover(QWidget):
                 )
                 table.setCurrentCell(row, values.index("") if "" in values else 0)
                 return
-            title_item = table.item(row, 0)
             checks = title_item.data(Qt.UserRole) if title_item else []
             notes.append({
                 "title": title, "platform": platform, "body": body,
@@ -4976,6 +5037,7 @@ class GameMover(QWidget):
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
             if notes_allowed else QAbstractItemView.NoEditTriggers
         )
+        entry["notes_body"].setReadOnly(not notes_allowed)
         entry["note_add"].setEnabled(notes_allowed)
         entry["note_remove"].setEnabled(notes_allowed)
         entry["note_save"].setEnabled(notes_allowed)
@@ -6431,13 +6493,25 @@ class GameMover(QWidget):
                 bar.setStyleSheet("QProgressBar::chunk { background-color: red; }")
 
     def refresh_dnsmasq_status(self):
+        if not is_host_management_mode(self.app_mode):
+            self.dnsmasq_status_label.setText(
+                "Stav: správa je dostupná jen v režimu Server nebo přes SSH tunel"
+            )
+            self.dnsmasq_stop_button.setEnabled(False)
+            return
         try:
-            resp = requests.get(f"{FLASK_URL}/dnsmasq/status")
+            resp = requests.get(
+                f"{self.host_management_api_url()}/dnsmasq/status", timeout=8,
+            )
             data = resp.json()
+            if resp.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {resp.status_code}"))
             status = data.get("status", "unknown")
             message = data.get("message", "Neznámý stav")
             self.dnsmasq_status_label.setText(f"Stav: {message}")
-            self.dnsmasq_stop_button.setEnabled(status == "active")
+            self.dnsmasq_stop_button.setEnabled(
+                status == "active" and bool(self.local_operation_headers("dns.config"))
+            )
         except Exception as e:
             self.dnsmasq_status_label.setText(f"Stav: chyba ({e})")
             self.dnsmasq_stop_button.setEnabled(False)
@@ -6452,15 +6526,25 @@ class GameMover(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
-        headers = self.local_admin_headers()
+        if not is_host_management_mode(self.app_mode):
+            return
+        headers = self.local_operation_headers("dns.config")
         if not headers:
-            QMessageBox.warning(self, "DNSmasq", "Chybí lokální admin token. Zkontroluj skupinu gemers a /etc/game_mover/api.token.")
+            QMessageBox.warning(
+                self, "DNSmasq", "Vypnutí dnsmasq vyžaduje oprávnění pro nastavení DNS.",
+            )
             return
         try:
-            resp = requests.post(f"{FLASK_URL}/dnsmasq/stop", headers=headers)
+            resp = requests.post(
+                f"{self.host_management_api_url()}/dnsmasq/stop",
+                headers=headers, timeout=15,
+            )
             data = resp.json()
             if resp.status_code != 200:
-                QMessageBox.critical(self, "DNSmasq", data.get("message", "Chyba"))
+                message = data.get("message", "Chyba")
+                if resp.status_code in (401, 403) and self.timekpr_token:
+                    message = self.host_pam_session_expired(message)
+                QMessageBox.critical(self, "DNSmasq", message)
             else:
                 QMessageBox.information(self, "DNSmasq", data.get("message", "OK"))
         except Exception as e:

@@ -659,6 +659,12 @@ v kartě zůstává pouze upozornění, že ověřující účet musí patřit d
 Záložka **Zabezpečení** nabízí také **Uzamknout nyní**, které token okamžitě
 zneplatní na hostiteli bez čekání na běžné vypršení relace.
 
+Poznámky v detailu serveru používají kompaktní seznam názvů a prostředí; celý
+ověřený postup se zobrazuje a upravuje v samostatném panelu pod seznamem.
+
+Stav a ruční zastavení systémového `dnsmasq` jsou v záložce **Síť**, kde logicky
+navazují na správu herního DNS. Zastavení se řídí PAM zásadou `dns.config`.
+
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se
 vrátí do původního stavu. Manifest zaznamená zdrojový backend a systemd jednotku

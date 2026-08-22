@@ -166,6 +166,12 @@ class ServerManagementGuiTest(unittest.TestCase):
             "Servery",
         )
 
+    def test_dnsmasq_controls_live_in_network_instead_of_mover(self):
+        mover_tab = self.window.tabs.widget(0)
+        self.assertTrue(self.window.network_tab.isAncestorOf(self.window.dnsmasq_status_label))
+        self.assertTrue(self.window.network_tab.isAncestorOf(self.window.dnsmasq_stop_button))
+        self.assertFalse(mover_tab.isAncestorOf(self.window.dnsmasq_status_label))
+
     def test_management_page_contains_existing_server_capabilities(self):
         self.window.open_server_management("mc-test")
         entry = self.window.server_management_pages["mc-test"]
@@ -205,9 +211,14 @@ class ServerManagementGuiTest(unittest.TestCase):
         table = self.window.server_management_pages["mc-test"]["notes_table"]
 
         self.assertEqual(table.rowCount(), 1)
+        self.assertEqual(table.columnCount(), 2)
+        self.assertLessEqual(table.maximumHeight(), 135)
         self.assertEqual(table.item(0, 0).text(), "Fedora + Wayland")
         self.assertEqual(table.item(0, 1).text(), "Fedora · CurseForge · NVIDIA")
-        self.assertIn("systémové GLFW", table.item(0, 2).text())
+        self.assertIn(
+            "systémové GLFW",
+            self.window.server_management_pages["mc-test"]["notes_body"].toPlainText(),
+        )
 
     def test_direct_connection_is_recommended_when_gate_route_is_absent(self):
         server = dict(SAMPLE_SERVER)

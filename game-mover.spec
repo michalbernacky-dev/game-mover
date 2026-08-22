@@ -177,6 +177,8 @@ fi
 - Replace the legacy inline Timekpr credentials with the shared PAM unlock dialog
 - Keep the wheel-account requirement visible next to the contextual unlock control
 - Add immediate host-side PAM session revocation from the Security tab
+- Replace oversized server-note rows with a compact master-detail editor
+- Move dnsmasq status and shutdown from Mover to Network and protect it by DNS policy
 
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.1-1
 - List only real interactive login accounts in Timekpr instead of every home directory

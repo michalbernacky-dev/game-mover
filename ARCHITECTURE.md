@@ -176,6 +176,10 @@ The authentication response also supplies the host's filtered interactive-user
 catalog so Timekpr never mistakes orphaned home directories for active accounts.
 An explicit Security-tab lock calls the loopback-only logout endpoint, revokes the
 presented token server-side, and clears all corresponding GUI state.
+Server-scoped knowledge uses the same compact master-detail interaction as the
+global knowledge view so long procedures never determine table-row height.
+Legacy system `dnsmasq` conflict handling belongs to Network rather than Mover;
+its stop action uses the same `dns.config` policy as other managed DNS mutations.
 
 The Minecraft installer opens **Minecraft: Modpacks** as a single closable,
 contextual tab instead of making Minecraft-specific discovery part of the

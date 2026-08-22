@@ -122,6 +122,19 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_dnsmasq_stop_uses_dns_policy_pam_session(self):
+        denied = self.client.post("/dnsmasq/stop", **self.local_options())
+        self.assertEqual(denied.status_code, 403)
+        with (
+            patch.object(backend, "systemctl_is_active", return_value=(0, "active", "")),
+            patch.object(backend, "systemctl_stop", return_value=(0, "", "")) as stop,
+        ):
+            response = self.client.post(
+                "/dnsmasq/stop", **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200)
+        stop.assert_called_once_with("dnsmasq")
+
     def save_servers(self):
         response = self.client.put(
             "/servers/config", json={"servers": self.servers},
