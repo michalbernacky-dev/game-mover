@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.29.0
+Version:        0.29.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -174,6 +174,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.29.1-1
+- Keep GOG, Epic, Ubisoft, and Rockstar visible as explicit read-only providers
+- Show Heroic ownership for GOG/Epic and unsupported status for untested launchers
+- Keep all non-Steam mutation controls disabled while the API remains Steam-only
+
 * Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.29.0-1
 - Narrow mutable Mover operations to the tested Steam shared-library workflow
 - Delegate GOG and Epic payload/prefix ownership to Heroic

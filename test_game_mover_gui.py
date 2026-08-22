@@ -139,13 +139,31 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(len(self.window.local_pam_buttons), 1)
 
-    def test_mover_exposes_only_the_supported_steam_workflow(self):
+    def test_mover_shows_other_launchers_but_mutates_only_steam(self):
         self.assertEqual(self.window.platform, "steam")
-        self.assertFalse(hasattr(self.window, "platform_combo"))
         self.assertFalse(hasattr(self.window, "source_user_combo"))
-        self.assertIn("pouze pro Steam", self.window.mover_scope_label.text())
+        self.assertEqual(
+            [self.window.platform_combo.itemData(index)
+             for index in range(self.window.platform_combo.count())],
+            ["steam", "gog", "epic", "ubisoft", "rockstar"],
+        )
         self.assertIn("Steam hry", self.window.label_move.text())
         self.assertIn("Steam hry", self.window.label_symlink.text())
+
+        self.window.platform_combo.setCurrentIndex(
+            self.window.platform_combo.findData("gog")
+        )
+        self.assertEqual(self.window.platform, "gog")
+        self.assertIn("spravuje Heroic", self.window.mover_scope_label.text())
+        self.assertFalse(self.window.move_button.isEnabled())
+        self.assertFalse(self.window.link_button.isEnabled())
+        self.assertFalse(self.window.cache_button.isVisible())
+
+        self.window.platform_combo.setCurrentIndex(
+            self.window.platform_combo.findData("ubisoft")
+        )
+        self.assertIn("pouze rozpoznávaný", self.window.mover_scope_label.text())
+        self.assertFalse(self.window.move_button.isEnabled())
 
     def test_launcher_tab_renders_outdated_and_missing_items(self):
         self.window.on_launcher_statuses_loaded({

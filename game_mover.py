@@ -70,6 +70,13 @@ SERVER_READ_TOKEN_PATH = os.getenv(
     CLIENT_CONFIG.get("server_read_token_path", "/etc/game_mover/read.token"),
 )
 SERVER_READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
+MOVER_PLATFORM_OPTIONS = (
+    ("Steam", "steam"),
+    ("GOG (Heroic)", "gog"),
+    ("Epic (Heroic)", "epic"),
+    ("Ubisoft Connect", "ubisoft"),
+    ("Rockstar Games", "rockstar"),
+)
 DAY_NAMES = {
     1: "Po",
     2: "Út",
@@ -874,6 +881,15 @@ class GameMover(QWidget):
                 layout.addWidget(self.logo_label)
         except Exception:
             pass
+
+        platform_row = QHBoxLayout()
+        platform_row.addWidget(QLabel("Platforma / launcher:", self))
+        self.platform_combo = QComboBox(self)
+        for label, platform in MOVER_PLATFORM_OPTIONS:
+            self.platform_combo.addItem(label, platform)
+        self.platform_combo.currentIndexChanged.connect(self.on_platform_changed)
+        platform_row.addWidget(self.platform_combo, 1)
+        layout.addLayout(platform_row)
 
         self.mover_scope_label = QLabel(
             "Sdílení herních dat zajišťuje Game Mover pouze pro Steam. "
@@ -3513,15 +3529,18 @@ class GameMover(QWidget):
         selected_game = self.game_combo_move.currentText()
         selected_link = self.symlink_list.currentItem()
         self.move_button.setEnabled(
-            bool(selected_game and not selected_game.startswith("Žádné"))
+            self.platform == "steam"
+            and bool(selected_game and not selected_game.startswith("Žádné"))
             and bool(self.local_mover_operation_headers("game.move"))
         )
         self.link_button.setEnabled(
-            bool(selected_link and not selected_link.text().startswith("Žádné"))
+            self.platform == "steam"
+            and bool(selected_link and not selected_link.text().startswith("Žádné"))
             and bool(self.local_mover_operation_headers("game.link"))
         )
         self.fix_perms_button.setEnabled(
-            bool(self.local_mover_operation_headers("library.permissions"))
+            self.platform == "steam"
+            and bool(self.local_mover_operation_headers("library.permissions"))
         )
         self.cache_button.setEnabled(
             self.platform == "steam"
@@ -6883,7 +6902,43 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "DNSmasq", f"Chyba: {e}")
         self.refresh_dnsmasq_status()
 
+    def on_platform_changed(self, _index):
+        self.platform = self.platform_combo.currentData() or "steam"
+        steam_supported = self.platform == "steam"
+        self.cache_button.setVisible(steam_supported)
+        self.fix_perms_button.setVisible(steam_supported)
+        self.show_move_residue_checkbox.setEnabled(steam_supported)
+        if steam_supported:
+            self.mover_scope_label.setText(
+                "Steam podporuje přesun herních dat do sdílené knihovny, "
+                "uživatelské symlinky a sdílenou download cache."
+            )
+            self.label_move.setText("Steam hry k přesunu do sdílené knihovny:")
+            self.label_symlink.setText(
+                "Steam hry ve sdílené knihovně dostupné pro symlink:"
+            )
+        elif self.platform in ("gog", "epic"):
+            store = "GOG" if self.platform == "gog" else "Epic"
+            self.mover_scope_label.setText(
+                f"{store} je rozpoznaný, ale herní data a oddělené Wine prefixy "
+                "spravuje Heroic. Game Mover zde neprovádí žádné změny."
+            )
+            self.label_move.setText(f"{store} / Heroic – sdílení herních dat:")
+            self.label_symlink.setText(f"{store} / Heroic – uživatelské prefixy:")
+        else:
+            launcher = self.platform_combo.currentText()
+            self.mover_scope_label.setText(
+                f"{launcher} je zatím pouze rozpoznávaný. Sdílení herních dat "
+                "není implementované ani otestované, proto jsou změny zakázané."
+            )
+            self.label_move.setText(f"{launcher} – sdílení herních dat:")
+            self.label_symlink.setText(f"{launcher} – uživatelská integrace:")
+        self.refresh_cache_status()
+        self.refresh_game_lists()
+
     def get_game_candidates(self):
+        if self.platform != "steam":
+            return []
         common = resolve_user_common(self.platform, self.user)
         if common and os.path.exists(common):
             candidates = []
@@ -6911,6 +6966,8 @@ class GameMover(QWidget):
         ]
 
     def get_symlink_candidates(self):
+        if self.platform != "steam":
+            return []
         try:
             resp = requests.get(f"{FLASK_URL}/list_shared",
                                 params={"platform": self.platform})
@@ -6924,6 +6981,26 @@ class GameMover(QWidget):
         return []
 
     def refresh_game_lists(self):
+        if self.platform != "steam":
+            managed = self.platform in ("gog", "epic")
+            message = (
+                "Správu instalací zajišťuje Heroic"
+                if managed else "Sdílení zatím není podporováno"
+            )
+            self.game_combo_move.clear()
+            self.game_combo_move.addItem(message)
+            self.symlink_list.clear()
+            self.symlink_list.addItem(message)
+            self.show_move_residue_checkbox.setText(
+                "Možné pozůstatky spravuje zvolený launcher"
+                if managed else "Detekce je pouze informativní"
+            )
+            self.move_button.setEnabled(False)
+            self.link_button.setEnabled(False)
+            self.update_disk_bars()
+            self.update_mover_action_availability()
+            return
+
         # kandidáti k přesunu
         self.game_combo_move.clear()
         candidates = self.get_game_candidates()

@@ -8,8 +8,9 @@ The mutable **Mover** tab supports Steam only: moving payloads into
 repairing Steam-library permissions. It hides Steam runtimes and possible stale
 installations by default, with an explicit checkbox for recovery. Heroic owns
 GOG and Epic payload/prefix management. Other launchers remain read-only
-inventory providers until their storage workflows are explicitly implemented
-and tested. Existing legacy data is never removed by this scope restriction.
+inventory providers, remain visible in Mover's platform selector, and expose no
+mutation until their storage workflows are explicitly implemented and tested.
+Existing legacy data is never removed by this scope restriction.
 
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -516,8 +517,9 @@ Mutující záložka **Mover** podporuje pouze Steam: přesun dat do
 oprávnění Steam knihovny. Runtime a možné staré instalace ve výchozím stavu
 skrývá, ale samostatný přepínač je zpřístupní pro obnovu. GOG a Epic včetně
 prefixů vlastní Heroic. Ostatní launchery zůstávají jen zdrojem read-only
-inventury, dokud jejich úložiště výslovně neimplementujeme a neotestujeme.
-Existující starší data zúžení rozsahu nikdy automaticky nemaže.
+inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
+dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
+starší data zúžení rozsahu nikdy automaticky nemaže.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 

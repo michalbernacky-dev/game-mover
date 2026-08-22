@@ -44,7 +44,9 @@ maintain competing installation metadata. Other launchers remain read-only
 inventory/knowledge providers until their storage and lifecycle have been
 implemented and tested explicitly. Existing legacy directories below
 `/var/Games` are preserved; narrowing the supported workflow never deletes or
-migrates them automatically.
+migrates them automatically. These providers remain visible in Mover's selector
+with an explicit read-only or externally managed state rather than disappearing
+from the product model.
 
 Adapters may discover endpoints from an authoritative game/runtime source and
 merge them with optional registry entries. Minecraft reads `server.properties`
