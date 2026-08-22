@@ -45,6 +45,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "refresh_dnsmasq_status",
             "refresh_launcher_statuses",
             "refresh_game_lists",
+            "refresh_system_resources",
             "update_disk_bars",
             "load_server_mods",
         )
@@ -164,6 +165,45 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertIn("pouze rozpoznávaný", self.window.mover_scope_label.text())
         self.assertFalse(self.window.move_button.isEnabled())
+
+    def test_global_resource_bars_show_local_capacity(self):
+        gib = 1024 ** 3
+        self.window.on_system_resources_loaded({
+            "target": "local",
+            "memory": {
+                "total_bytes": 32 * gib,
+                "used_bytes": 24 * gib,
+                "available_bytes": 8 * gib,
+                "percent": 75.0,
+            },
+            "swap": {
+                "total_bytes": 8 * gib,
+                "used_bytes": 2 * gib,
+                "free_bytes": 6 * gib,
+                "percent": 25.0,
+            },
+        })
+
+        self.assertEqual(self.window.system_resources_source.text(), "Paměť: místní počítač")
+        self.assertEqual(self.window.ram_bar.value(), 75)
+        self.assertIn("24.0 GiB / 32.0 GiB", self.window.ram_bar.format())
+        self.assertIn("dostupné 8.0 GiB", self.window.ram_bar.format())
+        self.assertEqual(self.window.swap_bar.value(), 25)
+        self.assertIn("2.0 GiB / 8.0 GiB", self.window.swap_bar.format())
+
+    def test_global_resource_target_switches_only_for_live_managed_tunnel(self):
+        self.window.app_mode = "ssh_tunnel"
+        self.window.ssh_tunnel_port = 5500
+        with patch.object(self.window, "managed_ssh_tunnel_running", return_value=True):
+            self.assertEqual(
+                self.window.system_resources_target(),
+                ("http://127.0.0.1:5500", "host"),
+            )
+        with patch.object(self.window, "managed_ssh_tunnel_running", return_value=False):
+            self.assertEqual(
+                self.window.system_resources_target(),
+                (game_mover.LOCAL_API_URL, "local"),
+            )
 
     def test_launcher_tab_renders_outdated_and_missing_items(self):
         self.window.on_launcher_statuses_loaded({

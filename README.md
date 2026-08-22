@@ -15,6 +15,13 @@ Existing legacy data is never removed by this scope restriction.
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+A compact RAM and SWAP capacity strip stays visible below every tab. Without a
+managed SSH tunnel it describes the local workstation; while the tunnel is
+active it reads the game-server host through that tunnel. It refreshes every
+ten seconds and is read-only, so viewing it does not require PAM. RAM includes
+the amount the kernel considers genuinely available, making it useful before
+starting another memory-heavy server. Game-library disk bars remain in Mover.
+
 The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
 shows whether their installed versions are current. Heroic releases are checked
 against the official GitHub project. A confirmed update downloads only the exact
@@ -522,6 +529,13 @@ dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existujíc
 starší data zúžení rozsahu nikdy automaticky nemaže.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
+
+Pod všemi záložkami zůstává viditelný kompaktní ukazatel RAM a SWAP. Bez
+spravovaného SSH tunelu popisuje místní počítač, s aktivním tunelem načítá přes
+něj prostředky hostitele herních serverů. Obnovuje se každých deset sekund a je
+jen informační, takže nevyžaduje PAM. U RAM uvádí také paměť, kterou jádro
+skutečně považuje za dostupnou, což pomáhá před spuštěním dalšího náročného
+serveru. Diskové ukazatele herních knihoven zůstávají v Moveru.
 
 Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi

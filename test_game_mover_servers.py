@@ -111,6 +111,25 @@ class ServerRegistryTest(unittest.TestCase):
         )
         self.assertEqual(denied.status_code, 403)
 
+    def test_system_resources_reports_memory_and_swap_without_authentication(self):
+        memory = Mock(total=32 * 1024**3, available=8 * 1024**3, percent=75.0)
+        swap = Mock(
+            total=8 * 1024**3, used=2 * 1024**3, free=6 * 1024**3,
+            percent=25.0,
+        )
+        with (
+            patch.object(backend.psutil, "virtual_memory", return_value=memory),
+            patch.object(backend.psutil, "swap_memory", return_value=swap),
+        ):
+            response = self.client.get("/system/resources", **self.local_options())
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["memory"]["used_bytes"], 24 * 1024**3)
+        self.assertEqual(payload["memory"]["available_bytes"], 8 * 1024**3)
+        self.assertEqual(payload["memory"]["percent"], 75.0)
+        self.assertEqual(payload["swap"]["used_bytes"], 2 * 1024**3)
+
     def test_mover_api_exposes_only_steam_without_touching_legacy_data(self):
         self.assertEqual(set(backend.PLATFORMS), {"steam"})
         for endpoint in ("/list_user_games", "/list_shared"):

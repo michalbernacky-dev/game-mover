@@ -101,6 +101,14 @@ assuming one runtime:
 
 ## User interface
 
+A compact capacity strip remains visible below the top-level tabs. It reports
+RAM pressure, genuinely available memory, and swap use for the machine relevant
+to the current management context: the local workstation normally, or the game
+server host while the GUI-owned SSH tunnel is active. This is a read-only,
+periodically refreshed planning aid for deciding whether another workload can
+be started; it requires no PAM session. Disk bars remain in Mover because they
+describe the local game libraries rather than generic host capacity.
+
 The host also owns a small SQLite knowledge base for operational notes that do
 not belong in workload configuration. Notes target a stable game, server, or
 launcher ID and carry a title, platform/environment qualifier, verified plain

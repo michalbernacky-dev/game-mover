@@ -635,6 +635,27 @@ class ServerStatusThread(QThread):
             self.loaded.emit({"request_error": str(error)})
 
 
+class SystemResourcesThread(QThread):
+    loaded = pyqtSignal(dict)
+
+    def __init__(self, base_url, target):
+        super().__init__()
+        self.base_url = base_url
+        self.target = target
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{self.base_url}/system/resources", timeout=3,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.loaded.emit({**data, "target": self.target})
+        except Exception as error:
+            self.loaded.emit({"target": self.target, "error": str(error)})
+
+
 class LauncherStatusThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -765,6 +786,8 @@ class GameMover(QWidget):
         self.launcher_status_thread = None
         self.launcher_update_thread = None
         self.installed_games_thread = None
+        self.system_resources_thread = None
+        self.system_resources_refresh_pending = False
         self.knowledge_saved_targets = set()
         self.launcher_cards = {}
         self.launcher_update_policy = "pam"
@@ -832,8 +855,26 @@ class GameMover(QWidget):
             self.tabs.tabBar().setTabButton(index, QTabBar.LeftSide, None)
             self.tabs.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
+        self.system_resources_widget = QWidget(self)
+        resources_layout = QHBoxLayout(self.system_resources_widget)
+        resources_layout.setContentsMargins(8, 4, 8, 4)
+        self.system_resources_source = QLabel("Paměť: zjišťuji zdroj…", self)
+        self.system_resources_source.setMinimumWidth(175)
+        resources_layout.addWidget(self.system_resources_source)
+        self.ram_bar = QProgressBar(self)
+        self.ram_bar.setRange(0, 100)
+        self.ram_bar.setMinimumWidth(260)
+        self.ram_bar.setTextVisible(True)
+        resources_layout.addWidget(self.ram_bar, 1)
+        self.swap_bar = QProgressBar(self)
+        self.swap_bar.setRange(0, 100)
+        self.swap_bar.setMinimumWidth(220)
+        self.swap_bar.setTextVisible(True)
+        resources_layout.addWidget(self.swap_bar, 1)
+
         layout = QVBoxLayout()
-        layout.addWidget(self.tabs)
+        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.system_resources_widget)
         self.setLayout(layout)
         self.setWindowTitle('Game Mover')
         self.setMinimumSize(720, 500)
@@ -845,6 +886,11 @@ class GameMover(QWidget):
         self.operation_refresh_timer.timeout.connect(self.refresh_server_statuses)
         self.refresh_server_statuses()
         self.refresh_game_lists()
+        self.refresh_system_resources()
+        self.system_resources_timer = QTimer(self)
+        self.system_resources_timer.setInterval(10_000)
+        self.system_resources_timer.timeout.connect(self.refresh_system_resources)
+        self.system_resources_timer.start()
         self.refresh_launcher_statuses()
         self.server_refresh_timer = QTimer(self)
         self.server_refresh_timer.timeout.connect(self.refresh_server_statuses)
@@ -860,6 +906,118 @@ class GameMover(QWidget):
     def server_api_url(self):
         address = self.active_server_profile().get("address", "127.0.0.1:5000").strip().rstrip("/")
         return address if address.startswith(("http://", "https://")) else f"http://{address}"
+
+    def system_resources_target(self):
+        """Return the machine whose capacity is relevant to the active context."""
+        if self.app_mode == "ssh_tunnel" and self.managed_ssh_tunnel_running():
+            return self.host_management_api_url(), "host"
+        return LOCAL_API_URL, "local"
+
+    def refresh_system_resources(self):
+        if self.application_closing or not hasattr(self, "ram_bar"):
+            return
+        base_url, target = self.system_resources_target()
+        self.system_resources_source.setText(
+            "Paměť: hostitel přes SSH tunel"
+            if target == "host" else "Paměť: místní počítač"
+        )
+        worker = self.system_resources_thread
+        if worker is not None and worker.isRunning():
+            if worker.target != target:
+                self.system_resources_refresh_pending = True
+            return
+        self.system_resources_refresh_pending = False
+        worker = SystemResourcesThread(base_url, target)
+        self.system_resources_thread = worker
+        worker.loaded.connect(self.on_system_resources_loaded)
+        worker.finished.connect(
+            lambda current=worker: self.on_system_resources_finished(current)
+        )
+        worker.start()
+
+    @staticmethod
+    def format_resource_bytes(value):
+        return f"{max(0, int(value)) / (1024 ** 3):.1f} GiB"
+
+    @staticmethod
+    def set_resource_bar_style(bar, percent, thresholds):
+        warning, critical = thresholds
+        if percent < warning:
+            color = "#2f9e44"
+        elif percent < critical:
+            color = "#f59f00"
+        else:
+            color = "#e03131"
+        bar.setStyleSheet(
+            "QProgressBar { border: 1px solid #526875; border-radius: 3px; "
+            "text-align: center; background-color: #182832; } "
+            f"QProgressBar::chunk {{ background-color: {color}; }}"
+        )
+
+    def on_system_resources_loaded(self, payload):
+        _base_url, current_target = self.system_resources_target()
+        if payload.get("target") != current_target:
+            self.system_resources_refresh_pending = True
+            return
+        self.system_resources_source.setText(
+            "Paměť: hostitel přes SSH tunel"
+            if current_target == "host" else "Paměť: místní počítač"
+        )
+        error = payload.get("error")
+        if error:
+            for name, bar in (("RAM", self.ram_bar), ("SWAP", self.swap_bar)):
+                bar.setValue(0)
+                bar.setFormat(f"{name}: nedostupné")
+                bar.setToolTip(str(error))
+                bar.setStyleSheet(
+                    "QProgressBar { border: 1px solid #7d4343; border-radius: 3px; "
+                    "text-align: center; background-color: #182832; }"
+                )
+            return
+
+        memory = payload.get("memory") or {}
+        memory_percent = max(0, min(100, round(float(memory.get("percent", 0)))))
+        self.ram_bar.setValue(memory_percent)
+        self.ram_bar.setFormat(
+            "RAM: "
+            f"{self.format_resource_bytes(memory.get('used_bytes', 0))} / "
+            f"{self.format_resource_bytes(memory.get('total_bytes', 0))} "
+            f"({memory_percent} %), dostupné "
+            f"{self.format_resource_bytes(memory.get('available_bytes', 0))}"
+        )
+        self.ram_bar.setToolTip(
+            "Využitá paměť je počítána jako celková minus skutečně dostupná; "
+            "dostupná paměť zahrnuje uvolnitelnou cache."
+        )
+        self.set_resource_bar_style(self.ram_bar, memory_percent, (70, 85))
+
+        swap = payload.get("swap") or {}
+        swap_total = max(0, int(swap.get("total_bytes", 0)))
+        if swap_total == 0:
+            self.swap_bar.setValue(0)
+            self.swap_bar.setFormat("SWAP: nepovolena")
+            self.swap_bar.setToolTip("Na vybraném počítači není aktivní swap.")
+            self.set_resource_bar_style(self.swap_bar, 0, (25, 60))
+        else:
+            swap_percent = max(0, min(100, round(float(swap.get("percent", 0)))))
+            self.swap_bar.setValue(swap_percent)
+            self.swap_bar.setFormat(
+                "SWAP: "
+                f"{self.format_resource_bytes(swap.get('used_bytes', 0))} / "
+                f"{self.format_resource_bytes(swap_total)} ({swap_percent} %)"
+            )
+            self.swap_bar.setToolTip(
+                f"Volný swap: {self.format_resource_bytes(swap.get('free_bytes', 0))}"
+            )
+            self.set_resource_bar_style(self.swap_bar, swap_percent, (25, 60))
+
+    def on_system_resources_finished(self, worker):
+        if self.system_resources_thread is worker:
+            self.system_resources_thread = None
+        worker.deleteLater()
+        if self.system_resources_refresh_pending and not self.application_closing:
+            self.system_resources_refresh_pending = False
+            QTimer.singleShot(0, self.refresh_system_resources)
 
     def local_admin_headers(self):
         self.local_admin_token = load_local_admin_token()
@@ -3455,6 +3613,8 @@ class GameMover(QWidget):
             self.load_local_services()
             if hasattr(self, "security_global_table"):
                 self.load_security_policies()
+        if hasattr(self, "ram_bar"):
+            self.refresh_system_resources()
 
     def update_management_action_availability(self):
         management_mode = is_host_management_mode(self.app_mode)
@@ -7568,6 +7728,8 @@ class GameMover(QWidget):
     def closeEvent(self, event):
         self.application_closing = True
         self.ssh_tunnel_probe_timer.stop()
+        if hasattr(self, "system_resources_timer"):
+            self.system_resources_timer.stop()
         if self.managed_ssh_tunnel_running():
             self.ssh_tunnel_stopping = True
             process = self.ssh_tunnel_process

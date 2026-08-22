@@ -18,6 +18,7 @@ import sqlite3
 import threading
 import ipaddress
 import socket
+import psutil
 from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
@@ -1724,6 +1725,29 @@ def launchers_status():
     return jsonify({
         "launchers": launcher_statuses(),
         "update_policy": operation_policy("launcher.update"),
+        "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    })
+
+
+@app.route("/system/resources", methods=["GET"])
+def system_resources():
+    """Return read-only memory pressure for the machine running this backend."""
+    memory = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+    memory_used = max(0, int(memory.total) - int(memory.available))
+    return jsonify({
+        "memory": {
+            "total_bytes": int(memory.total),
+            "used_bytes": memory_used,
+            "available_bytes": int(memory.available),
+            "percent": round(float(memory.percent), 1),
+        },
+        "swap": {
+            "total_bytes": int(swap.total),
+            "used_bytes": int(swap.used),
+            "free_bytes": int(swap.free),
+            "percent": round(float(swap.percent), 1),
+        },
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 

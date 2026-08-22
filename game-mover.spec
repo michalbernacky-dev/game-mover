@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.29.1
+Version:        0.30.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -174,6 +174,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.30.0-1
+- Show persistent RAM and swap capacity below every application tab
+- Read local capacity normally and host capacity through the active managed SSH tunnel
+- Refresh the read-only capacity indicator every ten seconds without PAM authentication
+
 * Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.29.1-1
 - Keep GOG, Epic, Ubisoft, and Rockstar visible as explicit read-only providers
 - Show Heroic ownership for GOG/Epic and unsupported status for untested launchers
