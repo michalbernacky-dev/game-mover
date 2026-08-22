@@ -432,11 +432,11 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.window.update_host_pam_buttons()
         self.assertEqual(self.window.timekpr_token, "shared-host-token")
-        self.assertEqual([
-            self.window.timekpr_user_combo.itemText(index)
-            for index in range(self.window.timekpr_user_combo.count())
-        ], ["dave", "alice", "bob", "carol"])
-        self.assertEqual(len(self.window.host_pam_buttons), 6)
+        self.assertEqual(
+            self.window.host_timekpr_payload["managed_users"],
+            ["carol", "bob", "dave", "alice"],
+        )
+        self.assertEqual(len(self.window.host_pam_buttons), 5)
         self.assertTrue(all(
             button.text() == "PAM hostitele odemčeno" and not button.isEnabled()
             for button in self.window.host_pam_buttons
@@ -446,9 +446,54 @@ class ServerManagementGuiTest(unittest.TestCase):
             json={"username": "admin", "password": "secret"}, timeout=8,
         )
 
-    def test_timekpr_uses_shared_pam_control_without_inline_password(self):
-        self.assertIn("wheel", self.window.timekpr_wheel_note.text())
-        self.assertIn(self.window.timekpr_unlock_button, self.window.host_pam_buttons)
+    def test_timekpr_switches_between_local_and_tunnel_host_context(self):
+        local_payload = {
+            "token": "local-token", "mode": "settimeleft",
+            "managed_users": ["local-user"],
+        }
+        host_payload = {
+            "token": "host-token", "mode": "addflag", "add_flag": "--addtime",
+            "managed_users": ["host-user"],
+        }
+        self.window.local_security_token = "local-token"
+        self.window.local_timekpr_payload = local_payload
+        self.window.app_mode = "client"
+        self.window.apply_active_timekpr_context()
+
+        self.assertEqual(self.window.timekpr_api_url(), "http://127.0.0.1:5000")
+        self.assertEqual(self.window.active_timekpr_token(), "local-token")
+        self.assertEqual(self.window.timekpr_user_combo.currentText(), "local-user")
+        self.assertIn("Místní PAM", self.window.timekpr_unlock_button.text())
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"hours": "20;21"}
+        with patch.object(game_mover.requests, "post", return_value=response) as post:
+            self.window.fetch_day_plan()
+        post.assert_called_once_with(
+            "http://127.0.0.1:5000/timekpr/day_plan",
+            json={"user": "local-user", "token": "local-token"},
+            headers={"X-Timekpr-Token": "local-token"}, timeout=8,
+        )
+
+        self.window.timekpr_token = "host-token"
+        self.window.host_timekpr_payload = host_payload
+        self.window.app_mode = "ssh_tunnel"
+        self.window.apply_active_timekpr_context()
+
+        self.assertEqual(self.window.timekpr_api_url(), "http://127.0.0.1:5500")
+        self.assertEqual(self.window.active_timekpr_token(), "host-token")
+        self.assertEqual(self.window.timekpr_user_combo.currentText(), "host-user")
+        self.assertIn("hostitele", self.window.timekpr_unlock_button.text())
+        with patch.object(game_mover.requests, "post", return_value=response) as post:
+            self.window.fetch_day_plan()
+        post.assert_called_once_with(
+            "http://127.0.0.1:5500/timekpr/day_plan",
+            json={"user": "host-user", "token": "host-token"},
+            headers={"X-Timekpr-Token": "host-token"}, timeout=8,
+        )
+
+        self.window.app_mode = "client"
+        self.window.apply_active_timekpr_context()
+        self.assertEqual(self.window.timekpr_user_combo.currentText(), "local-user")
         self.assertFalse(hasattr(self.window, "timekpr_auth_pass"))
         self.assertFalse(hasattr(self.window, "timekpr_auth_user_combo"))
 

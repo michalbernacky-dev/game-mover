@@ -735,6 +735,8 @@ class GameMover(QWidget):
         self.timekpra_add_flag = None
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
+        self.local_timekpr_payload = None
+        self.host_timekpr_payload = None
         self.host_pam_buttons = []
         self.local_pam_buttons = []
         self.local_security_token = ""
@@ -1673,7 +1675,11 @@ class GameMover(QWidget):
         tab = QWidget(self)
         layout = QVBoxLayout()
 
-        layout.addWidget(QLabel("Timekpr Next nástroje (bonus čas, vypnutí kontroly pro dnešek)."))
+        self.timekpr_target_label = QLabel(
+            "Místní Timekpr Next tohoto počítače "
+            "(bonus čas, vypnutí kontroly pro dnešek).", tab,
+        )
+        layout.addWidget(self.timekpr_target_label)
 
         self.timekpr_status_label = QLabel("Načítám stav timekpra…")
         layout.addWidget(self.timekpr_status_label)
@@ -1684,9 +1690,8 @@ class GameMover(QWidget):
         )
         self.timekpr_wheel_note.setStyleSheet("color: #aab7c0;")
         auth_row.addWidget(self.timekpr_wheel_note, 1)
-        self.timekpr_unlock_button = self.create_host_pam_button(
-            "správu Timekpr", tab, self.on_timekpr_pam_unlocked,
-        )
+        self.timekpr_unlock_button = QPushButton("Odemknout místní PAM…", tab)
+        self.timekpr_unlock_button.clicked.connect(self.unlock_timekpr_context)
         auth_row.addWidget(self.timekpr_unlock_button)
         layout.addLayout(auth_row)
 
@@ -1755,6 +1760,7 @@ class GameMover(QWidget):
         tab.setLayout(layout)
         self.tabs.addTab(tab, "Timekpr")
         self.set_timekpr_controls_enabled(False)
+        self.update_timekpr_context_ui()
         self.load_timekpr_status()
 
     def init_server_registry_tab(self):
@@ -2091,6 +2097,9 @@ class GameMover(QWidget):
             if response.status_code != 200 or not payload.get("token"):
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
             self.local_security_token = payload["token"]
+            self.local_timekpr_payload = dict(payload)
+            if self.app_mode != "ssh_tunnel":
+                self.apply_active_timekpr_context()
             self.security_tunnel_lock_status.setText(
                 f"Místní chráněné operace jsou PAM odemčené pro {local_user}."
             )
@@ -2116,6 +2125,9 @@ class GameMover(QWidget):
             )
             return
         self.local_security_token = ""
+        self.local_timekpr_payload = None
+        if self.app_mode != "ssh_tunnel":
+            self.apply_active_timekpr_context()
         self.security_tunnel_lock_status.setText(
             "Místní PAM operace a nastavení spravovaného SSH tunelu jsou uzamčené."
         )
@@ -2224,7 +2236,7 @@ class GameMover(QWidget):
         })
         save_client_config(self.client_config)
         self.timekpr_token = ""
-        self.set_timekpr_controls_enabled(False)
+        self.host_timekpr_payload = None
         self.ssh_tunnel_stopping = False
         self.ssh_tunnel_error_reported = False
         self.ssh_tunnel_ready_deadline = time.monotonic() + 15
@@ -2279,7 +2291,7 @@ class GameMover(QWidget):
                 self.ssh_tunnel_probe_timer.stop()
                 self.app_mode = "ssh_tunnel"
                 self.timekpr_token = ""
-                self.set_timekpr_controls_enabled(False)
+                self.host_timekpr_payload = None
                 self.update_server_mode_ui()
                 self.update_security_tunnel_ui()
                 self.refresh_server_statuses()
@@ -2344,9 +2356,9 @@ class GameMover(QWidget):
         if self.app_mode == "ssh_tunnel":
             self.app_mode = "client"
         self.timekpr_token = ""
+        self.host_timekpr_payload = None
         self.security_payload = None
         self.global_operation_policies = dict(GLOBAL_OPERATION_DEFAULTS)
-        self.set_timekpr_controls_enabled(False)
         self.ssh_tunnel_stopping = False
         self.update_server_mode_ui()
         self.update_security_tunnel_ui()
@@ -2566,11 +2578,6 @@ class GameMover(QWidget):
         fixed_definitions = catalog.get("fixed") if isinstance(catalog.get("fixed"), list) else []
         if not fixed_definitions:
             fixed_definitions = list(FIXED_OPERATION_DEFINITIONS)
-        if local_scope:
-            fixed_definitions = [
-                definition for definition in fixed_definitions
-                if definition.get("id") == "security.manage"
-            ]
         self.populate_fixed_security_operations(fixed_definitions)
 
         if local_scope:
@@ -3273,7 +3280,7 @@ class GameMover(QWidget):
         new_mode = normalize_app_mode(self.app_mode_combo.itemData(index))
         if new_mode != self.app_mode:
             self.timekpr_token = ""
-            self.set_timekpr_controls_enabled(False)
+            self.host_timekpr_payload = None
         self.app_mode = new_mode
         self.client_config["app_mode"] = self.app_mode
         save_client_config(self.client_config)
@@ -3286,9 +3293,112 @@ class GameMover(QWidget):
         return management_api_url(self.app_mode, self.ssh_tunnel_port)
 
     def timekpr_api_url(self):
-        if is_host_management_mode(self.app_mode):
+        """Use host Timekpr only while the GUI-owned SSH tunnel is active."""
+        if self.app_mode == "ssh_tunnel":
             return self.host_management_api_url()
-        return FLASK_URL
+        return LOCAL_API_URL
+
+    def active_timekpr_token(self):
+        return (
+            self.timekpr_token
+            if self.app_mode == "ssh_tunnel"
+            else self.local_security_token
+        )
+
+    def active_timekpr_payload(self):
+        return (
+            self.host_timekpr_payload
+            if self.app_mode == "ssh_tunnel"
+            else self.local_timekpr_payload
+        )
+
+    def apply_active_timekpr_context(self):
+        payload = self.active_timekpr_payload()
+        token = self.active_timekpr_token()
+        self.original_hours_today = {}
+        if not token or not isinstance(payload, dict):
+            self.timekpra_mode = None
+            self.timekpra_add_flag = None
+            self.set_timekpr_controls_enabled(False)
+            target = "hostitele" if self.app_mode == "ssh_tunnel" else "tohoto počítače"
+            self.timekpr_status_label.setText(f"Timekpr {target} je uzamčený")
+            self.update_timekpr_context_ui()
+            return
+        self.timekpra_mode = payload.get("mode")
+        self.timekpra_add_flag = payload.get("add_flag")
+        self.timekpr_disable_seconds = payload.get(
+            "disable_seconds", TIMEKPRA_DISABLE_SECONDS,
+        )
+        managed_users = payload.get("managed_users")
+        if isinstance(managed_users, list):
+            self.set_timekpr_users(managed_users)
+        available = self.timekpra_mode in ("settimeleft", "addflag")
+        self.set_timekpr_controls_enabled(available)
+        target = "hostitele" if self.app_mode == "ssh_tunnel" else "tohoto počítače"
+        if available:
+            mode_label = (
+                "settimeleft" if self.timekpra_mode == "settimeleft"
+                else self.timekpra_add_flag
+            )
+            self.timekpr_status_label.setText(
+                f"Timekpr {target} je odemčený (mode: {mode_label})"
+            )
+        else:
+            self.timekpr_status_label.setText(
+                f"PAM {target} je odemčený; Timekpr není dostupný"
+            )
+        self.update_timekpr_context_ui()
+
+    def update_timekpr_context_ui(self):
+        if not hasattr(self, "timekpr_unlock_button"):
+            return
+        host_context = self.app_mode == "ssh_tunnel"
+        unlocked = bool(self.active_timekpr_token() and self.active_timekpr_payload())
+        if host_context:
+            self.timekpr_target_label.setText(
+                "Timekpr Next hostitele přes spravovaný SSH tunel "
+                "(bonus čas, vypnutí kontroly pro dnešek)."
+            )
+            self.timekpr_wheel_note.setText(
+                "Ověření vyžaduje wheel účet hostitele."
+            )
+            self.timekpr_unlock_button.setText(
+                "PAM hostitele odemčeno" if unlocked
+                else "Odemknout PAM hostitele…"
+            )
+            locked_style = "background-color: #49354f; border: 1px solid #cc8de8;"
+        else:
+            self.timekpr_target_label.setText(
+                "Místní Timekpr Next tohoto počítače "
+                "(bonus čas, vypnutí kontroly pro dnešek)."
+            )
+            self.timekpr_wheel_note.setText(
+                "Ověření vyžaduje místní účet ve skupině wheel."
+            )
+            self.timekpr_unlock_button.setText(
+                "Místní PAM odemčeno" if unlocked
+                else "Odemknout místní PAM…"
+            )
+            locked_style = "background-color: #214653; border: 1px solid #4dabf7;"
+        self.timekpr_unlock_button.setStyleSheet(
+            "color: #b2f2bb; background-color: #244b3a; "
+            "border: 1px solid #69db7c;" if unlocked else locked_style
+        )
+        self.timekpr_unlock_button.setEnabled(not unlocked)
+
+    def unlock_timekpr_context(self):
+        if self.app_mode == "ssh_tunnel":
+            if self.timekpr_token and self.host_timekpr_payload:
+                self.apply_active_timekpr_context()
+                return
+            self.show_host_pam_dialog(
+                "správu Timekpr hostitele", self.on_timekpr_pam_unlocked,
+            )
+            return
+        if self.local_security_token and self.local_timekpr_payload:
+            self.apply_active_timekpr_context()
+            return
+        self.unlock_tunnel_management()
 
     def update_server_mode_ui(self):
         server_mode = self.app_mode == "server"
@@ -3336,6 +3446,8 @@ class GameMover(QWidget):
             self.update_security_mode_ui()
         if hasattr(self, "security_tunnel_panel"):
             self.update_security_tunnel_ui()
+        if hasattr(self, "timekpr_status_label"):
+            self.apply_active_timekpr_context()
         if management_mode and self.timekpr_token:
             self.load_local_services()
             if hasattr(self, "security_global_table"):
@@ -3446,13 +3558,10 @@ class GameMover(QWidget):
             warning = str(error)
         finally:
             self.timekpr_token = ""
-            self.timekpra_mode = None
-            self.timekpra_add_flag = None
-            self.original_hours_today = {}
+            self.host_timekpr_payload = None
             self.security_payload = None
             if self.security_policy_scope() == "host":
                 self.clear_security_policy_tables()
-            self.set_timekpr_controls_enabled(False)
             self.update_server_mode_ui()
         if warning:
             QMessageBox.warning(
@@ -3536,7 +3645,7 @@ class GameMover(QWidget):
     def authenticate_host_pam(self, username, password):
         """Obtain one backend PAM token shared by every protected host operation."""
         response = requests.post(
-            f"{self.timekpr_api_url()}/timekpr/auth",
+            f"{self.host_management_api_url()}/timekpr/auth",
             json={"username": username, "password": password}, timeout=8,
         )
         try:
@@ -3546,31 +3655,8 @@ class GameMover(QWidget):
         if response.status_code != 200 or not payload.get("token"):
             message = payload.get("message") if isinstance(payload, dict) else response.text
             raise RuntimeError(message or f"PAM ověření selhalo (HTTP {response.status_code})")
-        self.original_hours_today = {}
         self.timekpr_token = payload["token"]
-        self.timekpra_mode = payload.get("mode")
-        self.timekpra_add_flag = payload.get("add_flag")
-        self.timekpr_disable_seconds = payload.get(
-            "disable_seconds", TIMEKPRA_DISABLE_SECONDS,
-        )
-        managed_users = payload.get("managed_users")
-        if isinstance(managed_users, list):
-            self.set_timekpr_users(managed_users)
-        if hasattr(self, "timekpr_status_label"):
-            if self.timekpra_mode in ("settimeleft", "addflag"):
-                mode_label = (
-                    "settimeleft" if self.timekpra_mode == "settimeleft"
-                    else self.timekpra_add_flag
-                )
-                self.timekpr_status_label.setText(
-                    f"Odemčeno ({username}, mode: {mode_label})"
-                )
-                self.set_timekpr_controls_enabled(True)
-            else:
-                self.timekpr_status_label.setText(
-                    f"PAM odemčeno ({username}); Timekpr není dostupný"
-                )
-                self.set_timekpr_controls_enabled(False)
+        self.host_timekpr_payload = dict(payload)
         self.update_server_mode_ui()
         self.refresh_server_statuses()
         return payload
@@ -3658,7 +3744,12 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "PAM", str(error))
 
     def on_timekpr_pam_unlocked(self, payload):
-        if self.timekpra_mode in ("settimeleft", "addflag") and self.timekpr_token:
+        if self.app_mode == "ssh_tunnel":
+            self.host_timekpr_payload = dict(payload)
+        else:
+            self.local_timekpr_payload = dict(payload)
+        self.apply_active_timekpr_context()
+        if self.timekpra_mode in ("settimeleft", "addflag") and self.active_timekpr_token():
             self.fetch_day_plan()
             return
         detail = payload.get("error") or "server nevrátil podporovaný mód"
@@ -3671,8 +3762,8 @@ class GameMover(QWidget):
     def host_pam_session_expired(self, detail=""):
         """Fail closed immediately when the host rejects a cached PAM session."""
         self.timekpr_token = ""
+        self.host_timekpr_payload = None
         self.security_payload = None
-        self.set_timekpr_controls_enabled(False)
         self.update_server_mode_ui()
         message = (
             "Hostitelská PAM relace už není platná. Použij Odemknout PAM "
@@ -6888,7 +6979,7 @@ class GameMover(QWidget):
         """Po přepnutí uživatele automaticky načti plán a zbývající čas."""
         self.time_left_label.setText("Zbývající čas: —")
         self.plan_label.setText("Plán: —")
-        if not self.timekpr_token:
+        if not self.active_timekpr_token():
             return
         self.fetch_day_plan(force=True)
         self.show_time_left()
@@ -7057,13 +7148,14 @@ class GameMover(QWidget):
     def add_bonus_time(self):
         user = self.timekpr_user_combo.currentText()
         minutes = self.bonus_spin.value()
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/add_bonus",
-                                 json={"user": user, "minutes": minutes, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "minutes": minutes, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             msg = resp.json().get("message", "")
             if resp.status_code == 200:
@@ -7075,13 +7167,14 @@ class GameMover(QWidget):
 
     def disable_for_today(self):
         user = self.timekpr_user_combo.currentText()
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/disable_today",
-                                 json={"user": user, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             msg = resp.json().get("message", "")
             if resp.status_code == 200:
@@ -7093,13 +7186,14 @@ class GameMover(QWidget):
 
     def reset_time_left(self):
         user = self.timekpr_user_combo.currentText()
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/reset_today",
-                                 json={"user": user, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             data = resp.json()
             msg = data.get("message", "")
@@ -7118,13 +7212,14 @@ class GameMover(QWidget):
 
     def show_time_left(self):
         user = self.timekpr_user_combo.currentText()
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/userinfo",
-                                 json={"user": user, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             msg = resp.json().get("message", "")
             if resp.status_code == 200:
@@ -7158,12 +7253,13 @@ class GameMover(QWidget):
 
     def fetch_day_plan(self, force=False):
         user = self.timekpr_user_combo.currentText()
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/day_plan",
-                                 json={"user": user, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=8)
             data = resp.json()
             if resp.status_code == 200:
@@ -7183,7 +7279,8 @@ class GameMover(QWidget):
             pass
 
     def apply_window_today(self):
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         start_qt = self.window_start_time.time()
@@ -7197,8 +7294,8 @@ class GameMover(QWidget):
         user = self.timekpr_user_combo.currentText()
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/set_hours_today",
-                                 json={"user": user, "hours": hours_str, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "hours": hours_str, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             data = resp.json()
             if resp.status_code == 200:
@@ -7210,7 +7307,8 @@ class GameMover(QWidget):
             QMessageBox.critical(self, "Timekpr", str(e))
 
     def reset_window_today(self):
-        if not self.timekpr_token:
+        token = self.active_timekpr_token()
+        if not token:
             QMessageBox.warning(self, "Timekpr", "Nejprve se přihlas jako wheel uživatel.")
             return
         user = self.timekpr_user_combo.currentText()
@@ -7220,8 +7318,8 @@ class GameMover(QWidget):
             return
         try:
             resp = requests.post(f"{self.timekpr_api_url()}/timekpr/set_hours_today",
-                                 json={"user": user, "hours": orig_hours, "token": self.timekpr_token},
-                                 headers={"X-Timekpr-Token": self.timekpr_token},
+                                 json={"user": user, "hours": orig_hours, "token": token},
+                                 headers={"X-Timekpr-Token": token},
                                  timeout=10)
             data = resp.json()
             if resp.status_code == 200:

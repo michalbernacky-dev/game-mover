@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.27.0
+Version:        0.27.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -173,6 +173,12 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.1-1
+- Use local Timekpr, PAM, and users while no management tunnel is active
+- Switch Timekpr to the managed host only for the lifetime of the SSH tunnel
+- Restore the separate local Timekpr context after closing the tunnel
+- Make the contextual Timekpr target explicit through labels and PAM colors
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.0-1
 - Separate local workstation and managed-host security policy scopes
 - Show only Mover and launcher policies in read-only Client mode

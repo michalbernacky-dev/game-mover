@@ -157,6 +157,10 @@ The same tab contains the otherwise hidden local-PAM and managed-tunnel controls
 Local PAM authorizes protected Mover actions and creation of the SSH tunnel;
 opening the tunnel does not reuse that token for the host. A second host PAM
 login is always required for administrative API operations.
+Timekpr follows the active management context: without a tunnel it controls the
+local workstation through its local PAM session; while the GUI-owned tunnel is
+active it switches to the game-server host, its PAM session, and its user list.
+Closing the tunnel restores the previously unlocked local Timekpr context.
 
 ### Per-server management tabs
 
@@ -632,6 +636,9 @@ Ve stejné záložce jsou jinak skryté ovládací prvky spravovaného tunelu. J
 zobrazení vyžaduje PAM proti místní službě Game Mover na laptopu; otevření tunelu
 tuto relaci nepřenáší na hostitele. Pro administrativní operace je vždy nutné
 druhé PAM přihlášení vůči hostiteli.
+Timekpr sleduje aktivní kontext správy: bez tunelu ovládá tento počítač přes
+místní PAM relaci, zatímco s aktivním spravovaným tunelem se přepne na Timekpr,
+PAM relaci a uživatele hostitele. Zavření tunelu obnoví předchozí místní kontext.
 
 ### Správa jednotlivých serverů
 

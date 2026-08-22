@@ -175,6 +175,11 @@ launcher policies. **Game-server host** becomes selectable only in local Server
 mode or through the GUI-owned SSH tunnel. Each scope has its own PAM token;
 launcher updates always use the workstation scope. Distinct local and host
 button colors supplement, but do not replace, explicit text labels.
+Timekpr is deliberately context-sensitive rather than workstation-fixed: it
+uses the local loopback backend and local PAM session without a tunnel, switches
+to the managed host backend and host PAM session while the tunnel is active,
+and restores the cached local context when the tunnel closes. Local and host
+user catalogs are kept separate.
 
 Every fixed tab that exposes host-protected actions has a contextual PAM unlock
 control. All of them use the same short-lived backend session token; credentials
