@@ -20,6 +20,7 @@ from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixm
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
+from game_mover_game_filters import is_excluded_game
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
     DEFAULT_SSH_PORT,
@@ -77,15 +78,6 @@ DAY_NAMES = {
     5: "Pá",
     6: "So",
     7: "Ne",
-}
-
-EXCLUDE_PREFIXES = ("Steam", "steam", "Proton", "proton")
-EXCLUDE_LIST = {
-    "steam": ["Half-Life Dedicated Server"],
-    "gog": [],
-    "epic": [],
-    "ubisoft": [],
-    "rockstar": []
 }
 
 TIMEKPRA_DISABLE_SECONDS = 24 * 3600       # kolik času nastavit pro "vypnout kontrolu na dnešek"
@@ -1059,8 +1051,8 @@ class GameMover(QWidget):
         games_header.setSectionResizeMode(0, QHeaderView.Fixed)
         self.knowledge_games_table.setColumnWidth(0, 28)
         games_header.setSectionResizeMode(1, QHeaderView.Stretch)
-        for column, width in ((2, 110), (3, 140), (4, 90), (5, 44)):
-            games_header.setSectionResizeMode(column, QHeaderView.Fixed)
+        for column, width in ((2, 120), (3, 210), (4, 95), (5, 50)):
+            games_header.setSectionResizeMode(column, QHeaderView.Interactive)
             self.knowledge_games_table.setColumnWidth(column, width)
         self.knowledge_games_table.setMinimumHeight(150)
         self.knowledge_games_table.setMaximumHeight(190)
@@ -1231,9 +1223,15 @@ class GameMover(QWidget):
                 QTableWidgetItem(platforms), QTableWidgetItem(users),
                 QTableWidgetItem(size), QTableWidgetItem("💡" if matches else "—"),
             )
-            tooltip = "\n".join(game.get("paths", []))
+            paths = "\n".join(game.get("paths", []))
+            tooltips = (
+                dot.toolTip(), f"Umístění:\n{paths}" if paths else "Umístění není známé.",
+                f"Platformy: {platforms}", f"Uživatelé: {users}",
+                f"Logická velikost instalace: {size}",
+                "Pro tuto hru existuje uložený tip." if matches else "Pro tuto hru zatím tip nemáme.",
+            )
             for column, item in enumerate(values):
-                item.setToolTip(item.toolTip() or tooltip)
+                item.setToolTip(tooltips[column])
                 table.setItem(row, column, item)
         for target_type, target_id in sorted(self.knowledge_saved_targets - attached):
             if target_type == "launcher":
@@ -1252,9 +1250,8 @@ class GameMover(QWidget):
                 table.setItem(row, column, item)
         table.blockSignals(False)
         self.filter_knowledge_games(self.knowledge_search.text())
-        residues = sum(bool(game.get("possible_residue")) for game in games if isinstance(game, dict))
         self.knowledge_status.setText(
-            f"Nalezeno {len(games)} her; {residues} malých instalací je označeno jako možný pozůstatek."
+            f"Nalezeno {len(games)} her větších než 1 GiB. Menší adresáře jsou skryté jako pozůstatky."
         )
         if current[1]:
             self.set_knowledge_target(*current)
@@ -6254,8 +6251,7 @@ class GameMover(QWidget):
                 d for d in os.listdir(common)
                 if os.path.isdir(os.path.join(common, d))
                 and not os.path.islink(os.path.join(common, d))
-                and not d.startswith(EXCLUDE_PREFIXES)
-                and d not in EXCLUDE_LIST.get(self.platform, [])
+                and not is_excluded_game(self.platform, d)
             ]
         return []
 

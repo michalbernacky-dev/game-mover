@@ -27,9 +27,13 @@ class InstalledGameInventoryTest(unittest.TestCase):
         common = self.user / ".local/share/Steam/steamapps/common"
         common.mkdir(parents=True)
         (common / "The Forest").symlink_to(forest, target_is_directory=True)
+        runtime = self.shared / "steam" / "SteamLinuxRuntime_sniper"
+        runtime.mkdir(parents=True)
+        (runtime / "runtime.bin").write_bytes(b"xx")
 
         gta = self.shared / "Heroic" / "GTAVEnhanced"
         gta.mkdir(parents=True)
+        (gta / "game.bin").write_bytes(b"xx")
         heroic = self.user / ".config/heroic/legendaryConfig/legendary"
         heroic.mkdir(parents=True)
         (heroic / "installed.json").write_text(json.dumps({"gta": {
@@ -60,8 +64,10 @@ class InstalledGameInventoryTest(unittest.TestCase):
         connection.commit()
         connection.close()
         (self.shared / "gog" / "Postal 2").mkdir(parents=True)
+        (self.shared / "gog" / "Postal 2" / "game.bin").write_bytes(b"xx")
         rockstar_root = self.user / "Games/rockstar-games-launcher/drive_c/Program Files/Rockstar Games"
         (rockstar_root / "Red Dead Redemption 2").mkdir(parents=True)
+        (rockstar_root / "Red Dead Redemption 2" / "game.bin").write_bytes(b"xx")
         (rockstar_root / "Launcher").mkdir()
 
         items = scan_installed_games(str(self.homes), str(self.shared), small_install_bytes=1)
@@ -74,14 +80,14 @@ class InstalledGameInventoryTest(unittest.TestCase):
         self.assertIn("red-dead-redemption-2", by_id)
         self.assertNotIn("ubisoft-connect", by_id)
         self.assertNotIn("launcher", by_id)
+        self.assertNotIn("steamlinuxruntime-sniper", by_id)
 
-    def test_marks_only_tiny_directories_as_possible_residue(self):
+    def test_hides_directories_at_or_below_the_minimum_size(self):
         tiny = self.shared / "steam" / "Tiny Remnant"
         tiny.mkdir(parents=True)
         (tiny / "marker").write_bytes(b"x")
         items = scan_installed_games(str(self.homes), str(self.shared), small_install_bytes=8192)
-        item = next(item for item in items if item["id"] == "tiny-remnant")
-        self.assertTrue(item["possible_residue"])
+        self.assertNotIn("tiny-remnant", {item["id"] for item in items})
 
     def test_slug_is_stable_and_ascii(self):
         self.assertEqual(game_slug("Zaklínač® 3"), "zaklinac-3")

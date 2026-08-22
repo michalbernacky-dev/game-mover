@@ -103,8 +103,9 @@ The knowledge tab's target picker is populated from a local installed-game
 inventory rather than from launchers. Provider scanners combine `/var/Games`,
 Steam manifests/symlinks, Heroic metadata, Lutris SQLite and CurseForge
 instances, deduplicate paths, and aggregate the users that reference each game.
-Directory allocation is measured once per real path and very small entries are
-presented as possible remnants, never silently deleted. The local-only inventory
+Logical directory size is measured once per real path. Entries up to and
+including 1 GiB are treated as remnants and omitted from the catalog, but never
+deleted. The local-only inventory
 endpoint is cached briefly; remote knowledge notes remain a separate data source
 and are joined in the GUI through stable aliases.
 

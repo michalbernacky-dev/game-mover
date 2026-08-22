@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.25.2
+Version:        0.25.5
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -63,6 +63,7 @@ install -Dpm0644 game_mover_launchers.py %{buildroot}/opt/game_mover/game_mover_
 install -Dpm0644 game_mover_notes.py %{buildroot}/opt/game_mover/game_mover_notes.py
 install -Dpm0644 game_mover_tip_checks.py %{buildroot}/opt/game_mover/game_mover_tip_checks.py
 install -Dpm0644 game_mover_game_inventory.py %{buildroot}/opt/game_mover/game_mover_game_inventory.py
+install -Dpm0644 game_mover_game_filters.py %{buildroot}/opt/game_mover/game_mover_game_filters.py
 install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
 install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
@@ -156,6 +157,7 @@ fi
 /opt/game_mover/game_mover_notes.py
 /opt/game_mover/game_mover_tip_checks.py
 /opt/game_mover/game_mover_game_inventory.py
+/opt/game_mover/game_mover_game_filters.py
 /opt/game_mover/game_mover_operators.py
 /opt/game_mover/game_mover_whitelist.py
 /opt/game_mover/game_mover_version.py
@@ -169,6 +171,16 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.5-1
+- Make game metadata columns resizable and give each cell a contextual tooltip
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.4-1
+- Share non-game directory filters between Mover and the multi-provider tips inventory
+
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.3-1
+- Hide directories up to 1 GiB as remnants before building the game catalog
+- Measure logical directory size instead of allocated filesystem blocks
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.2-1
 - Replace the crowded tips combo/table with a compact searchable master-detail view
 - Add green, yellow, red and neutral local status indicators

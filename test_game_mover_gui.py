@@ -121,6 +121,18 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(self.window.knowledge_games_table.item(0, 3).text(), "alice, son")
         self.assertEqual(self.window.knowledge_games_table.item(0, 5).text(), "💡")
+        self.assertEqual(
+            self.window.knowledge_games_table.item(0, 3).toolTip(),
+            "Uživatelé: alice, son",
+        )
+        self.assertIn(
+            "/var/Games/Heroic/GTAVEnhanced",
+            self.window.knowledge_games_table.item(0, 1).toolTip(),
+        )
+        self.assertEqual(
+            self.window.knowledge_games_table.horizontalHeader().sectionResizeMode(3),
+            game_mover.QHeaderView.Interactive,
+        )
 
     def tearDown(self):
         self.window.close()

@@ -7,8 +7,10 @@ import sqlite3
 import unicodedata
 from pathlib import Path
 
+from game_mover_game_filters import is_excluded_game
 
-DEFAULT_SMALL_INSTALL_BYTES = 128 * 1024 * 1024
+
+DEFAULT_SMALL_INSTALL_BYTES = 1024 * 1024 * 1024
 LAUNCHER_SLUGS = frozenset({
     "ea-app", "epic-games-store", "gog-galaxy", "heroic-games-launcher",
     "launcher", "plarium-launcher", "rockstar-games-launcher", "social-club",
@@ -34,7 +36,7 @@ def knowledge_aliases(slug):
 
 
 def directory_size(path):
-    """Allocated size without following symlinked directories."""
+    """Logical file size without following symlinked directories."""
     total = 0
     try:
         for root, directories, files in os.walk(path, followlinks=False):
@@ -42,7 +44,7 @@ def directory_size(path):
             for name in files:
                 try:
                     stat = os.stat(os.path.join(root, name), follow_symlinks=False)
-                    total += stat.st_blocks * 512 if stat.st_blocks else stat.st_size
+                    total += stat.st_size
                 except OSError:
                     continue
     except OSError:
@@ -79,7 +81,12 @@ class Inventory:
         name = str(name).strip()
         path = os.path.realpath(str(path)) if path else ""
         slug = game_slug(name)
-        if not name or slug in LAUNCHER_SLUGS or not path or not os.path.isdir(path):
+        if (
+            not name or slug in LAUNCHER_SLUGS
+            or is_excluded_game(platform, name)
+            or is_excluded_game(platform, os.path.basename(path))
+            or not path or not os.path.isdir(path)
+        ):
             return
         item = self.items.setdefault(slug, {
             "id": slug, "name": name, "platforms": set(), "users": set(),
@@ -101,6 +108,11 @@ class Inventory:
                 if real not in self.path_sizes:
                     self.path_sizes[real] = directory_size(real)
                 size += self.path_sizes[real]
+            # The catalog intentionally models usable game installations, not
+            # leftover prefixes/manifests.  The family policy treats directories
+            # up to and including 1 GiB as remnants and hides them entirely.
+            if size <= self.small_install_bytes:
+                continue
             rows.append({
                 **item,
                 "platforms": sorted(item["platforms"]),
@@ -108,7 +120,7 @@ class Inventory:
                 "paths": sorted(item["paths"]),
                 "app_ids": sorted(item["app_ids"]),
                 "size_bytes": size,
-                "possible_residue": size < self.small_install_bytes,
+                "possible_residue": False,
             })
         return sorted(rows, key=lambda row: row["name"].casefold())
 

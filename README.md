@@ -29,8 +29,8 @@ library listed in `libraryfolders.vdf`, including secondary disks.
 On first opening, the tab asks the local Game Mover backend for an installed-game
 inventory. It combines shared `/var/Games` data, Steam manifests and Game Mover
 symlinks, Heroic metadata, Lutris' local catalog, and CurseForge instances. The
-catalog shows platforms, users, approximate allocated size, and flags installs
-below 128 MiB as possible remnants. Launcher-only records are excluded. Existing
+catalog shows platforms, users, and approximate logical size. Directories up to
+and including 1 GiB are treated as remnants and omitted. Launcher-only records are excluded. Existing
 SQLite notes are attached through stable aliases; games without notes are ready
 to receive a new entry without manually inventing an ID.
 
@@ -496,8 +496,8 @@ výsledky hostiteli. Kontrola Steamu používá AppID a prochází všechny knih
 Při prvním otevření si záložka od místního backendu vyžádá inventuru her. Sloučí
 sdílené instalace v `/var/Games`, manifesty a symlinky Steamu, metadata Heroicu,
 místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele,
-přibližnou alokovanou velikost a instalace pod 128 MiB označí jako možný
-pozůstatek. Samotné launchery do seznamu nezařazuje. Existující SQLite tip se
+přibližnou logickou velikost a adresáře do 1 GiB včetně vynechá jako pozůstatky.
+Samotné launchery do seznamu nezařazuje. Existující SQLite tip se
 připojí přes stabilní alias; hra bez tipu je rovnou připravená k jeho založení.
 
 ## Bezpečnostní model

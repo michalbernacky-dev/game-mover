@@ -79,6 +79,7 @@ from game_mover_whitelist import (
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
 from game_mover_game_inventory import scan_installed_games
+from game_mover_game_filters import is_excluded_game
 from game_mover_notes import (
     NotesError, delete_target_notes, initialize_notes_database, list_all_notes,
     list_notes, replace_notes,
@@ -588,15 +589,6 @@ def find_game_server(server_id):
         if server.get("id") == server_id:
             return server
     return None
-
-EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton")
-EXCLUDE_LIST = {
-    "steam": ["Half-Life Dedicated Server"],
-    "gog": [],
-    "epic": [],
-    "ubisoft": [],
-    "rockstar": []
-}
 
 TIMEKPRA_BIN = "timekpra"
 TIMEKPRA_BIN_RESOLVED: list[str] | None = None
@@ -1423,8 +1415,7 @@ def api_list_user_games():
             d for d in os.listdir(common)
             if os.path.isdir(os.path.join(common, d))
             and not os.path.islink(os.path.join(common, d))
-            and not any(d.startswith(p) for p in EXCLUDE_PREFIXES)
-            and d not in EXCLUDE_LIST.get(platform, [])
+            and not is_excluded_game(platform, d)
         ]
         return jsonify({"platform": platform, "user": user, "games": sorted(games)})
     except Exception as e:
@@ -1446,8 +1437,7 @@ def api_list_shared():
         games = [
             d for d in os.listdir(base)
             if os.path.isdir(os.path.join(base, d))
-            and not any(d.startswith(p) for p in EXCLUDE_PREFIXES)
-            and d not in EXCLUDE_LIST.get(platform, [])
+            and not is_excluded_game(platform, d)
         ]
         return jsonify({"platform": platform, "games": sorted(games)})
     except Exception as e:
@@ -1762,7 +1752,7 @@ def installed_games_catalog():
         games = [dict(game) for game in GAME_INVENTORY_CACHE["games"]]
     return jsonify({
         "games": games,
-        "small_install_threshold_bytes": 128 * 1024 * 1024,
+        "minimum_game_size_bytes": 1024 * 1024 * 1024,
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 
