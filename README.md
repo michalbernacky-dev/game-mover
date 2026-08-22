@@ -182,6 +182,10 @@ When a host PAM session expires, the first rejected protected request immediatel
 locks the host-management controls and offers authentication again in the current
 tab; it is never silently retried with broader credentials.
 
+The Timekpr user selector is built from the managed host's live interactive login
+accounts, not from directory names left under `/home`. System/service identities
+are hidden, while the editable field still permits an exceptional manual target.
+
 Registered systemd and Podman workloads with a data directory support verified
 full-data backups. A running workload is cleanly stopped before archiving and
 returned to its previous running state afterward. The manifest records the
@@ -642,6 +646,10 @@ vlastní bezpečnostní zásadou.
 Při vypršení PAM relace hostitele první odmítnutá chráněná operace okamžitě zamkne
 ovládací prvky správy a nabídne nové ověření přímo v aktuální záložce. Aplikace ji
 nikdy nezkouší potichu opakovat s širšími oprávněními.
+
+Výběr uživatele v Timekpr se po ověření skládá z živých interaktivních účtů
+spravovaného hostitele, nikoli ze zbytků adresářů v `/home`. Servisní účty se
+skrývají; editovatelné pole nadále dovoluje výjimečný ručně zadaný cíl.
 
 Registrované systemd i Podman workloady s datovým adresářem podporují ověřované
 úplné zálohy. Běžící workload se před archivací korektně zastaví a následně se

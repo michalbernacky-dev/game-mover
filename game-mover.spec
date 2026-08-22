@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.26.0
+Version:        0.26.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -64,6 +64,7 @@ install -Dpm0644 game_mover_notes.py %{buildroot}/opt/game_mover/game_mover_note
 install -Dpm0644 game_mover_tip_checks.py %{buildroot}/opt/game_mover/game_mover_tip_checks.py
 install -Dpm0644 game_mover_game_inventory.py %{buildroot}/opt/game_mover/game_mover_game_inventory.py
 install -Dpm0644 game_mover_game_filters.py %{buildroot}/opt/game_mover/game_mover_game_filters.py
+install -Dpm0644 game_mover_users.py %{buildroot}/opt/game_mover/game_mover_users.py
 install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
 install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
 install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
@@ -158,6 +159,7 @@ fi
 /opt/game_mover/game_mover_tip_checks.py
 /opt/game_mover/game_mover_game_inventory.py
 /opt/game_mover/game_mover_game_filters.py
+/opt/game_mover/game_mover_users.py
 /opt/game_mover/game_mover_operators.py
 /opt/game_mover/game_mover_whitelist.py
 /opt/game_mover/game_mover_version.py
@@ -171,6 +173,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.1-1
+- List only real interactive login accounts in Timekpr instead of every home directory
+- Refresh the editable user selector from the authenticated host for SSH administration
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.0-1
 - Offer one shared host PAM unlock directly in every tab with protected operations
 - Reuse the same short-lived backend token without storing the user's password

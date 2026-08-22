@@ -21,6 +21,7 @@ from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, p
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_game_filters import is_excluded_game
+from game_mover_users import interactive_usernames
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
     DEFAULT_SSH_PORT,
@@ -91,10 +92,7 @@ SERVER_POLICY_LABELS = {"silent": "tiché", "pam": "PAM", "disabled": "zakázán
 # Pomocné funkce
 # ------------------------------------------------------------
 def list_system_users():
-    base = "/home"
-    if os.path.isdir(base):
-        return [u for u in os.listdir(base) if os.path.isdir(os.path.join(base, u))]
-    return []
+    return interactive_usernames()
 
 def list_wheel_users():
     try:
@@ -1692,6 +1690,9 @@ class GameMover(QWidget):
         if self.user not in users:
             users.insert(0, self.user)
         self.timekpr_user_combo.addItems(users)
+        own_user_index = self.timekpr_user_combo.findText(self.user, Qt.MatchFixedString)
+        if own_user_index >= 0:
+            self.timekpr_user_combo.setCurrentIndex(own_user_index)
         self.timekpr_user_combo.currentIndexChanged.connect(self.on_timekpr_user_changed)
         layout.addWidget(self.timekpr_user_combo)
 
@@ -3246,6 +3247,9 @@ class GameMover(QWidget):
         self.timekpr_disable_seconds = payload.get(
             "disable_seconds", TIMEKPRA_DISABLE_SECONDS,
         )
+        managed_users = payload.get("managed_users")
+        if isinstance(managed_users, list):
+            self.set_timekpr_users(managed_users)
         if hasattr(self, "timekpr_status_label"):
             if self.timekpra_mode in ("settimeleft", "addflag"):
                 mode_label = (
@@ -3264,6 +3268,26 @@ class GameMover(QWidget):
         self.update_server_mode_ui()
         self.refresh_server_statuses()
         return payload
+
+    def set_timekpr_users(self, users):
+        """Replace stale home-directory guesses with backend-verified login users."""
+        if not hasattr(self, "timekpr_user_combo"):
+            return
+        normalized = sorted({
+            str(user).strip() for user in users if str(user).strip()
+        }, key=str.casefold)
+        current = self.timekpr_user_combo.currentText().strip()
+        preferred = current if current in normalized else (
+            self.user if self.user in normalized else (normalized[0] if normalized else current)
+        )
+        self.timekpr_user_combo.blockSignals(True)
+        self.timekpr_user_combo.clear()
+        self.timekpr_user_combo.addItems(normalized)
+        if preferred and preferred not in normalized:
+            self.timekpr_user_combo.addItem(preferred)
+        if preferred:
+            self.timekpr_user_combo.setCurrentText(preferred)
+        self.timekpr_user_combo.blockSignals(False)
 
     def show_host_pam_dialog(self, context="správu hostitele"):
         if not is_host_management_mode(self.app_mode):

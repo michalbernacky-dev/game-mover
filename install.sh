@@ -96,6 +96,7 @@ rsync -a --delete \
   --include='/game_mover_tip_checks.py' \
   --include='/game_mover_game_inventory.py' \
   --include='/game_mover_game_filters.py' \
+  --include='/game_mover_users.py' \
   --include='/game_mover_operators.py' \
   --include='/game_mover_whitelist.py' \
   --include='/game-mover' \

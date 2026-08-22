@@ -42,6 +42,7 @@ from game_mover_dns import (
 )
 from game_mover_pihole import PiholeAdapterError, sync_pihole_records
 from game_mover_mods import scan_mod_directory
+from game_mover_users import interactive_usernames
 from game_mover_security import (
     POLICY_MODES,
     SERVER_ACTION_IDS,
@@ -3290,6 +3291,7 @@ def timekpr_auth():
         "disable_seconds": TIMEKPRA_DISABLE_SECONDS,
         "user": username,
         "ttl_seconds": TOKEN_TTL_SECONDS,
+        "managed_users": interactive_usernames(),
     })
 
 

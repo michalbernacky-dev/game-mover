@@ -329,6 +329,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "token": "shared-host-token",
             "mode": "settimeleft",
             "disable_seconds": 3600,
+            "managed_users": ["carol", "bob", "dave", "alice"],
         }
         with (
             patch.object(game_mover.requests, "post", return_value=response) as post,
@@ -339,6 +340,10 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.window.update_host_pam_buttons()
         self.assertEqual(self.window.timekpr_token, "shared-host-token")
+        self.assertEqual([
+            self.window.timekpr_user_combo.itemText(index)
+            for index in range(self.window.timekpr_user_combo.count())
+        ], ["dave", "alice", "bob", "carol"])
         self.assertEqual(len(self.window.host_pam_buttons), 6)
         self.assertTrue(all(
             button.text() == "PAM odemčeno" and not button.isEnabled()
