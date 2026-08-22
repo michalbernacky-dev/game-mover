@@ -184,12 +184,16 @@ class ServerManagementGuiTest(unittest.TestCase):
             },
         })
 
-        self.assertEqual(self.window.system_resources_source.text(), "Paměť: místní počítač")
+        self.assertEqual(self.window.system_resources_source.text(), "MÍSTNÍ POČÍTAČ")
         self.assertEqual(self.window.ram_bar.value(), 75)
         self.assertIn("24.0 GiB / 32.0 GiB", self.window.ram_bar.format())
-        self.assertIn("dostupné 8.0 GiB", self.window.ram_bar.format())
+        self.assertIn("volná 8.0 GiB", self.window.ram_bar.format())
         self.assertEqual(self.window.swap_bar.value(), 25)
         self.assertIn("2.0 GiB / 8.0 GiB", self.window.swap_bar.format())
+
+        self.window.update_system_resources_context("host")
+        self.assertEqual(self.window.system_resources_source.text(), "HOSTITEL · SSH TUNEL")
+        self.assertIn("#cc8de8", self.window.system_resources_widget.styleSheet())
 
     def test_global_resource_target_switches_only_for_live_managed_tunnel(self):
         self.window.app_mode = "ssh_tunnel"

@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.30.0
+Version:        0.30.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -174,6 +174,10 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.30.1-1
+- Shorten RAM and swap labels so their values remain readable in the global strip
+- Distinguish local and tunneled-host capacity with blue and purple context panels
+
 * Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.30.0-1
 - Show persistent RAM and swap capacity below every application tab
 - Read local capacity normally and host capacity through the active managed SSH tunnel

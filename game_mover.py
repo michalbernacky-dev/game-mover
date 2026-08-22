@@ -856,9 +856,12 @@ class GameMover(QWidget):
             self.tabs.tabBar().setTabButton(index, QTabBar.RightSide, None)
 
         self.system_resources_widget = QWidget(self)
+        self.system_resources_widget.setObjectName("systemResourcesPanel")
         resources_layout = QHBoxLayout(self.system_resources_widget)
         resources_layout.setContentsMargins(8, 4, 8, 4)
-        self.system_resources_source = QLabel("Paměť: zjišťuji zdroj…", self)
+        resources_layout.setSpacing(8)
+        self.system_resources_source = QLabel("ZJIŠŤUJI ZDROJ…", self)
+        self.system_resources_source.setObjectName("systemResourcesContext")
         self.system_resources_source.setMinimumWidth(175)
         resources_layout.addWidget(self.system_resources_source)
         self.ram_bar = QProgressBar(self)
@@ -917,10 +920,7 @@ class GameMover(QWidget):
         if self.application_closing or not hasattr(self, "ram_bar"):
             return
         base_url, target = self.system_resources_target()
-        self.system_resources_source.setText(
-            "Paměť: hostitel přes SSH tunel"
-            if target == "host" else "Paměť: místní počítač"
-        )
+        self.update_system_resources_context(target)
         worker = self.system_resources_thread
         if worker is not None and worker.isRunning():
             if worker.target != target:
@@ -938,6 +938,23 @@ class GameMover(QWidget):
     @staticmethod
     def format_resource_bytes(value):
         return f"{max(0, int(value)) / (1024 ** 3):.1f} GiB"
+
+    def update_system_resources_context(self, target):
+        host_context = target == "host"
+        self.system_resources_source.setText(
+            "HOSTITEL · SSH TUNEL" if host_context else "MÍSTNÍ POČÍTAČ"
+        )
+        border = "#cc8de8" if host_context else "#4dabf7"
+        background = "#2b2332" if host_context else "#162d38"
+        label = "#e7c6f3" if host_context else "#b9e3f7"
+        self.system_resources_widget.setStyleSheet(
+            "QWidget#systemResourcesPanel {"
+            f"background-color: {background}; border: 1px solid {border}; "
+            "border-radius: 4px; } "
+            "QLabel#systemResourcesContext {"
+            f"color: {label}; border: none; background: transparent; "
+            "font-weight: bold; }"
+        )
 
     @staticmethod
     def set_resource_bar_style(bar, percent, thresholds):
@@ -959,10 +976,7 @@ class GameMover(QWidget):
         if payload.get("target") != current_target:
             self.system_resources_refresh_pending = True
             return
-        self.system_resources_source.setText(
-            "Paměť: hostitel přes SSH tunel"
-            if current_target == "host" else "Paměť: místní počítač"
-        )
+        self.update_system_resources_context(current_target)
         error = payload.get("error")
         if error:
             for name, bar in (("RAM", self.ram_bar), ("SWAP", self.swap_bar)):
@@ -979,13 +993,13 @@ class GameMover(QWidget):
         memory_percent = max(0, min(100, round(float(memory.get("percent", 0)))))
         self.ram_bar.setValue(memory_percent)
         self.ram_bar.setFormat(
-            "RAM: "
+            "RAM "
             f"{self.format_resource_bytes(memory.get('used_bytes', 0))} / "
-            f"{self.format_resource_bytes(memory.get('total_bytes', 0))} "
-            f"({memory_percent} %), dostupné "
+            f"{self.format_resource_bytes(memory.get('total_bytes', 0))} · volná "
             f"{self.format_resource_bytes(memory.get('available_bytes', 0))}"
         )
         self.ram_bar.setToolTip(
+            f"Využití RAM: {memory_percent} %.\n"
             "Využitá paměť je počítána jako celková minus skutečně dostupná; "
             "dostupná paměť zahrnuje uvolnitelnou cache."
         )
@@ -1002,11 +1016,12 @@ class GameMover(QWidget):
             swap_percent = max(0, min(100, round(float(swap.get("percent", 0)))))
             self.swap_bar.setValue(swap_percent)
             self.swap_bar.setFormat(
-                "SWAP: "
+                "SWAP "
                 f"{self.format_resource_bytes(swap.get('used_bytes', 0))} / "
-                f"{self.format_resource_bytes(swap_total)} ({swap_percent} %)"
+                f"{self.format_resource_bytes(swap_total)} · {swap_percent} %"
             )
             self.swap_bar.setToolTip(
+                f"Využití swapu: {swap_percent} %.\n"
                 f"Volný swap: {self.format_resource_bytes(swap.get('free_bytes', 0))}"
             )
             self.set_resource_bar_style(self.swap_bar, swap_percent, (25, 60))

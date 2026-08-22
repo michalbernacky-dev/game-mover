@@ -20,7 +20,9 @@ managed SSH tunnel it describes the local workstation; while the tunnel is
 active it reads the game-server host through that tunnel. It refreshes every
 ten seconds and is read-only, so viewing it does not require PAM. RAM includes
 the amount the kernel considers genuinely available, making it useful before
-starting another memory-heavy server. Game-library disk bars remain in Mover.
+starting another memory-heavy server. Like the PAM controls, a blue panel marks
+the local computer and a purple panel marks the tunneled host. Game-library disk
+bars remain in Mover.
 
 The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
 shows whether their installed versions are current. Heroic releases are checked
@@ -535,7 +537,8 @@ spravovaného SSH tunelu popisuje místní počítač, s aktivním tunelem nač�
 něj prostředky hostitele herních serverů. Obnovuje se každých deset sekund a je
 jen informační, takže nevyžaduje PAM. U RAM uvádí také paměť, kterou jádro
 skutečně považuje za dostupnou, což pomáhá před spuštěním dalšího náročného
-serveru. Diskové ukazatele herních knihoven zůstávají v Moveru.
+serveru. Stejně jako PAM tlačítka označuje modrý panel místní počítač a fialový
+panel hostitele přes tunel. Diskové ukazatele herních knihoven zůstávají v Moveru.
 
 Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi
