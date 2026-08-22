@@ -27,12 +27,45 @@ class GameFiltersTest(unittest.TestCase):
             residue.mkdir()
             Path(steamapps, "appmanifest_42.acf").write_text(
                 '"AppState"\n{\n\t"appid" "42"\n'
-                '\t"installdir" "Small Real Game"\n}\n',
+                '\t"installdir" "Small Real Game"\n'
+                '\t"SizeOnDisk" "0"\n}\n',
                 encoding="utf-8",
             )
 
             self.assertFalse(is_possible_game_residue("steam", installed))
             self.assertTrue(is_possible_game_residue("steam", residue))
+
+    def test_stale_steam_manifest_with_only_saves_is_residue(self):
+        with TemporaryDirectory() as temporary:
+            steamapps = Path(temporary, "steamapps")
+            game = steamapps / "common" / "Stale Game"
+            game.mkdir(parents=True)
+            Path(game, "save.dat").write_bytes(b"save")
+            Path(steamapps, "appmanifest_43.acf").write_text(
+                '"AppState"\n{\n\t"appid" "43"\n'
+                '\t"installdir" "Stale Game"\n'
+                '\t"SizeOnDisk" "8000000000"\n}\n',
+                encoding="utf-8",
+            )
+
+            self.assertTrue(is_possible_game_residue("steam", game))
+
+    def test_manifest_and_sufficient_payload_is_installed(self):
+        with TemporaryDirectory() as temporary:
+            steamapps = Path(temporary, "steamapps")
+            game = steamapps / "common" / "Installed Game"
+            game.mkdir(parents=True)
+            with open(Path(game, "payload.bin"), "wb") as payload:
+                payload.seek(60 * 1024 * 1024 - 1)
+                payload.write(b"x")
+            Path(steamapps, "appmanifest_44.acf").write_text(
+                '"AppState"\n{\n\t"appid" "44"\n'
+                '\t"installdir" "Installed Game"\n'
+                '\t"SizeOnDisk" "104857600"\n}\n',
+                encoding="utf-8",
+            )
+
+            self.assertFalse(is_possible_game_residue("steam", game))
 
     def test_complete_manual_gog_install_is_not_hidden_by_size(self):
         with TemporaryDirectory() as temporary:

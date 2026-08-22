@@ -210,6 +210,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "/var/Games/Heroic/GTAVEnhanced",
             self.window.knowledge_games_table.item(0, 1).toolTip(),
         )
+        self.assertFalse(self.window.knowledge_show_residue.isChecked())
         self.assertEqual(
             self.window.knowledge_games_table.horizontalHeader().sectionResizeMode(3),
             game_mover.QHeaderView.Interactive,

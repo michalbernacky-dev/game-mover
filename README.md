@@ -7,7 +7,8 @@ The **Mover** tab hides launcher runtimes and other support payloads. Steam
 directories without a matching local app manifest and incomplete GOG
 directories are hidden as possible remnants by default; an explicit checkbox
 shows them again for recovery or manually managed installations. Recognition is
-based on launcher/install metadata, not a minimum game size.
+based on launcher/install metadata and manifest payload completeness, not a
+fixed minimum game size.
 
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -35,8 +36,9 @@ library listed in `libraryfolders.vdf`, including secondary disks.
 On first opening, the tab asks the local Game Mover backend for an installed-game
 inventory. It combines shared `/var/Games` data, Steam manifests and Game Mover
 symlinks, Heroic metadata, Lutris' local catalog, and CurseForge instances. The
-catalog shows platforms, users, and approximate logical size. Directories up to
-and including 1 GiB are treated as remnants and omitted. Launcher-only records are excluded. Existing
+catalog shows platforms, users, and approximate logical size. Confirmed launcher
+entries remain visible regardless of size; small unverified directories are
+marked as possible remnants instead of being discarded. Launcher-only records are excluded. Existing
 SQLite notes are attached through stable aliases; games without notes are ready
 to receive a new entry without manually inventing an ID.
 
@@ -512,7 +514,7 @@ Záložka **Mover** skrývá runtime launcherů a další servisní obsah. Steam
 bez odpovídajícího místního manifestu a neúplné GOG adresáře jsou ve výchozím
 stavu skryté jako možné pozůstatky; samostatné zaškrtávací pole je znovu ukáže
 pro obnovu nebo ručně spravované instalace. Rozpoznání nepoužívá minimální
-velikost hry, ale metadata launcheru a instalace.
+velikost hry, ale metadata launcheru, instalace a úplnost obsahu vůči manifestu.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 
@@ -532,8 +534,9 @@ výsledky hostiteli. Kontrola Steamu používá AppID a prochází všechny knih
 Při prvním otevření si záložka od místního backendu vyžádá inventuru her. Sloučí
 sdílené instalace v `/var/Games`, manifesty a symlinky Steamu, metadata Heroicu,
 místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele,
-přibližnou logickou velikost a adresáře do 1 GiB včetně vynechá jako pozůstatky.
-Samotné launchery do seznamu nezařazuje. Existující SQLite tip se
+přibližnou logickou velikost a potvrzené instalace ponechá bez ohledu na jejich
+velikost. Malé neověřené adresáře pouze označí jako možné pozůstatky. Samotné
+launchery do seznamu nezařazuje. Existující SQLite tip se
 připojí přes stabilní alias; hra bez tipu je rovnou připravená k jeho založení.
 
 ## Bezpečnostní model

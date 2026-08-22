@@ -1044,6 +1044,14 @@ class GameMover(QWidget):
         self.knowledge_search.setPlaceholderText("Hledat hru, platformu nebo uživatele…")
         self.knowledge_search.textChanged.connect(self.filter_knowledge_games)
         target_row.addWidget(self.knowledge_search, 1)
+        self.knowledge_show_residue = QCheckBox("Zobrazit možné pozůstatky", tab)
+        self.knowledge_show_residue.setToolTip(
+            "Zobrazí malé adresáře, jejichž instalaci nepotvrdil žádný launcher."
+        )
+        self.knowledge_show_residue.toggled.connect(
+            lambda _checked: self.filter_knowledge_games(self.knowledge_search.text())
+        )
+        target_row.addWidget(self.knowledge_show_residue)
         self.knowledge_refresh = QPushButton("Obnovit seznam", tab)
         self.knowledge_refresh.clicked.connect(self.refresh_knowledge_targets)
         target_row.addWidget(self.knowledge_refresh)
@@ -1239,9 +1247,10 @@ class GameMover(QWidget):
             dot.setTextAlignment(Qt.AlignCenter)
             dot.setIcon(colored_dot_icon("#ff6b6b" if residue else "#69db7c"))
             dot.setData(Qt.UserRole, target)
+            dot.setData(Qt.UserRole + 1, residue)
             dot.setToolTip(
-                "Pravděpodobný pozůstatek: adresář je menší než 128 MiB."
-                if residue else "Instalace byla nalezena a má věrohodnou velikost."
+                "Pravděpodobný pozůstatek: malý adresář bez potvrzení launcherem."
+                if residue else "Instalace byla potvrzena launcherem nebo instalačními metadaty."
             )
             values = (
                 dot, QTableWidgetItem(str(game.get("name", game.get("id", "")))),
@@ -1267,6 +1276,7 @@ class GameMover(QWidget):
             dot.setTextAlignment(Qt.AlignCenter)
             dot.setIcon(colored_dot_icon("#f3f6f8"))
             dot.setData(Qt.UserRole, (target_type, target_id))
+            dot.setData(Qt.UserRole + 1, False)
             dot.setToolTip("Tip existuje, ale místní instalace nebyla nalezena.")
             for column, item in enumerate((
                 dot, QTableWidgetItem(target_id), QTableWidgetItem("—"),
@@ -1276,7 +1286,8 @@ class GameMover(QWidget):
         table.blockSignals(False)
         self.filter_knowledge_games(self.knowledge_search.text())
         self.knowledge_status.setText(
-            f"Nalezeno {len(games)} her větších než 1 GiB. Menší adresáře jsou skryté jako pozůstatky."
+            f"Nalezeno {len(games)} her, z toho {sum(bool(game.get('possible_residue')) for game in games)} "
+            "možných pozůstatků (ve výchozím stavu skrytých)."
         )
         if current[1]:
             self.set_knowledge_target(*current)
@@ -1296,12 +1307,18 @@ class GameMover(QWidget):
     def filter_knowledge_games(self, text):
         query = str(text).strip().casefold()
         for row in range(self.knowledge_games_table.rowCount()):
+            marker = self.knowledge_games_table.item(row, 0)
+            residue = bool(marker and marker.data(Qt.UserRole + 1))
             haystack = " ".join(
                 self.knowledge_games_table.item(row, column).text()
                 for column in range(1, self.knowledge_games_table.columnCount())
                 if self.knowledge_games_table.item(row, column)
             ).casefold()
-            self.knowledge_games_table.setRowHidden(row, bool(query and query not in haystack))
+            self.knowledge_games_table.setRowHidden(
+                row,
+                (residue and not self.knowledge_show_residue.isChecked())
+                or bool(query and query not in haystack),
+            )
 
     def select_knowledge_game_target(self, target):
         for row in range(self.knowledge_games_table.rowCount()):

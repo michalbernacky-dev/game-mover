@@ -3,18 +3,22 @@
 import json
 import os
 import re
+import shutil
 import sqlite3
 import unicodedata
 from pathlib import Path
+
+import yaml
 
 from game_mover_game_filters import is_excluded_game
 
 
 DEFAULT_SMALL_INSTALL_BYTES = 1024 * 1024 * 1024
 LAUNCHER_SLUGS = frozenset({
-    "ea-app", "epic-games-store", "gog-galaxy", "heroic-games-launcher",
-    "launcher", "plarium-launcher", "rockstar-games-launcher", "social-club",
-    "ubisoft-connect",
+    "bethesda-launcer", "bethesda-launcher", "ea-app", "epic-games-store",
+    "epicgame-store", "gog-galaxy", "heroic-games-launcher", "launcher",
+    "multimc", "origin", "plarium-launcher", "rockstar-games-launcher",
+    "social-club", "ubisoft-connect", "zbrush",
 })
 KNOWN_ID_ALIASES = {
     "grand-theft-auto-v-enhanced": ["gta-v-enhanced"],
@@ -37,6 +41,11 @@ def knowledge_aliases(slug):
 
 def directory_size(path):
     """Logical file size without following symlinked directories."""
+    try:
+        if os.path.isfile(path):
+            return os.stat(path, follow_symlinks=False).st_size
+    except OSError:
+        return 0
     total = 0
     try:
         for root, directories, files in os.walk(path, followlinks=False):
@@ -77,7 +86,10 @@ class Inventory:
         self.path_sizes = {}
         self.small_install_bytes = small_install_bytes
 
-    def add(self, name, platform, path, user=None, app_id=None):
+    def add(
+        self, name, platform, path, user=None, app_id=None, verified=False,
+        aliases=None,
+    ):
         name = str(name).strip()
         path = os.path.realpath(str(path)) if path else ""
         slug = game_slug(name)
@@ -85,12 +97,14 @@ class Inventory:
             not name or slug in LAUNCHER_SLUGS
             or is_excluded_game(platform, name)
             or is_excluded_game(platform, os.path.basename(path))
-            or not path or not os.path.isdir(path)
+            or not path or not os.path.exists(path)
         ):
             return
         item = self.items.setdefault(slug, {
             "id": slug, "name": name, "platforms": set(), "users": set(),
-            "paths": set(), "app_ids": set(), "knowledge_aliases": knowledge_aliases(slug),
+            "paths": set(), "app_ids": set(),
+            "knowledge_aliases": set(knowledge_aliases(slug)),
+            "verified": False,
         })
         item["platforms"].add(str(platform).lower())
         item["paths"].add(path)
@@ -98,6 +112,9 @@ class Inventory:
             item["users"].add(str(user))
         if app_id:
             item["app_ids"].add(str(app_id))
+        for alias in aliases or ():
+            item["knowledge_aliases"].add(game_slug(alias))
+        item["verified"] = item["verified"] or bool(verified)
 
     def result(self):
         rows = []
@@ -108,20 +125,17 @@ class Inventory:
                 if real not in self.path_sizes:
                     self.path_sizes[real] = directory_size(real)
                 size += self.path_sizes[real]
-            # The catalog intentionally models usable game installations, not
-            # leftover prefixes/manifests.  The family policy treats directories
-            # up to and including 1 GiB as remnants and hides them entirely.
-            if size <= self.small_install_bytes:
-                continue
             rows.append({
                 **item,
                 "platforms": sorted(item["platforms"]),
                 "users": sorted(item["users"]),
                 "paths": sorted(item["paths"]),
                 "app_ids": sorted(item["app_ids"]),
+                "knowledge_aliases": sorted(item["knowledge_aliases"]),
                 "size_bytes": size,
-                "possible_residue": False,
+                "possible_residue": not item["verified"] and size <= self.small_install_bytes,
             })
+            rows[-1].pop("verified", None)
         return sorted(rows, key=lambda row: row["name"].casefold())
 
 
@@ -137,7 +151,7 @@ def _scan_shared(inventory, shared_root):
                 real = os.path.realpath(entry.path)
                 if any(real in item["paths"] for item in inventory.items.values()):
                     continue
-                inventory.add(entry.name, platform, entry.path)
+                inventory.add(entry.name, platform, entry.path, verified=True)
 
 
 def _scan_steam_user(inventory, home, user):
@@ -163,7 +177,7 @@ def _scan_steam_user(inventory, home, user):
                 if name and install_dir:
                     inventory.add(
                         name.group(1), "steam", os.path.join(common, install_dir.group(1)),
-                        user, app_id.group(1) if app_id else None,
+                        user, app_id.group(1) if app_id else None, verified=True,
                     )
         except OSError:
             continue
@@ -175,19 +189,19 @@ def _scan_heroic_user(inventory, home, user):
     if isinstance(legendary, dict):
         for item in legendary.values():
             if isinstance(item, dict):
-                inventory.add(item.get("title"), "epic", item.get("install_path"), user, item.get("app_name"))
+                inventory.add(item.get("title"), "epic", item.get("install_path"), user, item.get("app_name"), verified=True)
     gog = _load_json(os.path.join(heroic, "gog_store/installed.json"))
     if isinstance(gog, dict):
         for item in gog.get("installed", []):
             if isinstance(item, dict):
                 path = item.get("install_path", "")
-                inventory.add(os.path.basename(path), "gog", path, user, item.get("appName"))
+                inventory.add(os.path.basename(path), "gog", path, user, item.get("appName"), verified=True)
     sideload = _load_json(os.path.join(heroic, "sideload_apps/library.json"))
     if isinstance(sideload, dict):
         for item in sideload.get("games", []):
             if isinstance(item, dict):
                 path = item.get("installPath") or item.get("install_path")
-                inventory.add(item.get("title") or item.get("app_name") or os.path.basename(path or ""), "heroic", path, user)
+                inventory.add(item.get("title") or item.get("app_name") or os.path.basename(path or ""), "heroic", path, user, verified=True)
 
 
 def _scan_curseforge_user(inventory, home, user):
@@ -212,31 +226,86 @@ def _scan_curseforge_user(inventory, home, user):
                 continue
             metadata = _load_json(os.path.join(real, "minecraftinstance.json"))
             name = metadata.get("name") if isinstance(metadata, dict) else None
-            inventory.add(name or entry.name, "curseforge", real, user)
+            inventory.add(name or entry.name, "curseforge", real, user, verified=True)
             seen.add(real)
+
+
+def _lutris_configuration(home, config_path):
+    if not config_path:
+        return {}
+    filename = str(config_path)
+    if not filename.endswith((".yml", ".yaml")):
+        filename += ".yml"
+    try:
+        with open(os.path.join(home, ".config/lutris/games", filename), encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle)
+            return payload if isinstance(payload, dict) else {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
+def _lutris_install_path(home, runner, directory, configuration):
+    game = configuration.get("game", {})
+    if not isinstance(game, dict):
+        game = {}
+
+    def expanded(value):
+        if not isinstance(value, str) or not value.strip():
+            return ""
+        return os.path.abspath(os.path.expanduser(value.strip()))
+
+    prefix = expanded(game.get("prefix"))
+    if prefix and os.path.exists(prefix):
+        return prefix
+    main_file = expanded(game.get("main_file"))
+    if main_file and os.path.exists(main_file):
+        return os.path.dirname(main_file)
+    game_path = expanded(game.get("path"))
+    if game_path and os.path.exists(game_path):
+        return game_path
+    app_id = str(game.get("appid", "")).strip()
+    if runner == "linux" and app_id:
+        executable = shutil.which(app_id)
+        if executable:
+            return executable
+    executable = expanded(game.get("exe"))
+    if executable and os.path.exists(executable):
+        return executable if runner == "linux" else os.path.dirname(executable)
+    directory = expanded(directory)
+    return directory if directory and os.path.exists(directory) else ""
 
 
 def _scan_lutris_user(inventory, home, user):
     database = os.path.join(home, ".local/share/lutris/pga.db")
     try:
         connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
-        rows = connection.execute(
-            "SELECT name, slug, runner, directory, service, service_id FROM games "
-            "WHERE installed = 1"
-        ).fetchall()
+        try:
+            rows = connection.execute(
+                "SELECT name, slug, runner, directory, service, service_id, configpath "
+                "FROM games WHERE installed = 1"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            rows = [(*row, None) for row in connection.execute(
+                "SELECT name, slug, runner, directory, service, service_id FROM games "
+                "WHERE installed = 1"
+            ).fetchall()]
         connection.close()
     except sqlite3.Error:
         return
     steam_common = os.path.join(home, ".local/share/Steam/steamapps/common")
-    for name, slug, runner, directory, service, service_id in rows:
+    for name, slug, runner, directory, service, service_id, config_path in rows:
         if game_slug(slug or name) in LAUNCHER_SLUGS:
             continue
         platform = service or runner or "lutris"
-        path = directory
+        configuration = _lutris_configuration(home, config_path)
+        path = _lutris_install_path(home, runner, directory, configuration)
         if platform == "steam" and not path:
             # Steam manifests/shared scanning will normally supply the precise path.
             path = os.path.join(steam_common, name)
-        inventory.add(name, platform, path, user, service_id)
+        inventory.add(
+            name, platform, path, user, service_id, verified=True,
+            aliases=[slug] if slug else None,
+        )
 
 
 def _scan_common_user_directories(inventory, home, user):

@@ -82,12 +82,41 @@ class InstalledGameInventoryTest(unittest.TestCase):
         self.assertNotIn("launcher", by_id)
         self.assertNotIn("steamlinuxruntime-sniper", by_id)
 
-    def test_hides_directories_at_or_below_the_minimum_size(self):
-        tiny = self.shared / "steam" / "Tiny Remnant"
+    def test_marks_unverified_small_directories_as_possible_residue(self):
+        tiny = self.user / "Games/Epic/Tiny Remnant"
         tiny.mkdir(parents=True)
         (tiny / "marker").write_bytes(b"x")
         items = scan_installed_games(str(self.homes), str(self.shared), small_install_bytes=8192)
-        self.assertNotIn("tiny-remnant", {item["id"] for item in items})
+        item = {item["id"]: item for item in items}["tiny-remnant"]
+        self.assertTrue(item["possible_residue"])
+
+    def test_reads_real_install_path_from_lutris_yaml_without_size_cutoff(self):
+        executable = self.user / "dosgames/Agent/AGENT.EXE"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"game")
+        lutris = self.user / ".local/share/lutris"
+        lutris.mkdir(parents=True)
+        connection = sqlite3.connect(lutris / "pga.db")
+        connection.execute(
+            "CREATE TABLE games (name, slug, runner, directory, service, service_id, installed, configpath)"
+        )
+        connection.execute(
+            "INSERT INTO games VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+            ("Agent Mlčňák", "agent-mlinak", "dosbox", "", None, None, "agent-test"),
+        )
+        connection.commit()
+        connection.close()
+        configs = self.user / ".config/lutris/games"
+        configs.mkdir(parents=True)
+        (configs / "agent-test.yml").write_text(
+            f"game:\n  main_file: {executable}\n", encoding="utf-8"
+        )
+
+        items = scan_installed_games(str(self.homes), str(self.shared))
+        agent = {item["id"]: item for item in items}["agent-mlcnak"]
+        self.assertEqual(agent["paths"], [str(executable.parent)])
+        self.assertFalse(agent["possible_residue"])
+        self.assertIn("agent-mlinak", agent["knowledge_aliases"])
 
     def test_slug_is_stable_and_ascii(self):
         self.assertEqual(game_slug("Zaklínač® 3"), "zaklinac-3")

@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.27.2
+Version:        0.28.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -14,6 +14,7 @@ Requires:       python3-qt5
 Requires:       python3-requests
 Requires:       python3-psutil
 Requires:       python3-pam
+Requires:       python3-pyyaml
 Requires:       openssh-clients
 Requires:       curl
 Requires:       jq
@@ -173,11 +174,17 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.28.0-1
+- Include small games when Lutris or another launcher confirms their installation
+- Resolve DOSBox, ScummVM, native Linux, Wine, and Steam paths from Lutris YAML
+- Mark only unverified small directories as possible remnants instead of hiding them
+- Exclude launcher and non-game Lutris entries from the tips catalog
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.2-1
 - Hide unregistered Steam and incomplete GOG directories as possible remnants in Mover
 - Keep possible remnants reachable through an explicit counted checkbox
 - Exclude GE-Proton, Steam controller configs, and Steamworks redistributables
-- Recognize small valid installations from manifests and install metadata instead of size
+- Recognize small valid installs while rejecting stale manifests with missing payloads
 
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.1-1
 - Use local Timekpr, PAM, and users while no management tunnel is active
