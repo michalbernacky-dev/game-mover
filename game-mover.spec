@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.27.1
+Version:        0.27.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -173,6 +173,12 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.2-1
+- Hide unregistered Steam and incomplete GOG directories as possible remnants in Mover
+- Keep possible remnants reachable through an explicit counted checkbox
+- Exclude GE-Proton, Steam controller configs, and Steamworks redistributables
+- Recognize small valid installations from manifests and install metadata instead of size
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.1-1
 - Use local Timekpr, PAM, and users while no management tunnel is active
 - Switch Timekpr to the managed host only for the lifetime of the SSH tunnel

@@ -20,7 +20,7 @@ from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixm
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
-from game_mover_game_filters import is_excluded_game
+from game_mover_game_filters import is_excluded_game, is_possible_game_residue
 from game_mover_users import interactive_usernames
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
@@ -930,6 +930,18 @@ class GameMover(QWidget):
             self.update_mover_action_availability
         )
         layout.addWidget(self.game_combo_move)
+
+        self.show_move_residue_checkbox = QCheckBox(
+            "Zobrazit možné pozůstatky instalací", self
+        )
+        self.show_move_residue_checkbox.setToolTip(
+            "Zobrazí adresáře, které launcher neeviduje jako nainstalovanou hru. "
+            "Mohou obsahovat savy, zálohy nebo ručně spravovanou instalaci."
+        )
+        self.show_move_residue_checkbox.toggled.connect(
+            lambda _checked: self.refresh_game_lists()
+        )
+        layout.addWidget(self.show_move_residue_checkbox)
 
         self.move_button = QPushButton('Přesunout hru', self)
         self.move_button.clicked.connect(self.move_game)
@@ -6907,16 +6919,32 @@ class GameMover(QWidget):
         self.refresh_cache_status()
         self.refresh_game_lists()
 
-    def get_game_list(self):
+    def get_game_candidates(self):
         common = resolve_user_common(self.platform, self.user)
         if common and os.path.exists(common):
-            return [
-                d for d in os.listdir(common)
-                if os.path.isdir(os.path.join(common, d))
-                and not os.path.islink(os.path.join(common, d))
-                and not is_excluded_game(self.platform, d)
-            ]
+            candidates = []
+            for name in os.listdir(common):
+                path = os.path.join(common, name)
+                if (
+                    os.path.isdir(path)
+                    and not os.path.islink(path)
+                    and not is_excluded_game(self.platform, name)
+                ):
+                    candidates.append({
+                        "name": name,
+                        "possible_residue": is_possible_game_residue(
+                            self.platform, path
+                        ),
+                    })
+            return sorted(candidates, key=lambda item: item["name"].casefold())
         return []
+
+    def get_game_list(self):
+        show_residue = self.show_move_residue_checkbox.isChecked()
+        return [
+            item["name"] for item in self.get_game_candidates()
+            if show_residue or not item["possible_residue"]
+        ]
 
     def get_symlink_candidates(self):
         try:
@@ -6934,7 +6962,18 @@ class GameMover(QWidget):
     def refresh_game_lists(self):
         # kandidáti k přesunu
         self.game_combo_move.clear()
-        move_games = self.get_game_list()
+        candidates = self.get_game_candidates()
+        residue_count = sum(
+            1 for item in candidates if item["possible_residue"]
+        )
+        self.show_move_residue_checkbox.setText(
+            f"Zobrazit možné pozůstatky instalací ({residue_count})"
+        )
+        show_residue = self.show_move_residue_checkbox.isChecked()
+        move_games = [
+            item["name"] for item in candidates
+            if show_residue or not item["possible_residue"]
+        ]
         if not move_games:
             self.game_combo_move.addItem('Žádné hry k přesunu')
             self.move_button.setEnabled(False)

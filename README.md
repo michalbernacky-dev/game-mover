@@ -3,6 +3,12 @@
 # game-mover
 Local-first game data manager for trusted local users on a single Linux machine.
 
+The **Mover** tab hides launcher runtimes and other support payloads. Steam
+directories without a matching local app manifest and incomplete GOG
+directories are hidden as possible remnants by default; an explicit checkbox
+shows them again for recovery or manually managed installations. Recognition is
+based on launcher/install metadata, not a minimum game size.
+
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -501,6 +507,12 @@ Behavior:
 
 # game-mover
 Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jednom Linux stroji.
+
+Záložka **Mover** skrývá runtime launcherů a další servisní obsah. Steam adresáře
+bez odpovídajícího místního manifestu a neúplné GOG adresáře jsou ve výchozím
+stavu skryté jako možné pozůstatky; samostatné zaškrtávací pole je znovu ukáže
+pro obnovu nebo ručně spravované instalace. Rozpoznání nepoužívá minimální
+velikost hry, ale metadata launcheru a instalace.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 
