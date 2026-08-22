@@ -87,6 +87,10 @@ SERVER_ACTION_LABELS = {
     "start": "Spuštění", "stop": "Vypnutí", "restart": "Restart", "backup": "Záloha",
 }
 SERVER_POLICY_LABELS = {"silent": "tiché", "pam": "PAM", "disabled": "zakázáno"}
+LOCAL_WORKSTATION_OPERATION_IDS = frozenset((
+    "game.move", "game.link", "library.permissions", "steam.cache",
+    "launcher.update",
+))
 
 # ------------------------------------------------------------
 # Pomocné funkce
@@ -732,6 +736,7 @@ class GameMover(QWidget):
         self.timekpra_mode = None  # "addflag" nebo "settimeleft"
         self.timekpr_token = ""
         self.host_pam_buttons = []
+        self.local_pam_buttons = []
         self.local_security_token = ""
         self.client_config = load_client_config()
         self.app_mode = normalize_app_mode(self.client_config.get("app_mode", "client"))
@@ -995,7 +1000,7 @@ class GameMover(QWidget):
         self.launchers_refresh_button = QPushButton("Zkontrolovat aktualizace", tab)
         self.launchers_refresh_button.clicked.connect(self.refresh_launcher_statuses)
         toolbar.addWidget(self.launchers_refresh_button)
-        toolbar.addWidget(self.create_host_pam_button("správu launcherů", tab))
+        toolbar.addWidget(self.create_local_pam_button("aktualizaci launcherů", tab))
         layout.addLayout(toolbar)
 
         scroll = QScrollArea(tab)
@@ -1136,6 +1141,13 @@ class GameMover(QWidget):
             and not self.knowledge_loaded
         ):
             self.refresh_knowledge_targets()
+        if (
+            hasattr(self, "security_tab_index")
+            and index == self.security_tab_index
+        ):
+            _url, _headers, unlocked, _label = self.security_policy_context()
+            if unlocked and not self.security_payload:
+                self.load_security_policies()
 
     def knowledge_request_target(self):
         return self.server_request_target()
@@ -1541,6 +1553,8 @@ class GameMover(QWidget):
             self.launchers_summary.setText(f"Kontrola launcherů selhala: {payload['error']}")
             return
         self.launcher_update_policy = payload.get("update_policy", "pam")
+        if self.launcher_update_policy in ("silent", "pam", "disabled"):
+            self.local_operation_policies["launcher.update"] = self.launcher_update_policy
         self.clear_layout(self.launchers_layout)
         self.launcher_cards = {}
         launchers = payload.get("launchers") if isinstance(payload.get("launchers"), list) else []
@@ -1592,7 +1606,7 @@ class GameMover(QWidget):
             update_button.setVisible(bool(launcher.get("update_supported")))
             update_button.setEnabled(
                 update_available
-                and bool(self.local_server_action_headers(self.launcher_update_policy))
+                and bool(self.local_mover_operation_headers("launcher.update"))
             )
             update_button.clicked.connect(
                 lambda _checked=False, item=dict(launcher): self.update_launcher(item)
@@ -1616,11 +1630,12 @@ class GameMover(QWidget):
     def update_launcher(self, launcher):
         if self.launcher_update_thread and self.launcher_update_thread.isRunning():
             return
-        headers = self.local_server_action_headers(self.launcher_update_policy)
+        headers = self.local_mover_operation_headers("launcher.update")
         if not headers:
             QMessageBox.warning(
                 self, "Aktualizace launcheru",
-                "Aktualizace vyžaduje platné oprávnění. Ověř se jako wheel uživatel v Timekpr.",
+                "Aktualizace není povolená, nebo vyžaduje místní PAM odemčení "
+                "v Zabezpečení.",
             )
             return
         name = launcher.get("name", launcher.get("id", "Launcher"))
@@ -1871,12 +1886,25 @@ class GameMover(QWidget):
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
+        scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel("Upravované zásady:", content))
+        self.security_scope_combo = QComboBox(content)
+        self.security_scope_combo.addItem("Tento počítač", "local")
+        self.security_scope_combo.addItem("Hostitel herních serverů", "host")
+        self.security_scope_combo.currentIndexChanged.connect(
+            self.on_security_scope_changed
+        )
+        scope_row.addWidget(self.security_scope_combo, 1)
+        layout.addLayout(scope_row)
         host_pam_row = QHBoxLayout()
         self.security_host_pam_status = QLabel("PAM relace hostitele: uzamčeno", content)
         self.security_host_pam_status.setStyleSheet("color: #aab7c0;")
         host_pam_row.addWidget(self.security_host_pam_status, 1)
         host_pam_row.addWidget(
-            self.create_host_pam_button("bezpečnostní zásady hostitele", content)
+            self.create_host_pam_button(
+                "bezpečnostní zásady hostitele", content,
+                on_unlocked=self.on_host_security_unlocked,
+            )
         )
         self.security_host_pam_lock_button = QPushButton("Uzamknout nyní", content)
         self.security_host_pam_lock_button.clicked.connect(self.lock_host_pam_session)
@@ -1942,7 +1970,8 @@ class GameMover(QWidget):
         self.security_tunnel_panel.setVisible(False)
         layout.addWidget(self.security_tunnel_panel)
 
-        layout.addWidget(QLabel("Globální operace:", content))
+        self.security_global_caption = QLabel("Místní operace:", content)
+        layout.addWidget(self.security_global_caption)
         self.security_global_table = QTableWidget(content)
         self.security_global_table.setColumnCount(3)
         self.security_global_table.setHorizontalHeaderLabels([
@@ -1957,7 +1986,8 @@ class GameMover(QWidget):
         self.security_global_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         layout.addWidget(self.security_global_table)
 
-        layout.addWidget(QLabel("Akce jednotlivých serverů:", content))
+        self.security_server_caption = QLabel("Akce jednotlivých serverů:", content)
+        layout.addWidget(self.security_server_caption)
         self.security_server_table = QTableWidget(content)
         self.security_server_table.setColumnCount(1 + len(SERVER_ACTIONS))
         self.security_server_table.setHorizontalHeaderLabels([
@@ -2001,7 +2031,8 @@ class GameMover(QWidget):
         layout.addStretch()
         scroll_area.setWidget(content)
         tab_layout.addWidget(scroll_area)
-        self.tabs.addTab(tab, "Zabezpečení")
+        self.security_tab = tab
+        self.security_tab_index = self.tabs.addTab(tab, "Zabezpečení")
         self.update_security_mode_ui()
 
     def local_security_headers(self):
@@ -2064,7 +2095,11 @@ class GameMover(QWidget):
                 f"Místní chráněné operace jsou PAM odemčené pro {local_user}."
             )
             self.update_security_tunnel_ui()
+            self.update_local_pam_buttons()
             self.update_mover_action_availability()
+            self.update_management_action_availability()
+            if self.security_policy_scope() == "local":
+                self.load_security_policies()
         except requests.ConnectionError:
             QMessageBox.critical(
                 self, "Zabezpečení",
@@ -2084,8 +2119,12 @@ class GameMover(QWidget):
         self.security_tunnel_lock_status.setText(
             "Místní PAM operace a nastavení spravovaného SSH tunelu jsou uzamčené."
         )
+        if self.security_policy_scope() == "local":
+            self.clear_security_policy_tables()
         self.update_security_tunnel_ui()
+        self.update_local_pam_buttons()
         self.update_mover_action_availability()
+        self.update_management_action_availability()
 
     def managed_ssh_tunnel_running(self):
         return bool(
@@ -2093,12 +2132,27 @@ class GameMover(QWidget):
             and self.ssh_tunnel_process.state() != QProcess.NotRunning
         )
 
+    def on_host_security_unlocked(self, _payload=None):
+        host_index = self.security_scope_combo.findData("host")
+        if host_index >= 0:
+            self.security_scope_combo.setCurrentIndex(host_index)
+        if self.security_policy_scope() == "host" and not self.security_payload:
+            self.load_security_policies()
+
     def update_security_tunnel_ui(self):
         unlocked = bool(self.local_security_token)
         running = self.managed_ssh_tunnel_running()
         active = running and self.app_mode == "ssh_tunnel"
+        local_button_style = (
+            "background-color: #214653; border: 1px solid #4dabf7;"
+        )
+        self.security_tunnel_unlock_button.setStyleSheet(local_button_style)
+        self.security_tunnel_start_button.setStyleSheet(local_button_style)
+        self.security_tunnel_stop_button.setStyleSheet(local_button_style)
+        self.security_tunnel_lock_button.setStyleSheet(local_button_style)
         self.security_tunnel_unlock_button.setVisible(not unlocked)
         self.security_tunnel_panel.setVisible(unlocked)
+        self.update_local_pam_buttons()
         try:
             profile = self.active_server_profile()
             host = connection_profile_host(profile.get("address", ""))
@@ -2352,44 +2406,100 @@ class GameMover(QWidget):
             self.security_fixed_table.setCellWidget(row, 2, policy_combo)
         self.fit_security_table_height(self.security_fixed_table)
 
+    def security_policy_scope(self):
+        if not hasattr(self, "security_scope_combo"):
+            return "local"
+        return self.security_scope_combo.currentData() or "local"
+
+    def security_policy_context(self):
+        if self.security_policy_scope() == "local":
+            return (
+                LOCAL_API_URL, self.local_security_headers(),
+                bool(self.local_security_token), "tohoto počítače",
+            )
+        return (
+            self.host_management_api_url(), self.local_pam_headers(),
+            is_host_management_mode(self.app_mode) and bool(self.timekpr_token),
+            "hostitele herních serverů",
+        )
+
+    def clear_security_policy_tables(self):
+        self.security_payload = None
+        self.security_global_table.setRowCount(0)
+        self.security_server_table.setRowCount(0)
+        self.fit_security_table_height(self.security_global_table)
+        self.fit_security_table_height(self.security_server_table)
+
+    def on_security_scope_changed(self, _index=None):
+        if (
+            self.security_policy_scope() == "host"
+            and not is_host_management_mode(self.app_mode)
+        ):
+            self.security_scope_combo.setCurrentIndex(
+                self.security_scope_combo.findData("local")
+            )
+            return
+        self.clear_security_policy_tables()
+        self.update_security_mode_ui()
+        _url, _headers, unlocked, _label = self.security_policy_context()
+        if unlocked:
+            self.load_security_policies()
+
     def update_security_mode_ui(self):
-        enabled = is_host_management_mode(self.app_mode) and bool(self.timekpr_token)
+        management_mode = is_host_management_mode(self.app_mode)
+        host_index = self.security_scope_combo.findData("host")
+        host_item = self.security_scope_combo.model().item(host_index)
+        if host_item is not None:
+            host_item.setEnabled(management_mode)
+        if not management_mode and self.security_policy_scope() == "host":
+            self.security_scope_combo.setCurrentIndex(
+                self.security_scope_combo.findData("local")
+            )
+        scope = self.security_policy_scope()
+        _url, _headers, enabled, scope_label = self.security_policy_context()
         for widget in (
             self.security_global_table, self.security_server_table,
             self.security_load_button, self.security_save_button,
         ):
             widget.setEnabled(enabled)
-        self.security_host_pam_lock_button.setEnabled(enabled)
+        host_unlocked = management_mode and bool(self.timekpr_token)
+        self.security_host_pam_lock_button.setEnabled(host_unlocked)
         self.security_host_pam_status.setText(
             "PAM relace hostitele: odemčeno"
-            if enabled else "PAM relace hostitele: uzamčeno"
+            if host_unlocked else "PAM relace hostitele: uzamčeno"
         )
         self.security_host_pam_status.setStyleSheet(
-            "color: #69db7c; font-weight: bold;" if enabled else "color: #aab7c0;"
+            "color: #69db7c; font-weight: bold;"
+            if host_unlocked else "color: #aab7c0;"
         )
-        if not is_host_management_mode(self.app_mode):
+        local_scope = scope == "local"
+        self.security_global_caption.setText(
+            "Operace tohoto počítače:" if local_scope else "Globální operace hostitele:"
+        )
+        self.security_server_caption.setVisible(not local_scope)
+        self.security_server_table.setVisible(not local_scope)
+        if not enabled:
             text = (
-                "Zásady hostitele jsou dostupné v místním režimu Server nebo po otevření "
-                "spravovaného SSH tunelu níže."
+                "Pro načtení a změnu místních zásad použij Odemknout místní PAM níže."
+                if local_scope else
+                "Otevři spravovaný SSH tunel a odemkni PAM hostitele."
             )
-        elif not self.timekpr_token:
-            text = "Pro správu zásad použij zde Odemknout PAM."
         elif self.security_payload:
-            text = "Bezpečnostní zásady jsou načtené z hostitele."
+            text = f"Bezpečnostní zásady {scope_label} jsou načtené."
         else:
-            text = "PAM je ověřený; načti bezpečnostní zásady hostitele."
+            text = f"PAM je ověřený; načti bezpečnostní zásady {scope_label}."
         self.security_status_label.setText(text)
         if hasattr(self, "security_tunnel_panel"):
             self.update_security_tunnel_ui()
 
     def load_security_policies(self):
-        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+        base_url, headers, unlocked, _scope_label = self.security_policy_context()
+        if not unlocked:
             self.update_security_mode_ui()
             return
         try:
             response = requests.get(
-                f"{self.host_management_api_url()}/security/policies",
-                headers=self.local_pam_headers(), timeout=10,
+                f"{base_url}/security/policies", headers=headers, timeout=10,
             )
             payload = response.json()
             if response.status_code != 200:
@@ -2406,6 +2516,12 @@ class GameMover(QWidget):
         catalog = payload.get("catalog") if isinstance(payload.get("catalog"), dict) else {}
 
         global_definitions = catalog.get("global") if isinstance(catalog.get("global"), list) else []
+        local_scope = self.security_policy_scope() == "local"
+        if local_scope:
+            global_definitions = [
+                definition for definition in global_definitions
+                if definition.get("id") in LOCAL_WORKSTATION_OPERATION_IDS
+            ]
         self.security_global_table.setRowCount(0)
         for definition in global_definitions:
             operation = definition.get("id", "")
@@ -2427,7 +2543,7 @@ class GameMover(QWidget):
             )
 
         self.security_server_table.setRowCount(0)
-        for server in payload.get("servers", []):
+        for server in ([] if local_scope else payload.get("servers", [])):
             server_id = server.get("id", "")
             row = self.security_server_table.rowCount()
             self.security_server_table.insertRow(row)
@@ -2448,26 +2564,47 @@ class GameMover(QWidget):
         self.fit_security_table_height(self.security_server_table)
 
         fixed_definitions = catalog.get("fixed") if isinstance(catalog.get("fixed"), list) else []
-        self.populate_fixed_security_operations(
-            fixed_definitions or FIXED_OPERATION_DEFINITIONS,
-        )
+        if not fixed_definitions:
+            fixed_definitions = list(FIXED_OPERATION_DEFINITIONS)
+        if local_scope:
+            fixed_definitions = [
+                definition for definition in fixed_definitions
+                if definition.get("id") == "security.manage"
+            ]
+        self.populate_fixed_security_operations(fixed_definitions)
 
-        self.global_operation_policies = {
-            **GLOBAL_OPERATION_DEFAULTS, **global_policies,
-        }
-        if self.app_mode == "server":
-            self.local_operation_policies = dict(self.global_operation_policies)
+        if local_scope:
+            self.local_operation_policies = {
+                **GLOBAL_OPERATION_DEFAULTS, **global_policies,
+            }
+        else:
+            self.global_operation_policies = {
+                **GLOBAL_OPERATION_DEFAULTS, **global_policies,
+            }
         self.update_security_mode_ui()
         self.update_management_action_availability()
 
     def collect_security_policies(self):
-        global_policies = {}
+        stored = (
+            self.security_payload.get("policies", {})
+            if isinstance(self.security_payload, dict) else {}
+        )
+        global_policies = dict(
+            stored.get("global", {}) if isinstance(stored.get("global"), dict) else {}
+        )
         for row in range(self.security_global_table.rowCount()):
             item = self.security_global_table.item(row, 0)
             combo = self.security_global_table.cellWidget(row, 2)
             if item and combo:
                 global_policies[item.data(Qt.UserRole)] = combo.currentData()
-        server_policies = {}
+        server_policies = {
+            str(server_id): dict(policies)
+            for server_id, policies in (
+                stored.get("servers", {}).items()
+                if isinstance(stored.get("servers"), dict) else ()
+            )
+            if isinstance(policies, dict)
+        }
         for row in range(self.security_server_table.rowCount()):
             item = self.security_server_table.item(row, 0)
             if not item:
@@ -2482,21 +2619,22 @@ class GameMover(QWidget):
         return {"global": global_policies, "servers": server_policies}
 
     def save_security_policies(self):
-        if not is_host_management_mode(self.app_mode) or not self.timekpr_token:
+        base_url, headers, unlocked, scope_label = self.security_policy_context()
+        if not unlocked:
             self.update_security_mode_ui()
             return
         answer = QMessageBox.question(
             self, "Uložit zabezpečení",
-            "Opravdu uložit nové zásady? Změny se projeví okamžitě na backendu hostitele.",
+            f"Opravdu uložit nové zásady {scope_label}? Změny se projeví okamžitě.",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer != QMessageBox.Yes:
             return
         try:
             response = requests.put(
-                f"{self.host_management_api_url()}/security/policies",
+                f"{base_url}/security/policies",
                 json={"policies": self.collect_security_policies()},
-                headers=self.local_pam_headers(), timeout=15,
+                headers=headers, timeout=15,
             )
             payload = response.json()
             if response.status_code != 200:
@@ -3222,7 +3360,7 @@ class GameMover(QWidget):
             launcher = entry.get("launcher", {})
             entry["update"].setEnabled(
                 bool(launcher.get("update_available"))
-                and bool(self.local_server_action_headers(self.launcher_update_policy))
+                and bool(self.local_mover_operation_headers("launcher.update"))
                 and not (
                     self.launcher_update_thread is not None
                     and self.launcher_update_thread.isRunning()
@@ -3312,12 +3450,14 @@ class GameMover(QWidget):
             self.timekpra_add_flag = None
             self.original_hours_today = {}
             self.security_payload = None
+            if self.security_policy_scope() == "host":
+                self.clear_security_policy_tables()
             self.set_timekpr_controls_enabled(False)
             self.update_server_mode_ui()
         if warning:
             QMessageBox.warning(
                 self, "PAM",
-                "Místní relace je uzamčená. Backendovou relaci se nepodařilo "
+                "Hostitelská relace je uzamčená. Backendovou relaci se nepodařilo "
                 f"výslovně zneplatnit; sama vyprší. ({warning})",
             )
 
@@ -3333,6 +3473,39 @@ class GameMover(QWidget):
         self.update_host_pam_buttons()
         return button
 
+    def create_local_pam_button(self, context, parent=None):
+        """Create a control for the PAM session of this workstation."""
+        button = QPushButton("Odemknout místní PAM…", parent or self)
+        button.setProperty("pam_context", context)
+        button.clicked.connect(self.unlock_tunnel_management)
+        self.local_pam_buttons.append(button)
+        self.update_local_pam_buttons()
+        return button
+
+    def update_local_pam_buttons(self):
+        if not hasattr(self, "local_pam_buttons"):
+            return
+        unlocked = bool(self.local_security_token)
+        for button in self.local_pam_buttons:
+            if unlocked:
+                button.setText("Místní PAM odemčeno")
+                button.setToolTip(
+                    "PAM relace tohoto počítače je aktivní; heslo není uložené."
+                )
+                button.setStyleSheet(
+                    "color: #b2f2bb; background-color: #244b3a; "
+                    "border: 1px solid #69db7c;"
+                )
+            else:
+                button.setText("Odemknout místní PAM…")
+                button.setToolTip(
+                    "Ověří místního wheel uživatele pro chráněné operace tohoto počítače."
+                )
+                button.setStyleSheet(
+                    "background-color: #214653; border: 1px solid #4dabf7;"
+                )
+            button.setEnabled(not unlocked)
+
     def update_host_pam_buttons(self):
         if not hasattr(self, "host_pam_buttons"):
             return
@@ -3340,19 +3513,24 @@ class GameMover(QWidget):
         unlocked = management_mode and bool(self.timekpr_token)
         for button in self.host_pam_buttons:
             if unlocked:
-                button.setText("PAM odemčeno")
+                button.setText("PAM hostitele odemčeno")
                 button.setToolTip(
                     "Sdílená PAM relace hostitele je aktivní; heslo není uložené."
                 )
-                button.setStyleSheet("color: #69db7c;")
+                button.setStyleSheet(
+                    "color: #b2f2bb; background-color: #244b3a; "
+                    "border: 1px solid #69db7c;"
+                )
             else:
-                button.setText("Odemknout PAM…")
+                button.setText("Odemknout PAM hostitele…")
                 button.setToolTip(
                     "Ověří wheel uživatele hostitele a dočasně odemkne chráněné operace."
                     if management_mode else
                     "Nejprve zvol režim Server nebo otevři spravovaný SSH tunel."
                 )
-                button.setStyleSheet("")
+                button.setStyleSheet(
+                    "background-color: #49354f; border: 1px solid #cc8de8;"
+                )
             button.setEnabled(management_mode and not unlocked)
 
     def authenticate_host_pam(self, username, password):

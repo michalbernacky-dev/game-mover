@@ -83,6 +83,62 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.local_mover_operation_headers("game.move"), {},
         )
 
+    def test_client_security_shows_only_local_workstation_operations(self):
+        self.window.app_mode = "client"
+        self.window.local_security_token = "local-pam-token"
+        payload = {
+            "policies": {
+                "global": {
+                    operation: "pam"
+                    for operation in game_mover.GLOBAL_OPERATION_DEFAULTS
+                },
+                "servers": {"mc-test": dict(SAMPLE_SERVER["permissions"])},
+            },
+            "catalog": {
+                "global": [
+                    {"id": operation, "label": operation, "description": operation,
+                     "default": "pam"}
+                    for operation in game_mover.GLOBAL_OPERATION_DEFAULTS
+                ],
+                "fixed": list(game_mover.FIXED_OPERATION_DEFINITIONS),
+            },
+            "servers": [{"id": "mc-test", "name": "Minecraft Test"}],
+        }
+        response = MagicMock(status_code=200)
+        response.json.return_value = payload
+
+        with patch.object(game_mover.requests, "get", return_value=response) as get:
+            self.window.load_security_policies()
+
+        get.assert_called_once_with(
+            "http://127.0.0.1:5000/security/policies",
+            headers={"X-Timekpr-Token": "local-pam-token"}, timeout=10,
+        )
+        visible_operations = {
+            self.window.security_global_table.item(row, 0).data(game_mover.Qt.UserRole)
+            for row in range(self.window.security_global_table.rowCount())
+        }
+        self.assertEqual(
+            visible_operations, game_mover.LOCAL_WORKSTATION_OPERATION_IDS,
+        )
+        self.assertTrue(self.window.security_server_table.isHidden())
+        self.assertTrue(self.window.security_load_button.isEnabled())
+        preserved = self.window.collect_security_policies()
+        self.assertIn("server.registry", preserved["global"])
+        self.assertIn("mc-test", preserved["servers"])
+
+    def test_launcher_update_uses_local_client_policy_and_pam(self):
+        self.window.app_mode = "client"
+        self.window.timekpr_token = "remote-host-token"
+        self.window.local_security_token = "local-pam-token"
+        self.window.local_operation_policies["launcher.update"] = "pam"
+
+        self.assertEqual(
+            self.window.local_mover_operation_headers("launcher.update"),
+            {"X-Timekpr-Token": "local-pam-token"},
+        )
+        self.assertEqual(len(self.window.local_pam_buttons), 1)
+
     def test_launcher_tab_renders_outdated_and_missing_items(self):
         self.window.on_launcher_statuses_loaded({
             "update_policy": "pam",
@@ -380,9 +436,9 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.timekpr_user_combo.itemText(index)
             for index in range(self.window.timekpr_user_combo.count())
         ], ["dave", "alice", "bob", "carol"])
-        self.assertEqual(len(self.window.host_pam_buttons), 7)
+        self.assertEqual(len(self.window.host_pam_buttons), 6)
         self.assertTrue(all(
-            button.text() == "PAM odemčeno" and not button.isEnabled()
+            button.text() == "PAM hostitele odemčeno" and not button.isEnabled()
             for button in self.window.host_pam_buttons
         ))
         post.assert_called_once_with(
@@ -401,7 +457,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.window.timekpr_token = ""
         self.window.update_host_pam_buttons()
         self.assertTrue(all(
-            button.text() == "Odemknout PAM…" and not button.isEnabled()
+            button.text() == "Odemknout PAM hostitele…" and not button.isEnabled()
             for button in self.window.host_pam_buttons
         ))
 

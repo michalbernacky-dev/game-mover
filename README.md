@@ -129,7 +129,11 @@ private keys, and the host `api.token` are never copied into it.
 ### Security policy registry
 
 The **Security** tab is the single editor for backend-enforced authorization.
-It contains policies for global platform operations and independent
+It explicitly separates **This computer** from the managed game-server host.
+In Client mode the local view contains only workstation-relevant Mover and
+launcher operations; server, Minecraft, Gate, and DNS policies stay hidden.
+After opening the managed SSH tunnel, a separate host scope contains global
+platform operations and independent
 start/stop/restart/backup policies for every registered server. `silent` uses
 the host-local `api.token`, `pam` requires a valid wheel-user session, and
 `disabled` rejects the operation in the backend. In SSH tunnel mode the PAM
@@ -137,8 +141,10 @@ session may also authorize a `silent` operation, so `api.token` never leaves the
 host. Mover actions (`game.move`, `game.link`, `library.permissions`,
 `steam.cache`), knowledge edits (`knowledge.manage`) and legacy dnsmasq shutdown
 (`dnsmasq.stop`) have independent rows instead of inheriting an unrelated
-server or DNS setting. Local Mover actions always read the workstation's own
-policy registry and never reuse a managed remote host's token. Timekpr
+server or DNS setting. Local Mover and launcher actions always read the
+workstation's own policy registry and never reuse a managed remote host's token.
+Local PAM buttons are blue-green and host PAM buttons purple so their credential
+boundary remains visible in addition to their explicit labels. Timekpr
 administration and changes to the security registry itself are
 shown in the same table style as fixed, disabled controls with the only policy
 **Requires PAM**; they cannot be weakened in the GUI or API.
@@ -604,10 +610,16 @@ a porty; SSH heslo, privátní klíč ani hostitelský `api.token` se do ní nek
 ### Registr bezpečnostních zásad
 
 Záložka **Zabezpečení** je jednotný editor autorizace vynucované backendem.
-Obsahuje zásady globálních operací platformy i samostatné zásady
+Výslovně odděluje zásady **tohoto počítače** od hostitele herních serverů.
+V režimu Klient ukazuje pouze místně relevantní operace Moveru a launcherů;
+serverové, Minecraft, Gate a DNS volby jsou schované. Po otevření spravovaného
+SSH tunelu lze samostatně přepnout na globální operace hostitele a zásady
 spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent` používá
 místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
-operaci odmítne přímo backend. V režimu SSH tunelu může PAM relace autorizovat i
+operaci odmítne přímo backend. Aktualizace Heroicu se vždy řídí místní zásadou
+`launcher.update`, nikdy oprávněním vzdáleného hostitele. Místní PAM tlačítka
+jsou modrozelená a hostitelská fialová; hranice je současně napsaná přímo v
+jejich popisku. V režimu SSH tunelu může PAM relace autorizovat i
 tichou operaci, takže `api.token` nikdy neopustí hostitele. Správa Timekpr a změny
 samotného zabezpečení jsou kvůli jednotnému vzhledu zobrazené ve stejné tabulce
 jako pevné neaktivní volby **Vyžaduje PAM**; přes GUI ani API je nelze oslabit.

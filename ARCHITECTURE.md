@@ -169,6 +169,13 @@ the same model without allowing those protections to be weakened. Remote SSH
 administration is absent from Connections and remains hidden in Security until
 local PAM authentication.
 
+Security has two explicit machine scopes. **This computer** is always available
+through the loopback backend and, in Client mode, renders only local Mover and
+launcher policies. **Game-server host** becomes selectable only in local Server
+mode or through the GUI-owned SSH tunnel. Each scope has its own PAM token;
+launcher updates always use the workstation scope. Distinct local and host
+button colors supplement, but do not replace, explicit text labels.
+
 Every fixed tab that exposes host-protected actions has a contextual PAM unlock
 control. All of them use the same short-lived backend session token; credentials
 exist only for the authentication request and are never retained by the GUI.

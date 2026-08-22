@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.26.2
+Version:        0.27.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -173,6 +173,12 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.27.0-1
+- Separate local workstation and managed-host security policy scopes
+- Show only Mover and launcher policies in read-only Client mode
+- Authorize Heroic updates exclusively through the workstation policy and PAM session
+- Distinguish local and host PAM controls by both labels and color
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.26.2-1
 - Replace the legacy inline Timekpr credentials with the shared PAM unlock dialog
 - Keep the wheel-account requirement visible next to the contextual unlock control
