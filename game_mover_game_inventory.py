@@ -8,7 +8,7 @@ import unicodedata
 from pathlib import Path
 
 
-DEFAULT_SMALL_INSTALL_BYTES = 32 * 1024 * 1024
+DEFAULT_SMALL_INSTALL_BYTES = 128 * 1024 * 1024
 LAUNCHER_SLUGS = frozenset({
     "ea-app", "epic-games-store", "gog-galaxy", "heroic-games-launcher",
     "launcher", "plarium-launcher", "rockstar-games-launcher", "social-club",

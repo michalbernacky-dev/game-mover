@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.25.1
+Version:        0.25.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -169,6 +169,11 @@ fi
 %{_datadir}/applications/game-mover.desktop
 
 %changelog
+* Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.2-1
+- Replace the crowded tips combo/table with a compact searchable master-detail view
+- Add green, yellow, red and neutral local status indicators
+- Treat installations below 128 MiB as probable remnants
+
 * Sat Aug 22 2026 Game Mover Packager <packager@example.invalid> - 0.25.1-1
 - Discover manually installed GOG, Ubisoft, Rockstar, Epic and EA games in common Wine paths
 

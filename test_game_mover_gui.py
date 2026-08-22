@@ -97,8 +97,8 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(self.window.knowledge_target_id.text(), "gta-v-enhanced")
         self.assertEqual(self.window.knowledge_table.rowCount(), 1)
         self.assertIn("Heroic", self.window.knowledge_table.item(0, 1).text())
-        self.assertIn("nenalezeno", self.window.knowledge_table.item(0, 2).text())
-        self.assertIn("fix.bat", self.window.knowledge_table.item(0, 3).text())
+        self.assertIn("Vyžaduje zásah", self.window.knowledge_table.item(0, 2).text())
+        self.assertIn("fix.bat", self.window.knowledge_body.toPlainText())
 
     def test_installed_game_catalog_attaches_existing_tip_alias_and_users(self):
         self.window.knowledge_saved_targets = {
@@ -114,14 +114,13 @@ class ServerManagementGuiTest(unittest.TestCase):
             "size_bytes": 100 * 1024**3, "possible_residue": False,
         }]})
 
-        self.assertEqual(self.window.knowledge_known_targets.count(), 3)
+        self.assertEqual(self.window.knowledge_games_table.rowCount(), 2)
         self.assertEqual(
-            self.window.knowledge_known_targets.itemData(1),
+            self.window.knowledge_games_table.item(0, 0).data(game_mover.Qt.UserRole),
             ("game", "gta-v-enhanced"),
         )
-        label = self.window.knowledge_known_targets.itemText(1)
-        self.assertIn("alice, son", label)
-        self.assertIn("💡 tip", label)
+        self.assertEqual(self.window.knowledge_games_table.item(0, 3).text(), "alice, son")
+        self.assertEqual(self.window.knowledge_games_table.item(0, 5).text(), "💡")
 
     def tearDown(self):
         self.window.close()

@@ -1762,7 +1762,7 @@ def installed_games_catalog():
         games = [dict(game) for game in GAME_INVENTORY_CACHE["games"]]
     return jsonify({
         "games": games,
-        "small_install_threshold_bytes": 32 * 1024 * 1024,
+        "small_install_threshold_bytes": 128 * 1024 * 1024,
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
 

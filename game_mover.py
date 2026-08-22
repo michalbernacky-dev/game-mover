@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QHeaderView, QAbstractItemView, QFormLayout, QScrollArea, QCheckBox,
     QDialog, QDialogButtonBox, QTabBar
 )
-from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPixmap
+from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixmap
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
@@ -179,6 +179,18 @@ def resolve_logo_path():
         if os.path.exists(path):
             return path
     return candidates[0]
+
+
+def colored_dot_icon(color):
+    pixmap = QPixmap(12, 12)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(2, 2, 8, 8)
+    painter.end()
+    return QIcon(pixmap)
 
 
 def load_local_admin_token():
@@ -1013,25 +1025,16 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         help_label = QLabel(
-            "Ověřené postupy z reálného provozu jsou uložené na hostiteli v SQLite. "
-            "Mohou patřit ke hře, serveru nebo launcheru a obsahují prostředí, pro které platí.",
+            "Sdílené postupy jsou uložené na hostiteli; instalace a nastavení se ověřují lokálně.",
             tab,
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
         target_row = QHBoxLayout()
-        self.knowledge_known_targets = QComboBox(tab)
-        self.knowledge_known_targets.setEditable(True)
-        self.knowledge_known_targets.setInsertPolicy(QComboBox.NoInsert)
-        self.knowledge_known_targets.setMaxVisibleItems(25)
-        self.knowledge_known_targets.completer().setCaseSensitivity(Qt.CaseInsensitive)
-        self.knowledge_known_targets.completer().setFilterMode(Qt.MatchContains)
-        self.knowledge_known_targets.setMinimumWidth(240)
-        self.knowledge_known_targets.currentIndexChanged.connect(
-            self.on_knowledge_known_target_selected
-        )
-        target_row.addWidget(QLabel("Uložené cíle:", tab))
-        target_row.addWidget(self.knowledge_known_targets, 1)
+        self.knowledge_search = QLineEdit(tab)
+        self.knowledge_search.setPlaceholderText("Hledat hru, platformu nebo uživatele…")
+        self.knowledge_search.textChanged.connect(self.filter_knowledge_games)
+        target_row.addWidget(self.knowledge_search, 1)
         self.knowledge_refresh = QPushButton("Obnovit seznam", tab)
         self.knowledge_refresh.clicked.connect(self.refresh_knowledge_targets)
         target_row.addWidget(self.knowledge_refresh)
@@ -1039,40 +1042,80 @@ class GameMover(QWidget):
         self.knowledge_local_refresh.clicked.connect(self.refresh_knowledge_local_checks)
         target_row.addWidget(self.knowledge_local_refresh)
         layout.addLayout(target_row)
-        editor_row = QHBoxLayout()
-        self.knowledge_target_type = QComboBox(tab)
+
+        self.knowledge_games_table = QTableWidget(tab)
+        self.knowledge_games_table.setColumnCount(6)
+        self.knowledge_games_table.setHorizontalHeaderLabels([
+            "", "Hra", "Platforma", "Uživatelé", "Velikost", "Tip",
+        ])
+        self.knowledge_games_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.knowledge_games_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.knowledge_games_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.knowledge_games_table.setAlternatingRowColors(True)
+        self.knowledge_games_table.setWordWrap(False)
+        self.knowledge_games_table.verticalHeader().setVisible(False)
+        self.knowledge_games_table.verticalHeader().setDefaultSectionSize(26)
+        games_header = self.knowledge_games_table.horizontalHeader()
+        games_header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.knowledge_games_table.setColumnWidth(0, 28)
+        games_header.setSectionResizeMode(1, QHeaderView.Stretch)
+        for column, width in ((2, 110), (3, 140), (4, 90), (5, 44)):
+            games_header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.knowledge_games_table.setColumnWidth(column, width)
+        self.knowledge_games_table.setMinimumHeight(150)
+        self.knowledge_games_table.setMaximumHeight(190)
+        self.knowledge_games_table.itemSelectionChanged.connect(self.on_knowledge_game_selected)
+        layout.addWidget(self.knowledge_games_table)
+
+        self.knowledge_manual_toggle = QPushButton("Ruční cíl…", tab)
+        self.knowledge_manual_toggle.setCheckable(True)
+        layout.addWidget(self.knowledge_manual_toggle, 0, Qt.AlignLeft)
+        self.knowledge_manual_panel = QWidget(tab)
+        editor_row = QHBoxLayout(self.knowledge_manual_panel)
+        editor_row.setContentsMargins(0, 0, 0, 0)
+        self.knowledge_target_type = QComboBox(self.knowledge_manual_panel)
         for label, value in (("Hra", "game"), ("Server", "server"), ("Launcher", "launcher")):
             self.knowledge_target_type.addItem(label, value)
         editor_row.addWidget(self.knowledge_target_type)
-        self.knowledge_target_id = QLineEdit(tab)
+        self.knowledge_target_id = QLineEdit(self.knowledge_manual_panel)
         self.knowledge_target_id.setPlaceholderText("stabilní-id-cíle, např. gta-v-enhanced")
         self.knowledge_target_id.setMaxLength(128)
         editor_row.addWidget(self.knowledge_target_id, 1)
-        self.knowledge_load = QPushButton("Načíst cíl", tab)
+        self.knowledge_load = QPushButton("Načíst ID", self.knowledge_manual_panel)
         self.knowledge_load.clicked.connect(self.load_knowledge_target)
         editor_row.addWidget(self.knowledge_load)
-        layout.addLayout(editor_row)
+        self.knowledge_manual_panel.setVisible(False)
+        self.knowledge_manual_toggle.toggled.connect(self.knowledge_manual_panel.setVisible)
+        layout.addWidget(self.knowledge_manual_panel)
         self.knowledge_status = QLabel("Zvol cíl nebo zadej nové ID.", tab)
         self.knowledge_status.setWordWrap(True)
         self.knowledge_status.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.knowledge_status)
         self.knowledge_table = QTableWidget(tab)
-        self.knowledge_table.setColumnCount(4)
+        self.knowledge_table.setColumnCount(3)
         self.knowledge_table.setHorizontalHeaderLabels([
-            "Nadpis", "Platforma / prostředí", "Stav na tomto PC", "Ověřený postup",
+            "Nadpis", "Platforma / prostředí", "Stav na tomto PC",
         ])
         self.knowledge_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.knowledge_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.knowledge_table.setAlternatingRowColors(True)
-        self.knowledge_table.setWordWrap(True)
+        self.knowledge_table.setWordWrap(False)
         self.knowledge_table.verticalHeader().setVisible(False)
         header = self.knowledge_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.knowledge_table.setColumnWidth(1, 220)
+        self.knowledge_table.setColumnWidth(2, 165)
         self.knowledge_table.itemChanged.connect(self.mark_knowledge_dirty)
+        self.knowledge_table.itemSelectionChanged.connect(self.on_knowledge_note_selected)
+        self.knowledge_table.setMaximumHeight(110)
         layout.addWidget(self.knowledge_table)
+        layout.addWidget(QLabel("Ověřený postup:", tab))
+        self.knowledge_body = QPlainTextEdit(tab)
+        self.knowledge_body.setPlaceholderText("Vyber tip nebo přidej nový…")
+        self.knowledge_body.textChanged.connect(self.on_knowledge_body_changed)
+        layout.addWidget(self.knowledge_body, 1)
         actions = QHBoxLayout()
         self.knowledge_add = QPushButton("Přidat poznámku", tab)
         self.knowledge_add.clicked.connect(self.add_knowledge_row)
@@ -1155,9 +1198,9 @@ class GameMover(QWidget):
             self.knowledge_target_type.currentData(), self.knowledge_target_id.text().strip(),
         )
         attached = set()
-        self.knowledge_known_targets.blockSignals(True)
-        self.knowledge_known_targets.clear()
-        self.knowledge_known_targets.addItem("— vyber nalezenou hru —", None)
+        table = self.knowledge_games_table
+        table.blockSignals(True)
+        table.setRowCount(0)
         for game in games:
             if not isinstance(game, dict):
                 continue
@@ -1169,36 +1212,89 @@ class GameMover(QWidget):
             target = next((match for match in matches if match[0] == "game"), None)
             target = target or (matches[0] if matches else ("game", str(game.get("id", ""))))
             attached.update(matches)
-            platforms = ", ".join(game.get("platforms", [])) or "neznámá platforma"
-            users = ", ".join(game.get("users", [])) or "bez uživatelského odkazu"
+            platforms = ", ".join(game.get("platforms", [])) or "neznámá"
+            users = ", ".join(game.get("users", [])) or "—"
             size = self.format_game_size(game.get("size_bytes", 0))
-            marker = "⚠ možný pozůstatek" if game.get("possible_residue") else "● nainstalováno"
-            tip = " · 💡 tip" if matches else ""
-            self.knowledge_known_targets.addItem(
-                f"{game.get('name', game.get('id'))} · {platforms} · {size} · {users} · {marker}{tip}",
-                target,
+            residue = bool(game.get("possible_residue"))
+            row = table.rowCount()
+            table.insertRow(row)
+            dot = QTableWidgetItem("")
+            dot.setTextAlignment(Qt.AlignCenter)
+            dot.setIcon(colored_dot_icon("#ff6b6b" if residue else "#69db7c"))
+            dot.setData(Qt.UserRole, target)
+            dot.setToolTip(
+                "Pravděpodobný pozůstatek: adresář je menší než 128 MiB."
+                if residue else "Instalace byla nalezena a má věrohodnou velikost."
             )
-            index = self.knowledge_known_targets.count() - 1
-            self.knowledge_known_targets.setItemData(
-                index, "\n".join(game.get("paths", [])), Qt.ToolTipRole,
+            values = (
+                dot, QTableWidgetItem(str(game.get("name", game.get("id", "")))),
+                QTableWidgetItem(platforms), QTableWidgetItem(users),
+                QTableWidgetItem(size), QTableWidgetItem("💡" if matches else "—"),
             )
+            tooltip = "\n".join(game.get("paths", []))
+            for column, item in enumerate(values):
+                item.setToolTip(item.toolTip() or tooltip)
+                table.setItem(row, column, item)
         for target_type, target_id in sorted(self.knowledge_saved_targets - attached):
             if target_type == "launcher":
                 continue
-            self.knowledge_known_targets.addItem(
-                f"{target_id} · 💡 uložený tip, instalace nenalezena",
-                (target_type, target_id),
-            )
-        self.knowledge_known_targets.blockSignals(False)
+            row = table.rowCount()
+            table.insertRow(row)
+            dot = QTableWidgetItem("")
+            dot.setTextAlignment(Qt.AlignCenter)
+            dot.setIcon(colored_dot_icon("#f3f6f8"))
+            dot.setData(Qt.UserRole, (target_type, target_id))
+            dot.setToolTip("Tip existuje, ale místní instalace nebyla nalezena.")
+            for column, item in enumerate((
+                dot, QTableWidgetItem(target_id), QTableWidgetItem("—"),
+                QTableWidgetItem("—"), QTableWidgetItem("—"), QTableWidgetItem("💡"),
+            )):
+                table.setItem(row, column, item)
+        table.blockSignals(False)
+        self.filter_knowledge_games(self.knowledge_search.text())
         residues = sum(bool(game.get("possible_residue")) for game in games if isinstance(game, dict))
         self.knowledge_status.setText(
             f"Nalezeno {len(games)} her; {residues} malých instalací je označeno jako možný pozůstatek."
         )
         if current[1]:
             self.set_knowledge_target(*current)
+            self.select_knowledge_game_target(current)
+        else:
+            preferred = next(
+                (
+                    row for row in range(table.rowCount())
+                    if table.item(row, 5) and table.item(row, 5).text() == "💡"
+                    and table.item(row, 4) and table.item(row, 4).text() != "—"
+                ),
+                0 if table.rowCount() else None,
+            )
+            if preferred is not None:
+                table.selectRow(preferred)
 
-    def on_knowledge_known_target_selected(self, index):
-        target = self.knowledge_known_targets.itemData(index)
+    def filter_knowledge_games(self, text):
+        query = str(text).strip().casefold()
+        for row in range(self.knowledge_games_table.rowCount()):
+            haystack = " ".join(
+                self.knowledge_games_table.item(row, column).text()
+                for column in range(1, self.knowledge_games_table.columnCount())
+                if self.knowledge_games_table.item(row, column)
+            ).casefold()
+            self.knowledge_games_table.setRowHidden(row, bool(query and query not in haystack))
+
+    def select_knowledge_game_target(self, target):
+        for row in range(self.knowledge_games_table.rowCount()):
+            item = self.knowledge_games_table.item(row, 0)
+            if item and item.data(Qt.UserRole) == target:
+                self.knowledge_games_table.selectRow(row)
+                self.knowledge_games_table.scrollToItem(item)
+                return
+
+    def on_knowledge_game_selected(self):
+        rows = self.knowledge_games_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self.knowledge_games_table.item(rows[0].row(), 0)
+        target = item.data(Qt.UserRole) if item else None
         if isinstance(target, tuple) and len(target) == 2:
             self.set_knowledge_target(*target)
             self.load_knowledge_target()
@@ -1228,6 +1324,8 @@ class GameMover(QWidget):
 
     def render_knowledge_notes(self, notes):
         self.knowledge_table.blockSignals(True)
+        self.knowledge_body.blockSignals(True)
+        self.knowledge_body.clear()
         self.knowledge_table.setRowCount(0)
         for note in notes if isinstance(notes, list) else []:
             if not isinstance(note, dict):
@@ -1235,20 +1333,24 @@ class GameMover(QWidget):
             row = self.knowledge_table.rowCount()
             self.knowledge_table.insertRow(row)
             checks = note.get("checks", []) if isinstance(note.get("checks", []), list) else []
-            status, tooltip = self.knowledge_local_status(checks)
+            status, tooltip, color = self.knowledge_local_status(checks)
             for column, value in enumerate((
                 note.get("title", ""), note.get("platform", "Obecné"), status,
-                note.get("body", ""),
             )):
                 item = QTableWidgetItem(str(value))
                 if column == 0:
-                    item.setData(Qt.UserRole, checks)
+                    item.setData(Qt.UserRole, {"checks": checks, "body": str(note.get("body", ""))})
                 if column == 2:
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     item.setToolTip(tooltip)
+                    item.setForeground(QBrush(QColor(color)))
+                    item.setIcon(colored_dot_icon(color))
                 self.knowledge_table.setItem(row, column, item)
-        self.knowledge_table.resizeRowsToContents()
         self.knowledge_table.blockSignals(False)
+        self.knowledge_body.blockSignals(False)
+        if self.knowledge_table.rowCount():
+            self.knowledge_table.selectRow(0)
+            self.on_knowledge_note_selected()
         self.knowledge_dirty = False
         self.knowledge_status.setText(
             f"Načteno {self.knowledge_table.rowCount()} poznámek."
@@ -1258,7 +1360,7 @@ class GameMover(QWidget):
     def knowledge_local_status(self, checks):
         results = evaluate_checks(checks)
         if not results:
-            return "— bez kontrol", "Tento tip zatím nemá definované automatické kontroly."
+            return "Bez kontroly", "Tento tip zatím nemá definované automatické kontroly.", "#f3f6f8"
         installation = [result for result in results if result["category"] == "installation"]
         configuration = [result for result in results if result["category"] == "configuration"]
         parts = []
@@ -1282,23 +1384,53 @@ class GameMover(QWidget):
             f"{icons[result['status']]} {result['label']}: {result['detail']}"
             for result in results
         )
-        return " · ".join(parts), tooltip
+        if any(result["status"] == "missing" for result in results):
+            return "Vyžaduje zásah", tooltip, "#ff6b6b"
+        if any(result["status"] == "unknown" for result in results):
+            return "Nelze ověřit", tooltip, "#ffd43b"
+        return "V pořádku", tooltip, "#69db7c"
+
+    def on_knowledge_note_selected(self):
+        rows = self.knowledge_table.selectionModel().selectedRows()
+        self.knowledge_body.blockSignals(True)
+        if not rows:
+            self.knowledge_body.clear()
+        else:
+            item = self.knowledge_table.item(rows[0].row(), 0)
+            data = item.data(Qt.UserRole) if item else {}
+            self.knowledge_body.setPlainText(
+                str(data.get("body", "")) if isinstance(data, dict) else ""
+            )
+        self.knowledge_body.blockSignals(False)
+
+    def on_knowledge_body_changed(self):
+        rows = self.knowledge_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        item = self.knowledge_table.item(rows[0].row(), 0)
+        if item is None:
+            return
+        data = item.data(Qt.UserRole)
+        data = dict(data) if isinstance(data, dict) else {"checks": []}
+        data["body"] = self.knowledge_body.toPlainText()
+        item.setData(Qt.UserRole, data)
+        self.mark_knowledge_dirty()
 
     def refresh_knowledge_local_checks(self):
         self.knowledge_table.blockSignals(True)
         for row in range(self.knowledge_table.rowCount()):
             title_item = self.knowledge_table.item(row, 0)
-            checks = title_item.data(Qt.UserRole) if title_item else []
-            status, tooltip = self.knowledge_local_status(
-                checks if isinstance(checks, list) else []
-            )
+            data = title_item.data(Qt.UserRole) if title_item else {}
+            checks = data.get("checks", []) if isinstance(data, dict) else []
+            status, tooltip, color = self.knowledge_local_status(checks)
             item = self.knowledge_table.item(row, 2) or QTableWidgetItem()
             item.setText(status)
             item.setToolTip(tooltip)
+            item.setForeground(QBrush(QColor(color)))
+            item.setIcon(colored_dot_icon(color))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             self.knowledge_table.setItem(row, 2, item)
         self.knowledge_table.blockSignals(False)
-        self.knowledge_table.resizeRowsToContents()
 
     def mark_knowledge_dirty(self, _item=None):
         if _item is not None and _item.column() == 2:
@@ -1309,12 +1441,14 @@ class GameMover(QWidget):
     def add_knowledge_row(self):
         row = self.knowledge_table.rowCount()
         self.knowledge_table.insertRow(row)
-        for column, value in enumerate(("Nový tip", "Obecné", "— bez kontrol", "Popiš ověřený postup…")):
+        for column, value in enumerate(("Nový tip", "Obecné", "Bez kontroly")):
             item = QTableWidgetItem(value)
             if column == 0:
-                item.setData(Qt.UserRole, [])
+                item.setData(Qt.UserRole, {"checks": [], "body": "Popiš ověřený postup…"})
             if column == 2:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                item.setForeground(QBrush(QColor("#f3f6f8")))
+                item.setIcon(colored_dot_icon("#f3f6f8"))
             self.knowledge_table.setItem(row, column, item)
         self.knowledge_table.setCurrentCell(row, 0)
         self.knowledge_table.editItem(self.knowledge_table.item(row, 0))
@@ -1324,6 +1458,7 @@ class GameMover(QWidget):
         for row in rows:
             self.knowledge_table.removeRow(row)
         if rows:
+            self.on_knowledge_note_selected()
             self.mark_knowledge_dirty()
 
     def save_knowledge_target(self):
@@ -1341,15 +1476,17 @@ class GameMover(QWidget):
             values = [
                 self.knowledge_table.item(row, column).text().strip()
                 if self.knowledge_table.item(row, column) else ""
-                for column in (0, 1, 3)
+                for column in (0, 1)
             ]
-            if any(not value for value in values):
+            title_item = self.knowledge_table.item(row, 0)
+            data = title_item.data(Qt.UserRole) if title_item else {}
+            body = str(data.get("body", "")).strip() if isinstance(data, dict) else ""
+            if any(not value for value in values) or not body:
                 self.knowledge_status.setText("Každý řádek musí mít nadpis, platformu a postup.")
                 return
-            title_item = self.knowledge_table.item(row, 0)
-            checks = title_item.data(Qt.UserRole) if title_item else []
+            checks = data.get("checks", []) if isinstance(data, dict) else []
             notes.append({
-                "title": values[0], "platform": values[1], "body": values[2],
+                "title": values[0], "platform": values[1], "body": body,
                 "checks": checks if isinstance(checks, list) else [],
             })
         try:
@@ -1376,6 +1513,7 @@ class GameMover(QWidget):
             QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed
             if allowed else QAbstractItemView.NoEditTriggers
         )
+        self.knowledge_body.setReadOnly(not allowed)
         self.knowledge_add.setEnabled(allowed)
         self.knowledge_remove.setEnabled(allowed)
         self.knowledge_save.setEnabled(allowed)
