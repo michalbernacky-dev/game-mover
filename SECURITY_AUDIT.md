@@ -142,7 +142,7 @@ was subsequently verified by moving and successfully running a Steam game.
 ## GM-SA-2026-003: Excessive privileges and insufficient service isolation
 
 - Severity: **High**
-- Status: **Mitigated** (working tree, deployment pending)
+- Status: **Mitigated** (deployment verified)
 - Relevant weakness class: CWE-250
 - Affected component: `game_mover.service`
 
@@ -189,6 +189,11 @@ longer request SGID. The `acl` package is now an explicit runtime dependency,
 ACL commands operate on a validated open directory descriptor, and recursive
 processing does not follow nested symlinks. This preserves the measured
 hardening score rather than accepting a weaker unit.
+
+The ACL-based implementation and hardened service were subsequently deployed
+and verified through both the local application path and the managed SSH tunnel
+to the host. Mover operations and the surrounding host/client functionality
+remained operational in both contexts.
 
 The finding remains mitigated rather than fixed because the API still runs as
 root. `ProtectHome` would prevent the Mover from maintaining per-user Steam
