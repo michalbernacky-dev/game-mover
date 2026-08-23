@@ -23,7 +23,7 @@ regression tests have been reviewed.
 |---|---|---|---|
 | GM-SA-2026-001 | Critical | Fixed | Arbitrary recursive permission changes by the root API |
 | GM-SA-2026-002 | High | Fixed | Path traversal in privileged Game Mover operations |
-| GM-SA-2026-003 | High | Open | Excessive privileges and insufficient isolation of the API service |
+| GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Open | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Open | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
@@ -87,7 +87,7 @@ packaged deployment was subsequently verified without a functional regression.
 ## GM-SA-2026-002: Path traversal in privileged Game Mover operations
 
 - Severity: **High**
-- Status: **Fixed** (working tree, deployment pending)
+- Status: **Fixed** (deployment verified)
 - Relevant weakness classes: CWE-22, CWE-23, CWE-59
 - Affected components: `/move_game`, `/create_symlink`, `/set_steam_cache`,
   `/list_user_games`
@@ -136,13 +136,13 @@ symlink escapes, and a symlink in place of the managed shared cache.
 
 Regression coverage exercises invalid users, `../` game names, source and
 cache symlink escapes, a side-effect-free GET, and successful normal move and
-link workflows. The complete suite of 228 tests passed. The fixed code still
-needs to be packaged and deployed before installed hosts are protected.
+link workflows. The complete suite of 228 tests passed. The packaged deployment
+was subsequently verified by moving and successfully running a Steam game.
 
 ## GM-SA-2026-003: Excessive privileges and insufficient service isolation
 
 - Severity: **High**
-- Status: **Open**
+- Status: **Mitigated** (working tree, deployment pending)
 - Relevant weakness class: CWE-250
 - Affected component: `game_mover.service`
 
@@ -166,6 +166,27 @@ privileges and affect the entire host.
 3. Add compatible systemd hardening and explicit writable paths.
 4. Measure the resulting unit with `systemd-analyze security` on the target
    host and record accepted exceptions.
+
+### Mitigation applied
+
+The first hardening stage was added on 2026-08-23. The service now uses a
+restrictive group-readable umask, `NoNewPrivileges`, a private temporary
+directory, native system-call architecture, an explicit address-family
+allowlist, SUID/SGID and realtime restrictions, and protection for the host
+clock, hostname, kernel logs, kernel modules, and control groups. Capabilities
+unrelated to the documented orchestration duties are removed from the bounding
+set.
+
+`systemd-analyze verify` accepts the unit. Its offline exposure score improved
+from **9.4 UNSAFE** to **6.4 MEDIUM**. Regression tests pin the baseline so it
+cannot disappear silently.
+
+The finding remains mitigated rather than fixed because the API still runs as
+root. `ProtectHome` would prevent the Mover from maintaining per-user Steam
+links, while `ProtectSystem` would prevent the current in-process DNF, Pi-hole,
+Timekpr and host-configuration workflows. Closing this finding requires moving
+those mutations into small allowlisted helpers and then running the HTTP
+service as an unprivileged account with explicit writable paths.
 
 ## GM-SA-2026-004: Missing PAM authentication rate limiting
 

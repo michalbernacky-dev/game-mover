@@ -10,6 +10,30 @@ User=root
 Group=gemers
 Restart=always
 RestartSec=5
+UMask=0027
+
+# Safe baseline for the still-privileged orchestration service. ProtectHome and
+# ProtectSystem cannot be enabled until DNF, Pi-hole, Timekpr and per-user game
+# mutations move to narrowly scoped helpers.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=~CAP_AUDIT_CONTROL CAP_AUDIT_READ CAP_AUDIT_WRITE
+CapabilityBoundingSet=~CAP_BLOCK_SUSPEND CAP_BPF CAP_IPC_LOCK CAP_LEASE
+CapabilityBoundingSet=~CAP_LINUX_IMMUTABLE CAP_MAC_ADMIN CAP_MAC_OVERRIDE
+CapabilityBoundingSet=~CAP_SYS_BOOT CAP_SYS_MODULE CAP_SYS_PACCT CAP_SYS_PTRACE
+CapabilityBoundingSet=~CAP_SYS_RAWIO CAP_SYS_TIME CAP_SYS_TTY_CONFIG CAP_SYSLOG
+CapabilityBoundingSet=~CAP_WAKE_ALARM
+
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
