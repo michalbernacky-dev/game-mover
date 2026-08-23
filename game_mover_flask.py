@@ -118,6 +118,7 @@ app = Flask(__name__)
 GAMES_ROOT = "/var/Games"
 GAMES_LINKS_ROOT = "/var/Games_links"
 GROUP_NAME = "gemers"
+SETFACL_PATH = "/usr/bin/setfacl"
 PERMISSION_TARGETS = {
     "steam-library": os.path.join(GAMES_ROOT, "steam"),
 }
@@ -730,7 +731,7 @@ def permission_target_path(target_id):
 def _set_group_perms_fd(directory_fd, gid):
     """Apply shared-library modes using descriptors and never follow symlinks."""
     os.fchown(directory_fd, -1, gid)
-    os.fchmod(directory_fd, 0o2775)
+    os.fchmod(directory_fd, 0o775)
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
     file_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 
@@ -754,11 +755,35 @@ def _set_group_perms_fd(directory_fd, gid):
 
 
 def set_group_perms(path):
+    """Grant durable shared access without relying on the SGID filesystem bit."""
     gid = grp.getgrnam(GROUP_NAME).gr_gid
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
     directory_fd = os.open(path, flags)
     try:
         _set_group_perms_fd(directory_fd, gid)
+        descriptor_path = f"/proc/self/fd/{directory_fd}"
+        common = {
+            "check": True,
+            "capture_output": True,
+            "text": True,
+            "pass_fds": (directory_fd,),
+        }
+        # The command-line /proc path resolves to the already validated and
+        # opened directory. setfacl's recursive walk skips nested symlinks.
+        subprocess.run(
+            [
+                SETFACL_PATH, "-R", "-m",
+                f"g:{gid}:rwX,m::rwX", descriptor_path,
+            ],
+            **common,
+        )
+        subprocess.run(
+            [
+                SETFACL_PATH, "-R", "-d", "-m",
+                f"g:{gid}:rwx,m::rwx", descriptor_path,
+            ],
+            **common,
+        )
     finally:
         os.close(directory_fd)
 
@@ -1687,7 +1712,7 @@ def set_steam_cache():
         try:
             gid = grp.getgrnam(GROUP_NAME).gr_gid
             os.chown(shared_base, -1, gid)
-            os.chmod(shared_base, 0o2775)
+            os.chmod(shared_base, 0o775)
         except Exception:
             pass
 

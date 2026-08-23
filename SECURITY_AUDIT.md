@@ -181,6 +181,15 @@ set.
 from **9.4 UNSAFE** to **6.4 MEDIUM**. Regression tests pin the baseline so it
 cannot disappear silently.
 
+Deployment testing initially exposed an incompatibility between
+`RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
+The restriction remains enabled: shared-library inheritance was migrated to
+POSIX default ACLs for the `gemers` group, while ordinary directory modes no
+longer request SGID. The `acl` package is now an explicit runtime dependency,
+ACL commands operate on a validated open directory descriptor, and recursive
+processing does not follow nested symlinks. This preserves the measured
+hardening score rather than accepting a weaker unit.
+
 The finding remains mitigated rather than fixed because the API still runs as
 root. `ProtectHome` would prevent the Mover from maintaining per-user Steam
 links, while `ProtectSystem` would prevent the current in-process DNF, Pi-hole,

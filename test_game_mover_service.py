@@ -31,6 +31,15 @@ class ServiceHardeningTest(unittest.TestCase):
         self.assertIn("ProtectHome and", unit)
         self.assertIn("ProtectSystem cannot be enabled", unit)
 
+    def test_acl_replaces_runtime_sgid_creation(self):
+        spec = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
+        backend = pathlib.Path("game_mover_flask.py").read_text(encoding="utf-8")
+        self.assertIn("Requires:       acl", spec)
+        self.assertIn("setfacl -m", spec)
+        self.assertNotIn("chmod 2775", spec)
+        self.assertIn('SETFACL_PATH = "/usr/bin/setfacl"', backend)
+        self.assertNotIn("os.fchmod(directory_fd, 0o2775)", backend)
+
 
 if __name__ == "__main__":
     unittest.main()

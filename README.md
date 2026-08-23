@@ -454,7 +454,7 @@ cd ~/Projects/game-mover-rpm
 
 What installer does:
 - copies scripts + logo into `/opt/game_mover`
-- ensures the `gemers` group and shared directories `/var/Games` and `/var/Games_links` exist with sgid and group ownership
+- ensures the `gemers` group and shared directories `/var/Games` and `/var/Games_links` exist with group ownership and inheritable POSIX ACLs
 - installs and enables the `game_mover.service` systemd unit (Flask API on `127.0.0.1:5000`)
 - installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
 - optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
@@ -947,7 +947,7 @@ cd ~/Projects/game-mover-rpm
 
 Co instalátor dělá:
 - kopíruje skripty a logo do `/opt/game_mover`
-- zajistí skupinu `gemers` a sdílené adresáře `/var/Games` a `/var/Games_links` se sgid a group ownership
+- zajistí skupinu `gemers` a sdílené adresáře `/var/Games` a `/var/Games_links` se skupinovým vlastnictvím a dědičnými POSIX ACL
 - nainstaluje a zapne systemd jednotku `game_mover.service` (Flask API na `127.0.0.1:5000`)
 - nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
 - volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`

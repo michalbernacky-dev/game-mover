@@ -479,13 +479,25 @@ class ServerRegistryTest(unittest.TestCase):
         outside.chmod(0o600)
         (library / "outside-link").symlink_to(outside)
 
-        with patch.object(
-            backend.grp, "getgrnam", return_value=Mock(gr_gid=os.getgid()),
+        with (
+            patch.object(
+                backend.grp, "getgrnam", return_value=Mock(gr_gid=os.getgid()),
+            ),
+            patch.object(backend.subprocess, "run") as setfacl,
         ):
             backend.set_group_perms(str(library))
 
         self.assertEqual(outside.stat().st_mode & 0o777, 0o600)
         self.assertEqual((library / "game.dat").stat().st_mode & 0o777, 0o664)
+        self.assertEqual(library.stat().st_mode & 0o7777, 0o775)
+        self.assertEqual(setfacl.call_count, 2)
+        for invocation in setfacl.call_args_list:
+            command = invocation.args[0]
+            self.assertEqual(command[0], "/usr/bin/setfacl")
+            self.assertIn("-R", command)
+            self.assertTrue(command[-1].startswith("/proc/self/fd/"))
+            self.assertTrue(invocation.kwargs["check"])
+            self.assertEqual(len(invocation.kwargs["pass_fds"]), 1)
 
     def save_servers(self):
         response = self.client.put(

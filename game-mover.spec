@@ -20,6 +20,7 @@ Requires:       curl
 Requires:       jq
 Requires:       rsync
 Requires:       podman
+Requires:       acl
 Requires(pre):  shadow-utils
 Requires(post): shadow-utils
 Requires(post): util-linux
@@ -108,7 +109,9 @@ chmod 0640 /etc/game_mover/read.token || :
 
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
-chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache || :
+chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache || :
+setfacl -m 'g:gemers:rwx,m::rwx,d:g:gemers:rwx,d:m::rwx' \
+    /var/Games /var/Games_links /var/Games/steam-cache || :
 
 install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform \
