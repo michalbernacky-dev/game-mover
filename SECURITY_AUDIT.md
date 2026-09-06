@@ -26,7 +26,7 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | Mitigated | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Open | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Open | Public security and licensing policy is incomplete |
 
@@ -290,7 +290,7 @@ passed, and the RPM build produced `game-mover-0.30.1-1.fc43.noarch.rpm`.
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**
-- Status: **Mitigated**
+- Status: **Fixed**
 - Relevant weakness class: CWE-200
 
 ### Description
@@ -313,22 +313,27 @@ unnecessary permanent association between people and private infrastructure.
 4. Repeat secret scanning across all branches and tags immediately before
    publication.
 
-### Mitigation
+### Resolution
 
-Mitigated in the current tree on 2026-09-06. Personal-looking usernames and
+Resolved on 2026-09-06. Personal-looking usernames and
 infrastructure examples were replaced with neutral fixture identities,
 reserved `.example` names, the `192.0.2.0/24` documentation range, and generic
 addresses from the shared `100.64.0.0/10` range where tests specifically need
 to exercise Tailscale/CGNAT handling. The standardized `home.arpa` suffix is
 retained where the application intentionally models a private home DNS zone.
 
-This does not remove metadata from existing commits: all 126 pre-mitigation
-human-authored commits reachable during this review use one of two personal
-author-address variants, and earlier blobs retain the replaced fixtures.
-Rewriting that history remains an explicit publication decision because it
-would change commit IDs and require coordinated force-pushing of rewritten
-branches and tags. A neutral or GitHub no-reply address for future commits also
-remains to be configured once the desired identity is known.
+All reachable local refs and historical blobs were rewritten. Human-authored
+commits now use the repository owner's GitHub no-reply identity; GitHub and
+Dependabot commits retain their original no-reply identities. The same
+no-reply identity is configured locally for future commits. Reflogs and
+unreachable pre-rewrite objects were pruned after a private recovery bundle
+was created outside the repository.
+
+Post-rewrite verification scanned all 129 reachable commits for the replaced
+metadata and found no match. Gitleaks scanned the same history without finding
+a secret, all 237 tests passed, and the CI-scoped Ruff check passed. Publishing
+the rewritten history still requires a coordinated force-push because all
+rewritten commit IDs differ from the existing remote history.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
