@@ -2117,10 +2117,8 @@ def launchers_status():
     if PRIVILEGED_HELPER_ENABLED:
         for launcher in launchers:
             if launcher.get("id") == "heroic":
-                launcher["update_supported"] = False
-                launcher["update_disabled_reason"] = (
-                    "Nepodepsané upstream RPM vyžaduje ruční sudo dnf install"
-                )
+                launcher["update_supported"] = True
+                launcher["update_mode"] = "client-packagekit"
     return jsonify({
         "launchers": launchers,
         "update_policy": operation_policy("launcher.update"),
@@ -2156,12 +2154,9 @@ def launcher_update(launcher_id):
     if not require_local_operation(request, "launcher.update"):
         return jsonify({"message": "Unauthorized"}), 403
     if PRIVILEGED_HELPER_ENABLED:
-        return jsonify({
-            "message": (
-                "Automatická root instalace nepodepsaného Heroic RPM je vypnutá; "
-                "použijte ruční sudo dnf install"
-            ),
-        }), 409
+        if launcher_id != "heroic":
+            return jsonify({"message": "Tento launcher nelze aktualizovat"}), 400
+        return jsonify({"install_via_client": True, "launcher_id": launcher_id})
     try:
         return jsonify(update_launcher(launcher_id))
     except LauncherError as error:

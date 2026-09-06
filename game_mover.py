@@ -8,6 +8,7 @@ import grp
 import re
 import json
 import time
+import subprocess
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
@@ -42,6 +43,7 @@ from game_mover_security import (
     SERVER_ACTION_IDS,
 )
 from game_mover_version import __version__
+from game_mover_launchers import update_launcher as perform_launcher_update
 from game_mover_endpoints import (
     normalize_endpoints,
 )
@@ -692,9 +694,21 @@ class LauncherUpdateThread(QThread):
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            if data.get("install_via_client"):
+                data = perform_launcher_update(
+                    self.launcher_id, installer=self._packagekit_install,
+                )
             self.completed.emit({**data, "launcher_id": self.launcher_id})
         except Exception as error:
             self.completed.emit({"launcher_id": self.launcher_id, "error": str(error)})
+
+    @staticmethod
+    def _packagekit_install(path):
+        return subprocess.run(
+            ["/usr/bin/pkcon", "--plain", "--noninteractive",
+             "--allow-untrusted", "install-local", path],
+            text=True, capture_output=True, check=False, timeout=900,
+        )
 
 
 class InstalledGamesThread(QThread):

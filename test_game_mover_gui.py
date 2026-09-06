@@ -140,6 +140,16 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(len(self.window.local_pam_buttons), 1)
 
+    def test_heroic_client_installer_uses_packagekit_without_sudo(self):
+        completed = MagicMock(returncode=0, stdout="", stderr="")
+        with patch.object(game_mover.subprocess, "run", return_value=completed) as run:
+            result = game_mover.LauncherUpdateThread._packagekit_install("/tmp/heroic.rpm")
+        self.assertIs(result, completed)
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/pkcon")
+        self.assertIn("install-local", command)
+        self.assertNotIn("sudo", command)
+
     def test_mover_shows_other_launchers_but_mutates_only_steam(self):
         self.assertEqual(self.window.platform, "steam")
         self.assertFalse(hasattr(self.window, "source_user_combo"))

@@ -123,6 +123,31 @@ class LauncherProviderTest(unittest.TestCase):
         with self.assertRaisesRegex(launchers.LauncherError, "ukonči Heroic"):
             launchers.update_heroic(runner=runner, request_get=Mock())
 
+    def test_verified_rpm_can_be_delegated_to_client_installer(self):
+        body = b"verified heroic rpm"
+        digest = f"sha256:{hashlib.sha256(body).hexdigest()}"
+        runner = Mock(side_effect=[
+            completed([], 0, "2.22.0"), completed([], 1),
+            completed([], 0, "heroic\n2.22.1\nx86_64\n"),
+        ])
+        installed_paths = []
+
+        def installer(path):
+            self.assertTrue(os.path.isfile(path))
+            installed_paths.append(path)
+            return completed([], 0)
+
+        result = launchers.update_heroic(
+            runner=runner,
+            request_get=Mock(side_effect=[
+                FakeResponse(payload=heroic_payload(digest=digest)),
+                FakeResponse(body=body),
+            ]),
+            installer=installer,
+        )
+        self.assertTrue(result["changed"])
+        self.assertFalse(os.path.exists(installed_paths[0]))
+
 
 class LauncherApiTest(unittest.TestCase):
     def setUp(self):
@@ -153,15 +178,15 @@ class LauncherApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         update.assert_called_once_with("heroic")
 
-    def test_split_service_never_installs_unsigned_heroic_rpm(self):
+    def test_split_service_authorizes_client_packagekit_without_installing(self):
         with (
             patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
             patch.object(backend, "require_local_operation", return_value=True),
             patch.object(backend, "update_launcher") as update,
         ):
             response = self.client.post("/launchers/heroic/update", **self.local)
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("sudo dnf install", response.get_json()["message"])
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()["install_via_client"])
         update.assert_not_called()
 
 

@@ -27,9 +27,10 @@ bars remain in Mover.
 The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
 shows whether their installed versions are current. Heroic releases are checked
 against the official GitHub project. The upstream RPM is not signed for the
-host RPM trust store, so the split-service backend reports the update but does
-not install it as root. Installation remains an explicit manual administrator
-action with `sudo dnf install`; Heroic should be closed first.
+host RPM trust store, so the split-service backend never installs it as root.
+The local Qt client downloads and verifies the release, then asks PackageKit to
+install that exact file through the desktop's standard polkit authorization;
+Heroic should be closed first.
 
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
@@ -697,8 +698,9 @@ serverové, Minecraft, Gate a DNS volby jsou schované. Po otevření spravovan�
 SSH tunelu lze samostatně přepnout na globální operace hostitele a zásady
 spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent` používá
 místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
-operaci odmítne přímo backend. Backend pouze hlásí novou verzi Heroicu;
-nepodepsané upstream RPM musí správce nainstalovat ručně přes `sudo dnf install`.
+operaci odmítne přímo backend. Aktualizaci Heroicu stáhne a ověří místní Qt
+klient; instalaci pak předá PackageKitu, který zobrazí standardní polkit
+autorizaci. Síťový backend ani jeho root helper balíček neinstalují.
 Místní PAM tlačítka
 jsou modrozelená a hostitelská fialová; hranice je současně napsaná přímo v
 jejich popisku. V režimu SSH tunelu může PAM relace autorizovat i

@@ -191,9 +191,11 @@ local socket. Rootless Podman remains in the unprivileged service and managed
 containers use `keep-id` ownership. Steam filesystem operations run in a fixed
 internal worker after dropping to the selected player's UID with only the
 `gemers` supplementary group, so player-writable paths are never traversed as
-root. Automatic installation of Heroic's
-unsigned upstream RPM was removed from the privileged workflow and replaced by
-an explicit administrator-run DNF instruction.
+root. Installation of Heroic's unsigned upstream RPM was removed from the
+privileged workflow. Its local Qt client instead verifies the official release
+digest and RPM identity before handing the exact private temporary file to
+PackageKit, whose polkit transaction performs interactive authorization outside
+both the network API and its broker.
 
 `systemd-analyze verify` accepts both units. On the deployed Fedora host,
 `systemd-analyze security` reports **3.7 OK** for `game_mover.service` and
@@ -460,7 +462,7 @@ findings:
 - Subprocess calls use argument arrays; no `shell=True` use was found.
 - Backup restoration, modpack archive extraction, RCON commands, and managed
   server deletion contain targeted validation and size or scope limits.
-- After the GM-SA-2026-003 remediation, 259 automated tests passed.
+- After the GM-SA-2026-003 remediation, 261 automated tests passed.
 
 ## Publication gate
 

@@ -34,10 +34,12 @@ allowlist.
 Mutable registry, DNS, Gate and security-policy state lives under
 `/var/lib/game-mover`, owned by `gameplatform`. Authentication tokens and the
 CurseForge BYOK credential remain root-provisioned under `/etc/game_mover`.
-Automatic installation of upstream Heroic RPM files is disabled in the split
-service because those release RPMs are not independently signed for the host
-RPM trust store. Version discovery remains available, while installation is an
-explicit administrator action outside the network service.
+The split service never installs upstream Heroic RPM files. The local Qt client
+downloads the exact official asset, validates its release digest and RPM
+identity, and submits the private temporary file to PackageKit. PackageKit and
+the desktop polkit agent own the privileged transaction and interactive
+authorization; neither the network API nor its root broker can install a
+package.
 
 The platform has two complementary workload models:
 

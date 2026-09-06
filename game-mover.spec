@@ -21,6 +21,7 @@ Requires:       jq
 Requires:       rsync
 Requires:       podman
 Requires:       acl
+Requires:       PackageKit
 Requires(pre):  shadow-utils
 Requires(post): shadow-utils
 Requires(post): util-linux

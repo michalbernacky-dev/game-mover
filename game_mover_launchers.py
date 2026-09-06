@@ -208,7 +208,7 @@ def _validate_downloaded_rpm(path, version, runner):
         raise LauncherError("Stažený soubor neodpovídá očekávanému Heroic RPM")
 
 
-def update_heroic(*, runner=_run, request_get=requests.get):
+def update_heroic(*, runner=_run, request_get=requests.get, installer=None):
     installed = rpm_installed_version("heroic", runner=runner)
     if not installed:
         raise LauncherError("Heroic není nainstalovaný jako RPM")
@@ -249,7 +249,11 @@ def update_heroic(*, runner=_run, request_get=requests.get):
             if digest.hexdigest() != expected_digest.removeprefix("sha256:"):
                 raise LauncherError("Kontrolní součet Heroic RPM nesouhlasí")
         _validate_downloaded_rpm(temporary_path, release["version"], runner)
-        result = runner(["dnf", "install", "-y", temporary_path], timeout=900)
+        result = (
+            installer(temporary_path)
+            if installer is not None
+            else runner(["dnf", "install", "-y", temporary_path], timeout=900)
+        )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip().splitlines()
             suffix = f": {detail[-1]}" if detail else ""
