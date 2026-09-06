@@ -259,7 +259,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.window.on_installed_knowledge_games({"games": [{
             "id": "grand-theft-auto-v-enhanced",
             "name": "Grand Theft Auto V Enhanced",
-            "platforms": ["epic"], "users": ["alice", "son"],
+            "platforms": ["epic"], "users": ["alice", "bob"],
             "paths": ["/var/Games/Heroic/GTAVEnhanced"],
             "knowledge_aliases": ["grand-theft-auto-v-enhanced", "gta-v-enhanced"],
             "size_bytes": 100 * 1024**3, "possible_residue": False,
@@ -270,11 +270,11 @@ class ServerManagementGuiTest(unittest.TestCase):
             self.window.knowledge_games_table.item(0, 0).data(game_mover.Qt.UserRole),
             ("game", "gta-v-enhanced"),
         )
-        self.assertEqual(self.window.knowledge_games_table.item(0, 3).text(), "alice, son")
+        self.assertEqual(self.window.knowledge_games_table.item(0, 3).text(), "alice, bob")
         self.assertEqual(self.window.knowledge_games_table.item(0, 5).text(), "💡")
         self.assertEqual(
             self.window.knowledge_games_table.item(0, 3).toolTip(),
-            "Uživatelé: alice, son",
+            "Uživatelé: alice, bob",
         )
         self.assertIn(
             "/var/Games/Heroic/GTAVEnhanced",
@@ -492,7 +492,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "token": "shared-host-token",
             "mode": "settimeleft",
             "disable_seconds": 3600,
-            "managed_users": ["carol", "bob", "dave", "alice"],
+            "managed_users": ["alice", "bob", "carol", "dave"],
         }
         with (
             patch.object(game_mover.requests, "post", return_value=response) as post,
@@ -505,7 +505,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(self.window.timekpr_token, "shared-host-token")
         self.assertEqual(
             self.window.host_timekpr_payload["managed_users"],
-            ["carol", "bob", "dave", "alice"],
+            ["alice", "bob", "carol", "dave"],
         )
         self.assertEqual(len(self.window.host_pam_buttons), 5)
         self.assertTrue(all(

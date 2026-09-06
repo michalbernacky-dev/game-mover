@@ -60,7 +60,7 @@ class InteractiveUsersTest(unittest.TestCase):
         result = interactive_usernames(
             entries, home_exists=lambda _path: True, uid_range=(1000, 60000),
         )
-        self.assertEqual(result, ["dave", "alice", "bob", "carol"])
+        self.assertEqual(result, ["alice", "bob", "carol", "dave"])
 
 
 if __name__ == "__main__":

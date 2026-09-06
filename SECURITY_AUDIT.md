@@ -26,7 +26,7 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | Mitigated | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Open | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Open | Public security and licensing policy is incomplete |
 
@@ -290,15 +290,16 @@ passed, and the RPM build produced `game-mover-0.30.1-1.fc43.noarch.rpm`.
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**
-- Status: **Open**
+- Status: **Mitigated**
 - Relevant weakness class: CWE-200
 
 ### Description
 
-The current tree and Git history contain personal author e-mail addresses,
-real-looking local usernames, a Tailscale address, LAN addresses, and internal
-DNS examples. No password, API token, private key, or cloud credential was
-found by the review's heuristic scans.
+The original review identified personal author e-mail addresses in Git
+metadata and real-looking local usernames, a Tailscale address, LAN addresses,
+and internal DNS examples in tracked content and historical blobs. No password,
+API token, private key, or cloud credential was found by the review's heuristic
+scans.
 
 These values are not authentication secrets, but publication would create an
 unnecessary permanent association between people and private infrastructure.
@@ -311,6 +312,23 @@ unnecessary permanent association between people and private infrastructure.
 3. Decide explicitly whether the privacy benefit justifies rewriting history.
 4. Repeat secret scanning across all branches and tags immediately before
    publication.
+
+### Mitigation
+
+Mitigated in the current tree on 2026-09-06. Personal-looking usernames and
+infrastructure examples were replaced with neutral fixture identities,
+reserved `.example` names, the `192.0.2.0/24` documentation range, and generic
+addresses from the shared `100.64.0.0/10` range where tests specifically need
+to exercise Tailscale/CGNAT handling. The standardized `home.arpa` suffix is
+retained where the application intentionally models a private home DNS zone.
+
+This does not remove metadata from existing commits: all 126 pre-mitigation
+human-authored commits reachable during this review use one of two personal
+author-address variants, and earlier blobs retain the replaced fixtures.
+Rewriting that history remains an explicit publication decision because it
+would change commit IDs and require coordinated force-pushing of rewritten
+branches and tags. A neutral or GitHub no-reply address for future commits also
+remains to be configured once the desired identity is known.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 

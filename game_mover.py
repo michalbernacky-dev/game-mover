@@ -3036,7 +3036,7 @@ class GameMover(QWidget):
         provider.setCurrentIndex(max(0, provider.findData(current.get("provider", "disabled"))))
         zone = QLineEdit(current.get("zone", "mc.home.arpa"), dialog)
         listen = QLineEdit(", ".join(current.get("listen_addresses") or []), dialog)
-        listen.setPlaceholderText("např. 192.0.2.66, 100.x.y.z")
+        listen.setPlaceholderText("např. 192.0.2.66, 100.64.0.10")
         answers = QLineEdit(", ".join(current.get("answer_addresses") or []), dialog)
         answers.setPlaceholderText("např. 192.0.2.66")
         ttl = QSpinBox(dialog)
