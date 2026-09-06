@@ -1,0 +1,18 @@
+[lint]
+select = ["S"]
+ignore = [
+    # Shared game directories intentionally grant group write access.
+    "S103",
+    # Public game listeners and wildcard-address comparisons are intentional.
+    "S104",
+    # Header names and token file paths are identifiers, not embedded secrets.
+    "S105",
+    # Existing best-effort UI/config cleanup paths intentionally discard errors.
+    "S110",
+    # Long-running local management requests cannot use a generic short timeout.
+    "S113",
+    # Subprocess calls use argv arrays and separately validated allowlisted values.
+    "S603",
+    # systemctl is resolved from the service's fixed system PATH.
+    "S607",
+]

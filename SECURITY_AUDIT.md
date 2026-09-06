@@ -25,7 +25,7 @@ regression tests have been reviewed.
 | GM-SA-2026-002 | High | Fixed | Path traversal in privileged Game Mover operations |
 | GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
-| GM-SA-2026-005 | Medium | Open | Mutable CI dependencies and incomplete security verification |
+| GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Open | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Open | Public security and licensing policy is incomplete |
@@ -247,7 +247,7 @@ passed.
 ## GM-SA-2026-005: Mutable CI dependencies and incomplete verification
 
 - Severity: **Medium**
-- Status: **Open**
+- Status: **Fixed**
 - Relevant weakness class: CWE-829
 - Affected component: `.github/workflows/rpm-build.yml`
 
@@ -266,6 +266,26 @@ suite or a security-oriented static check.
 4. Add secret scanning, dependency monitoring, and a suitable Python static
    security check.
 5. Apply least-privilege `permissions:` to the workflow token.
+
+### Resolution
+
+Resolved on 2026-09-06. The RPM workflow now uses the fixed Fedora 43 release,
+pins `actions/checkout` 4.2.2 and `actions/upload-artifact` 4.6.2 to reviewed
+full commit SHAs, disables persisted checkout credentials, and grants the
+workflow token only `contents: read`. Checkout fetches complete history so
+Gitleaks examines every commit before any package is built.
+
+The workflow installs its test and analysis tools from the signed Fedora
+repositories, runs Ruff's Python security rules with documented project-specific
+exceptions, executes the complete unit-test suite, and only then builds the RPM
+and SRPM. Dependabot is configured to monitor both GitHub Actions and Python
+dependencies weekly. Regression tests reject mutable Action references, a
+floating Fedora image, missing least-privilege permissions, reordered checks,
+or missing dependency monitoring.
+
+The complete CI sequence was reproduced in a clean Fedora 43 container. Ruff
+passed, Gitleaks scanned all 125 commits without finding a secret, all 237 tests
+passed, and the RPM build produced `game-mover-0.30.1-1.fc43.noarch.rpm`.
 
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
