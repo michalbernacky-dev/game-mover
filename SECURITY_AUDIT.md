@@ -1,6 +1,6 @@
 # Game Mover security audit register
 
-Last review: 2026-08-23
+Last review: 2026-09-06
 
 Reviewed version: 0.30.1
 
@@ -24,7 +24,7 @@ regression tests have been reviewed.
 | GM-SA-2026-001 | Critical | Fixed | Arbitrary recursive permission changes by the root API |
 | GM-SA-2026-002 | High | Fixed | Path traversal in privileged Game Mover operations |
 | GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
-| GM-SA-2026-004 | Medium | Open | PAM authentication has no application-level rate limiting |
+| GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Open | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Open | Installer source list can drift from the RPM payload |
@@ -205,7 +205,7 @@ service as an unprivileged account with explicit writable paths.
 ## GM-SA-2026-004: Missing PAM authentication rate limiting
 
 - Severity: **Medium**
-- Status: **Open**
+- Status: **Fixed**
 - Relevant weakness class: CWE-307
 - Affected component: `/timekpr/auth`
 
@@ -221,6 +221,28 @@ not enforce or document this dependency.
 Add bounded per-user and per-source backoff, avoid revealing unnecessary PAM
 failure detail, log throttled attempts, and document interaction with the host
 PAM lockout policy.
+
+### Resolution
+
+Resolved on 2026-09-06. `/timekpr/auth` now serializes authentication attempts
+and applies capped exponential backoff to both the normalized username and the
+loopback source. The first failure waits one second before another PAM call is
+allowed; subsequent failures double the interval up to 60 seconds. Throttled
+requests return HTTP `429` with `Retry-After`, and both failed and throttled
+attempts are written to the service journal without passwords. Tracking tables
+have fixed entry limits and expire inactive state.
+
+The endpoint no longer reveals whether a supplied account belongs to `wheel`;
+invalid credentials and valid non-wheel accounts receive the same response.
+PAM import and runtime failures likewise return a generic service-unavailable
+message. The README documents that this process-local limiter resets on restart
+and complements, but does not replace, persistent host policy such as
+`pam_faillock`.
+
+Regression coverage verifies the per-user and per-source dimensions, capped
+backoff and tracking size, `Retry-After`, audit logging, response equivalence,
+and reset after a successful authentication. The complete suite of 234 tests
+passed.
 
 ## GM-SA-2026-005: Mutable CI dependencies and incomplete verification
 

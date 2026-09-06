@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import time
 import unittest
@@ -31,6 +32,8 @@ class ServerRegistryTest(unittest.TestCase):
         backend.DNS_PIHOLE_STATE_PATH = str(Path(self.temp_dir.name) / "dns-pihole-state.json")
         backend.NOTES_DB_PATH = str(Path(self.temp_dir.name) / "notes.sqlite3")
         backend.TIMEKPRA_TOKENS["test-session"] = ("tester", time.time() + 60)
+        backend.PAM_AUTH_USER_FAILURES.clear()
+        backend.PAM_AUTH_SOURCE_FAILURES.clear()
         self.pam_headers = {"X-Timekpr-Token": "test-session"}
         self.admin_headers = {backend.LOCAL_ADMIN_TOKEN_HEADER: "local-secret"}
         self.client = backend.app.test_client()
@@ -68,6 +71,8 @@ class ServerRegistryTest(unittest.TestCase):
         backend.NOTES_DB_PATH = self.original_notes_db_path
         backend.OPERATIONS = self.original_operations
         backend.TIMEKPRA_TOKENS.pop("test-session", None)
+        backend.PAM_AUTH_USER_FAILURES.clear()
+        backend.PAM_AUTH_SOURCE_FAILURES.clear()
         with backend.MINECRAFT_STATUS_LOCK:
             backend.MINECRAFT_STATUS_CACHE.clear()
             backend.MINECRAFT_STATUS_INFLIGHT.clear()
@@ -75,6 +80,93 @@ class ServerRegistryTest(unittest.TestCase):
 
     def local_options(self, headers=None):
         return {"headers": headers or {}, "environ_base": {"REMOTE_ADDR": "127.0.0.1"}}
+
+    def test_pam_auth_throttles_each_source_and_username_before_calling_pam_again(self):
+        pam_module = Mock()
+        pam_module.pam.return_value.authenticate.return_value = False
+        with (
+            patch.dict(sys.modules, {"pam": pam_module}),
+            patch.object(backend, "user_in_wheel", return_value=True),
+            patch.object(backend.time, "monotonic", return_value=100.0),
+            self.assertLogs(backend.app.logger, level="WARNING") as logs,
+        ):
+            failed = self.client.post(
+                "/timekpr/auth",
+                json={"username": "alice", "password": "wrong"},
+                **self.local_options(),
+            )
+            same_source = self.client.post(
+                "/timekpr/auth",
+                json={"username": "bob", "password": "wrong"},
+                **self.local_options(),
+            )
+            same_user = self.client.post(
+                "/timekpr/auth",
+                json={"username": "ALICE", "password": "wrong"},
+                environ_base={"REMOTE_ADDR": "::1"},
+            )
+
+        self.assertEqual(failed.status_code, 401)
+        self.assertEqual(same_source.status_code, 429)
+        self.assertEqual(same_user.status_code, 429)
+        self.assertEqual(same_source.headers["Retry-After"], "1")
+        self.assertEqual(same_user.headers["Retry-After"], "1")
+        pam_module.pam.return_value.authenticate.assert_called_once_with("alice", "wrong")
+        self.assertTrue(any("throttled" in message for message in logs.output))
+
+    def test_pam_auth_hides_wheel_membership_and_clears_backoff_on_success(self):
+        pam_module = Mock()
+        pam_module.pam.return_value.authenticate.side_effect = [True, False, True, False]
+        wheel_membership = [False, True, True]
+        clock = Mock(return_value=200.0)
+        with (
+            patch.dict(sys.modules, {"pam": pam_module}),
+            patch.object(backend, "user_in_wheel", side_effect=wheel_membership),
+            patch.object(backend.time, "monotonic", clock),
+        ):
+            non_wheel = self.client.post(
+                "/timekpr/auth",
+                json={"username": "guest", "password": "valid"},
+                **self.local_options(),
+            )
+            backend.PAM_AUTH_USER_FAILURES.clear()
+            backend.PAM_AUTH_SOURCE_FAILURES.clear()
+            wrong_password = self.client.post(
+                "/timekpr/auth",
+                json={"username": "admin", "password": "wrong"},
+                **self.local_options(),
+            )
+            clock.return_value = 201.0
+            success = self.client.post(
+                "/timekpr/auth",
+                json={"username": "admin", "password": "valid"},
+                **self.local_options(),
+            )
+            after_success = self.client.post(
+                "/timekpr/auth",
+                json={"username": "other", "password": "wrong"},
+                **self.local_options(),
+            )
+
+        self.assertEqual(non_wheel.status_code, 401)
+        self.assertEqual(wrong_password.status_code, 401)
+        self.assertEqual(non_wheel.get_json(), wrong_password.get_json())
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(after_success.status_code, 401)
+        self.assertEqual(pam_module.pam.return_value.authenticate.call_count, 4)
+
+    def test_pam_auth_backoff_and_tracking_are_bounded(self):
+        now = 300.0
+        for attempt in range(10):
+            delay = backend.record_pam_auth_failure("127.0.0.1", "alice", now=now)
+            self.assertLessEqual(delay, backend.PAM_AUTH_BACKOFF_MAX_SECONDS)
+            now += delay
+        self.assertEqual(delay, backend.PAM_AUTH_BACKOFF_MAX_SECONDS)
+
+        with patch.object(backend, "PAM_AUTH_THROTTLE_MAX_USERS", 2):
+            backend.record_pam_auth_failure("::1", "bob", now=now)
+            backend.record_pam_auth_failure("::1", "carol", now=now + 1)
+        self.assertLessEqual(len(backend.PAM_AUTH_USER_FAILURES), 2)
 
     def test_install_readiness_reports_container_log_when_it_stops(self):
         workload_backend = Mock()

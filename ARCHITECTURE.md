@@ -211,6 +211,12 @@ user catalogs are kept separate.
 Every fixed tab that exposes host-protected actions has a contextual PAM unlock
 control. All of them use the same short-lived backend session token; credentials
 exist only for the authentication request and are never retained by the GUI.
+The loopback authentication endpoint serializes PAM attempts and applies
+bounded exponential backoff independently to the normalized username and the
+connection source. It returns only generic credential or service failures and
+logs rejected and throttled attempts without passwords. The limiter is
+process-local defense in depth; persistent account lockout remains the host PAM
+stack's responsibility.
 The authentication response also supplies the host's filtered interactive-user
 catalog so Timekpr never mistakes orphaned home directories for active accounts.
 An explicit Security-tab lock calls the loopback-only logout endpoint, revokes the

@@ -427,6 +427,15 @@ pip install -r requirements.txt
 
 > PAM authentication: wheel user authentication on the server requires the `python3-pam` module to be installed (on Fedora: `sudo dnf install python3-pam`). The `python-pam` pip dependency is listed in `requirements`, but it will not work without the system PAM library.
 
+Game Mover also limits `/timekpr/auth` failures by both normalized username and
+loopback source. Failed attempts receive an exponential 1, 2, 4, ... second
+backoff capped at 60 seconds; blocked requests return HTTP `429` with
+`Retry-After` and are recorded in the service journal. This in-memory limiter
+resets when the service restarts and supplements, rather than replaces, the
+host PAM policy. Keep a host-side lockout policy such as Fedora's `pam_faillock`
+enabled; attempts that reach PAM still count toward that policy, while requests
+rejected by the application limiter do not reach PAM.
+
 2) Run the installer only for first-time/manual bootstrap (creates `/opt/game_mover`, the systemd service, and the desktop launcher). The script is idempotent, so you can run it again, but the normal deploy path is now the RPM:
 
 ```bash
@@ -919,6 +928,15 @@ pip install -r requirements.txt
 > Integrace Timekpr Next: záložka Timekpr vyžaduje nainstalovaný balík `timekpr-next`, aby byl dostupný CLI nástroj `timekpra`. Není to Python balíček, takže jej nelze instalovat přes pip. Nainstaluj jej přes správce balíčků své distribuce.
 
 > PAM autentizace: ověření wheel uživatelů na serveru vyžaduje nainstalovaný modul `python3-pam` (na Fedoře: `sudo dnf install python3-pam`). Pip závislost `python-pam` je uvedená v `requirements`, ale bez systémové PAM knihovny nebude fungovat.
+
+Game Mover navíc omezuje neúspěšné požadavky na `/timekpr/auth` podle
+normalizovaného uživatelského jména i loopback zdroje. Po selhání následuje
+exponenciální prodleva 1, 2, 4, ... sekund s maximem 60 sekund; zablokovaný
+požadavek dostane HTTP `429` s hlavičkou `Retry-After` a zapíše se do žurnálu
+služby. Tento stav je pouze v paměti a restartem služby se smaže, takže doplňuje,
+ale nenahrazuje zásady PAM hostitele. Ponech zapnuté hostitelské zamykání účtů,
+například fedoří `pam_faillock`: pokusy, které dojdou až do PAM, se do něj
+započítají, zatímco požadavky odmítnuté aplikačním limitem do PAM nevstoupí.
 
 2) Spusť instalátor pouze pro první ruční bootstrap (vytvoří `/opt/game_mover`, systemd službu a desktop launcher). Skript je idempotentní, takže jej můžeš spustit znovu, ale běžná deploy cesta je už přes RPM:
 

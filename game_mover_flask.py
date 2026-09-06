@@ -19,6 +19,7 @@ import threading
 import ipaddress
 import socket
 import stat
+import math
 import psutil
 from concurrent.futures import ThreadPoolExecutor
 
@@ -607,6 +608,24 @@ TIMEKPRA_SET_ALLOWED_HOURS = "--setallowedhours"
 
 TOKEN_TTL_SECONDS = 15 * 60
 TIMEKPRA_TOKENS = {}  # token -> (username, expiry)
+PAM_AUTH_BACKOFF_BASE_SECONDS = 1
+PAM_AUTH_BACKOFF_MAX_SECONDS = 60
+PAM_AUTH_THROTTLE_RETENTION_SECONDS = 15 * 60
+PAM_AUTH_THROTTLE_MAX_USERS = 1024
+PAM_AUTH_THROTTLE_MAX_SOURCES = 128
+
+
+@dataclass
+class PamAuthThrottleEntry:
+    failures: int = 0
+    blocked_until: float = 0.0
+    updated_at: float = 0.0
+
+
+PAM_AUTH_USER_FAILURES: dict[str, PamAuthThrottleEntry] = {}
+PAM_AUTH_SOURCE_FAILURES: dict[str, PamAuthThrottleEntry] = {}
+PAM_AUTH_THROTTLE_LOCK = threading.Lock()
+PAM_AUTH_ATTEMPT_LOCK = threading.Lock()
 
 # ------------------------------------------------------------
 # Platform user common
@@ -1335,6 +1354,79 @@ def user_in_wheel(username: str) -> bool:
         return username in wheel.gr_mem
     except KeyError:
         return False
+
+
+def _pam_auth_throttle_prune(records, now):
+    stale_before = now - PAM_AUTH_THROTTLE_RETENTION_SECONDS
+    stale = [
+        key for key, entry in records.items()
+        if entry.updated_at < stale_before and entry.blocked_until <= now
+    ]
+    for key in stale:
+        records.pop(key, None)
+
+
+def _pam_auth_throttle_entry(records, key, limit, now):
+    entry = records.get(key)
+    if entry is not None:
+        return entry
+    if len(records) >= limit:
+        oldest = min(records, key=lambda item: records[item].updated_at)
+        records.pop(oldest, None)
+    entry = PamAuthThrottleEntry(updated_at=now)
+    records[key] = entry
+    return entry
+
+
+def pam_auth_retry_after(source: str, username: str, now=None) -> int:
+    """Return the remaining per-source or per-user authentication backoff."""
+    current = time.monotonic() if now is None else now
+    normalized_user = username.strip().casefold()
+    with PAM_AUTH_THROTTLE_LOCK:
+        _pam_auth_throttle_prune(PAM_AUTH_SOURCE_FAILURES, current)
+        _pam_auth_throttle_prune(PAM_AUTH_USER_FAILURES, current)
+        entries = (
+            PAM_AUTH_SOURCE_FAILURES.get(source),
+            PAM_AUTH_USER_FAILURES.get(normalized_user),
+        )
+        remaining = max(
+            (entry.blocked_until - current for entry in entries if entry),
+            default=0.0,
+        )
+    return max(0, math.ceil(remaining))
+
+
+def record_pam_auth_failure(source: str, username: str, now=None) -> int:
+    """Apply capped exponential backoff to both authentication dimensions."""
+    current = time.monotonic() if now is None else now
+    normalized_user = username.strip().casefold()
+    delays = []
+    with PAM_AUTH_THROTTLE_LOCK:
+        _pam_auth_throttle_prune(PAM_AUTH_SOURCE_FAILURES, current)
+        _pam_auth_throttle_prune(PAM_AUTH_USER_FAILURES, current)
+        dimensions = (
+            (PAM_AUTH_SOURCE_FAILURES, source, PAM_AUTH_THROTTLE_MAX_SOURCES),
+            (PAM_AUTH_USER_FAILURES, normalized_user, PAM_AUTH_THROTTLE_MAX_USERS),
+        )
+        for records, key, limit in dimensions:
+            entry = _pam_auth_throttle_entry(records, key, limit, current)
+            entry.failures += 1
+            delay = PAM_AUTH_BACKOFF_BASE_SECONDS
+            for _ in range(entry.failures - 1):
+                delay = min(PAM_AUTH_BACKOFF_MAX_SECONDS, delay * 2)
+                if delay == PAM_AUTH_BACKOFF_MAX_SECONDS:
+                    break
+            entry.blocked_until = current + delay
+            entry.updated_at = current
+            delays.append(delay)
+    return max(delays)
+
+
+def clear_pam_auth_failures(source: str, username: str) -> None:
+    normalized_user = username.strip().casefold()
+    with PAM_AUTH_THROTTLE_LOCK:
+        PAM_AUTH_SOURCE_FAILURES.pop(source, None)
+        PAM_AUTH_USER_FAILURES.pop(normalized_user, None)
 
 
 def issue_token(username: str) -> str:
@@ -3361,21 +3453,54 @@ def timekpr_disable_today():
 
 @app.route("/timekpr/auth", methods=["POST"])
 def timekpr_auth():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
     username = data.get("username", "")
     password = data.get("password", "")
-    if not username or not password:
+    if (
+        not isinstance(username, str)
+        or not isinstance(password, str)
+        or not username
+        or not password
+        or len(username) > 256
+    ):
         return jsonify({"message": "Missing credentials"}), 400
-    if not user_in_wheel(username):
-        return jsonify({"message": "Uživatel není ve wheel"}), 403
-    try:
-        import pam
-    except ImportError:
-        return jsonify({"message": "Chybí modul pam (python3-pam)"}), 500
+    source = request.remote_addr or "unknown"
+    # Serializing this low-volume endpoint prevents a parallel burst from
+    # passing the limiter before the first failed PAM result is recorded.
+    with PAM_AUTH_ATTEMPT_LOCK:
+        retry_after = pam_auth_retry_after(source, username)
+        if retry_after:
+            app.logger.warning(
+                "PAM authentication throttled for user=%r source=%s retry_after=%ss",
+                username, source, retry_after,
+            )
+            response = jsonify({"message": "Příliš mnoho pokusů; zkuste to později"})
+            response.headers["Retry-After"] = str(retry_after)
+            return response, 429
+        try:
+            import pam
+        except ImportError:
+            app.logger.error("PAM authentication module is unavailable")
+            return jsonify({"message": "Ověřovací služba není dostupná"}), 503
 
-    p = pam.pam()
-    if not p.authenticate(username, password):
-        return jsonify({"message": "Neplatné přihlášení"}), 401
+        try:
+            authenticated = bool(pam.pam().authenticate(username, password))
+        except Exception:
+            app.logger.exception(
+                "PAM authentication service failed for user=%r source=%s",
+                username, source,
+            )
+            return jsonify({"message": "Ověřovací služba není dostupná"}), 503
+        if not authenticated or not user_in_wheel(username):
+            delay = record_pam_auth_failure(source, username)
+            app.logger.warning(
+                "PAM authentication failed for user=%r source=%s backoff=%ss",
+                username, source, delay,
+            )
+            return jsonify({"message": "Neplatné přihlášení"}), 401
+        clear_pam_auth_failures(source, username)
     token = issue_token(username)
     caps = TIMEKPRA_CAPS
     return jsonify({
