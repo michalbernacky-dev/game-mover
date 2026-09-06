@@ -90,6 +90,26 @@ class PrivilegedBrokerTest(unittest.TestCase):
         setter.assert_called_once_with(str(steam))
         self.assertIn("oprávnění", result["message"].lower())
 
+    def test_setfacl_inherits_the_validated_directory_descriptor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            games = Path(temporary) / "games"
+            steam = games / "steam"
+            steam.mkdir(parents=True)
+            with (
+                patch.object(privileged, "GAMES_ROOT", str(games)),
+                patch.object(
+                    privileged.grp, "getgrnam", return_value=Mock(gr_gid=os.getgid()),
+                ),
+                patch.object(privileged.subprocess, "run") as setfacl,
+            ):
+                privileged._set_shared_permissions(str(steam))
+
+        self.assertEqual(setfacl.call_count, 2)
+        for invocation in setfacl.call_args_list:
+            descriptor = invocation.kwargs["pass_fds"]
+            self.assertEqual(len(descriptor), 1)
+            self.assertEqual(invocation.args[0][-1], f"/proc/self/fd/{descriptor[0]}")
+
     def test_beneath_rejects_parent_escape(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = os.path.join(temporary, "root")

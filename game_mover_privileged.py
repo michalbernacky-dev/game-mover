@@ -186,7 +186,13 @@ def _set_shared_permissions(path: str) -> None:
         os.fchown(directory_fd, -1, gid)
         os.fchmod(directory_fd, 0o775)
         descriptor = f"/proc/self/fd/{directory_fd}"
-        common = {"check": True, "capture_output": True, "text": True, "timeout": 120}
+        common = {
+            "check": True,
+            "capture_output": True,
+            "text": True,
+            "timeout": 120,
+            "pass_fds": (directory_fd,),
+        }
         subprocess.run(
             ["/usr/bin/setfacl", "-R", "-m", f"g:{gid}:rwX,m::rwX", descriptor],
             **common,

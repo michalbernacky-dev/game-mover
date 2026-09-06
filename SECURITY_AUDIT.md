@@ -462,7 +462,7 @@ findings:
 - Subprocess calls use argument arrays; no `shell=True` use was found.
 - Backup restoration, modpack archive extraction, RCON commands, and managed
   server deletion contain targeted validation and size or scope limits.
-- After the GM-SA-2026-003 remediation, 261 automated tests passed.
+- After the GM-SA-2026-003 remediation, 262 automated tests passed.
 
 ## Publication gate
 
