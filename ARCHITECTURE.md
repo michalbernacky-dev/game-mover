@@ -11,6 +11,34 @@ dedicated game servers, their persistent data, and Minecraft server instances.
 It is intended for a trusted home LAN and Tailscale network; it is not designed
 to expose its management API or game backends directly to the public Internet.
 
+## Privilege boundary
+
+The network-facing Flask API runs as the unprivileged `gameplatform` account
+with an empty capability set, a read-only host filesystem and read-only home
+directories. Its explicit writable paths are limited to the application state,
+rootless workload data, backups, proxies and shared game libraries. Rootless
+Podman uses the same account; platform-created Minecraft containers use
+`--userns=keep-id` and the account's real UID/GID so their persistent files do
+not require host root ownership repair.
+
+Host operations that cannot run unprivileged cross a local Unix socket to
+`game-mover-privileged.service`. The broker accepts one bounded JSON request,
+checks the peer UID with `SO_PEERCRED`, and dispatches only semantic actions for
+Steam moves/links, shared permissions, PAM, Timekpr, Pi-hole and allowlisted
+systemd services. It has no TCP/IP address family and cannot execute arbitrary
+client-supplied commands or paths. The API cannot control its own unit or the
+broker. Additional adopted systemd services must be entered manually in the
+root-owned `/etc/game_mover/allowed-services.json`; the API cannot modify that
+allowlist.
+
+Mutable registry, DNS, Gate and security-policy state lives under
+`/var/lib/game-mover`, owned by `gameplatform`. Authentication tokens and the
+CurseForge BYOK credential remain root-provisioned under `/etc/game_mover`.
+Automatic installation of upstream Heroic RPM files is disabled in the split
+service because those release RPMs are not independently signed for the host
+RPM trust store. Version discovery remains available, while installation is an
+explicit administrator action outside the network service.
+
 The platform has two complementary workload models:
 
 - Generic systemd services remain first-class workloads. This supports
@@ -139,12 +167,12 @@ and are joined in the GUI through stable aliases.
 The fixed **Launchers** tab is a provider-backed inventory of native desktop game
 launchers. Missing launchers remain visible but muted, installed versions are
 compared with their authoritative source, and available updates are highlighted.
-Providers keep discovery separate from mutation. The first mutable provider is
-Heroic: it accepts only the exact x86_64 RPM asset from the official Heroic
-GitHub release, validates its digest when published plus its RPM name, version,
-and architecture, refuses to replace a running launcher, and installs only after
-an explicit PAM-policy-controlled confirmation. Repository-managed launchers such
-as Lutris and Steam initially remain read-only inventory entries.
+Providers keep discovery separate from mutation. Heroic version discovery uses
+the exact x86_64 RPM asset metadata from the official GitHub release. Because
+the upstream RPM is not signed for the host RPM trust store, installation is a
+manual administrator operation and is never delegated to the privileged broker.
+Repository-managed launchers such as Lutris and Steam remain read-only inventory
+entries.
 
 The **Servers** tab is the daily overview. Every manageable workload has the
 appropriate lifecycle actions. Minecraft server cards additionally expose a

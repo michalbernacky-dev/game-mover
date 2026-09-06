@@ -1,0 +1,38 @@
+[Unit]
+Description=Game Mover privileged operation broker
+Before=game_mover.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -B /opt/game_mover/game_mover_privileged.py
+WorkingDirectory=/opt/game_mover
+User=root
+Group=gameplatform
+RuntimeDirectory=game-mover
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+# This process has no network listener and accepts only peer-checked,
+# schema-validated operations over its Unix socket.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETFCAP CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_SETUID
+
+[Install]
+WantedBy=multi-user.target

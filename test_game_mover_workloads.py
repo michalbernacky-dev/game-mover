@@ -223,6 +223,25 @@ class WorkloadBackendTest(unittest.TestCase):
         self.assertIn("0.0.0.0:25580:25580/tcp", arguments)
         self.assertEqual(arguments[-1], "example.invalid/game/service:1")
 
+    def test_keep_id_user_namespace_is_explicit_and_allowlisted(self):
+        runner = RecordingRunner()
+        backend = PodmanBackend(
+            "gameplatform", runner, "/run/user/955/podman/podman.sock",
+        )
+        workload = {
+            "backend": "podman", "runtime": {"container_name": "managed-service"},
+        }
+        backend.create_container(
+            workload, "example.invalid/game/service:1", userns="keep-id",
+        )
+        arguments = runner.calls[0][0][4:]
+        self.assertIn("--userns", arguments)
+        self.assertIn("keep-id", arguments)
+        with self.assertRaisesRegex(ValueError, "user namespace"):
+            backend.create_container(
+                workload, "example.invalid/game/service:1", userns="host",
+            )
+
     def test_podman_rejects_unknown_restart_policy(self):
         runner = RecordingRunner()
         backend = PodmanBackend(

@@ -27,6 +27,13 @@ must remain bound to loopback unless access is deliberately constrained by the
 documented authenticated network or SSH-tunnel configuration. Do not expose
 the management API directly to the public internet.
 
+The network-facing API runs without root privileges or Linux capabilities.
+Root-required host changes are isolated in a local Unix-socket broker that
+checks the API process UID and accepts only schema-validated semantic actions.
+Additional adopted systemd units must be explicitly listed by root in
+`/etc/game_mover/allowed-services.json`; never make that file writable by the
+API account.
+
 CurseForge support is optional and bring-your-own-key. Never include a
 CurseForge API key in a report, repository, RPM, container image, log, backup,
 or client configuration. If a key may have been exposed, revoke it through the

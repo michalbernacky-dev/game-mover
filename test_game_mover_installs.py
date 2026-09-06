@@ -77,6 +77,15 @@ class MinecraftInstallTest(unittest.TestCase):
             "FORGE_VERSION": "47.4.4",
         })
 
+    def test_container_environment_can_keep_host_owner_identity(self):
+        account = Mock(pw_uid=955, pw_gid=955)
+        with patch("game_mover_installs.pwd.getpwnam", return_value=account):
+            environment = container_environment(
+                normalize_install_request(self.config()), owner_user="gameplatform",
+            )
+        self.assertEqual(environment["UID"], "955")
+        self.assertEqual(environment["GID"], "955")
+
     def test_rejects_unapproved_image_and_bad_hostname(self):
         config = self.config()
         config["image"] = "docker.io/library/alpine:latest"

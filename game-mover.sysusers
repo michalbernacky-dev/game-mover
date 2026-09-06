@@ -1,0 +1,2 @@
+g gemers -
+u gameplatform - "Game Mover service account" /var/lib/game-platform /usr/sbin/nologin

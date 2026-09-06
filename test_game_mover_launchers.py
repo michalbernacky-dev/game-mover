@@ -153,6 +153,17 @@ class LauncherApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         update.assert_called_once_with("heroic")
 
+    def test_split_service_never_installs_unsigned_heroic_rpm(self):
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(backend, "require_local_operation", return_value=True),
+            patch.object(backend, "update_launcher") as update,
+        ):
+            response = self.client.post("/launchers/heroic/update", **self.local)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("sudo dnf install", response.get_json()["message"])
+        update.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

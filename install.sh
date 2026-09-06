@@ -8,16 +8,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/opt/game_mover"
 SERVICE_NAME="game_mover.service"
+PRIVILEGED_SERVICE_NAME="game-mover-privileged.service"
 LEGACY_SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
+PRIVILEGED_SERVICE_PATH="/etc/systemd/system/${PRIVILEGED_SERVICE_NAME}"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
 LOCAL_ADMIN_DIR="/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH="${LOCAL_ADMIN_DIR}/api.token"
 READ_TOKEN_PATH="${LOCAL_ADMIN_DIR}/read.token"
+CURSEFORGE_KEY_PATH="${LOCAL_ADMIN_DIR}/curseforge.key"
+ALLOWED_SERVICES_PATH="${LOCAL_ADMIN_DIR}/allowed-services.json"
 GROUP_NAME="gemers"
 PODMAN_USER="gameplatform"
 PODMAN_HOME="/var/lib/game-platform"
+STATE_DIR="/var/lib/game-mover"
 RESTART_SERVICE=1
 AUTOSTART=0
 
@@ -71,6 +76,16 @@ ensure_local_admin_token() {
   fi
   chown root:"${GROUP_NAME}" "${READ_TOKEN_PATH}"
   chmod 0640 "${READ_TOKEN_PATH}"
+  if [[ -f "${CURSEFORGE_KEY_PATH}" ]]; then
+    chown root:"${PODMAN_USER}" "${CURSEFORGE_KEY_PATH}"
+    chmod 0640 "${CURSEFORGE_KEY_PATH}"
+  fi
+  if [[ ! -f "${ALLOWED_SERVICES_PATH}" ]]; then
+    printf '%s\n' '["forge-srv.service", "satisfactory.service"]' \
+      > "${ALLOWED_SERVICES_PATH}"
+  fi
+  chown root:root "${ALLOWED_SERVICES_PATH}"
+  chmod 0644 "${ALLOWED_SERVICES_PATH}"
 }
 
 echo "[1/8] Kopíruji aplikaci do ${INSTALL_DIR}"
@@ -107,10 +122,20 @@ fi
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" \
   "${PODMAN_HOME}" "${PODMAN_HOME}/servers" "${PODMAN_HOME}/backups" \
   "${PODMAN_HOME}/proxies"
+install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" "${STATE_DIR}"
+for config in servers.json gate.json security.json dns.json dns-runtime.json dns-pihole-state.json; do
+  if [[ -f "${LOCAL_ADMIN_DIR}/${config}" && ! -e "${STATE_DIR}/${config}" ]]; then
+    mv "${LOCAL_ADMIN_DIR}/${config}" "${STATE_DIR}/${config}"
+  fi
+  if [[ -f "${STATE_DIR}/${config}" ]]; then
+    chown "${PODMAN_USER}:${PODMAN_USER}" "${STATE_DIR}/${config}"
+    chmod 0640 "${STATE_DIR}/${config}"
+  fi
+done
 PYTHONPATH="${INSTALL_DIR}" python3 -c \
   'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
-chown root:"${GROUP_NAME}" "${PODMAN_HOME}/game-mover-notes.sqlite3"
-chmod 0640 "${PODMAN_HOME}/game-mover-notes.sqlite3"
+chown "${PODMAN_USER}:${PODMAN_USER}" "${PODMAN_HOME}/game-mover-notes.sqlite3"
+chmod 0600 "${PODMAN_HOME}/game-mover-notes.sqlite3"
 loginctl enable-linger "${PODMAN_USER}"
 podman_uid="$(id -u "${PODMAN_USER}")"
 runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
@@ -118,34 +143,14 @@ runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
 ensure_local_admin_token
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp "${GROUP_NAME}" /var/Games /var/Games_links /var/Games/steam-cache
-chmod 2775 /var/Games /var/Games_links /var/Games/steam-cache
+chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache
+setfacl -m "g:${GROUP_NAME}:rwx,m::rwx,d:g:${GROUP_NAME}:rwx,d:m::rwx" \
+  /var/Games /var/Games_links /var/Games/steam-cache
 
 echo "[4/8] Instaluji systemd službu pro Flask API (${SERVICE_PATH})"
-service_tmp="$(mktemp)"
-cat >"${service_tmp}" <<'EOF'
-[Unit]
-Description=Flask Server for Game Mover
-After=network.target
-
-[Service]
-ExecStart=/usr/bin/env python3 -B /opt/game_mover/game_mover_flask.py
-WorkingDirectory=/opt/game_mover
-User=root
-Group=gemers
-Restart=always
-RestartSec=5
-Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
-Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
-Environment=GAME_PLATFORM_BACKUP_ROOT=/var/lib/game-platform/backups
-
-
-[Install]
-WantedBy=multi-user.target
-EOF
-copy_if_changed "${service_tmp}" "${SERVICE_PATH}" 644
-rm -f "${service_tmp}"
+copy_if_changed "${SCRIPT_DIR}/game_mover.service" "${SERVICE_PATH}" 644
+copy_if_changed "${SCRIPT_DIR}/game-mover-privileged.service" \
+  "${PRIVILEGED_SERVICE_PATH}" 644
 copy_if_changed "${SCRIPT_DIR}/game-mover-dns.service" \
   "/etc/systemd/system/game-mover-dns.service" 644
 

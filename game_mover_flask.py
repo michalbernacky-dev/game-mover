@@ -34,6 +34,7 @@ from game_mover_catalog import (
 from game_mover_jobs import OperationAlreadyRunning, OperationRegistry
 from game_mover_endpoints import normalize_endpoints
 from game_mover_satisfactory import discover_satisfactory_endpoints
+from game_mover_privileged import PrivilegedError, privileged_call
 from game_mover_dns import (
     DnsConfigError,
     default_dns_config,
@@ -107,8 +108,8 @@ from game_mover_installs import (
     restore_backup,
 )
 from game_mover_workloads import (
-    CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState, backend_for, bounded_log_output,
-    normalize_log_tail,
+    BackendResult, CONTAINER_NAME_RE, SYSTEMD_UNIT_RE, WorkloadState,
+    backend_for as make_backend, bounded_log_output, normalize_log_tail, run_command,
 )
 
 app = Flask(__name__)
@@ -124,17 +125,20 @@ PERMISSION_TARGETS = {
     "steam-library": os.path.join(GAMES_ROOT, "steam"),
 }
 LOCAL_ADMIN_TOKEN_DIR = "/etc/game_mover"
+STATE_DIRECTORY = os.path.realpath(
+    os.getenv("GAME_MOVER_STATE_DIRECTORY", "/var/lib/game-mover")
+)
 LOCAL_ADMIN_TOKEN_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "api.token")
 LOCAL_ADMIN_TOKEN_HEADER = "X-Game-Mover-Token"
 READ_TOKEN_PATH = os.getenv("GAME_MOVER_READ_TOKEN_PATH", "/etc/game_mover/read.token")
 READ_TOKEN_HEADER = "X-Game-Mover-Read-Token"
 MINECRAFT_MODS_DIR = os.getenv("GAME_MOVER_MINECRAFT_MODS_DIR", "/opt/forge_srv/mods")
-GAME_SERVERS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "servers.json")
-GATE_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "gate.json")
-SECURITY_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "security.json")
-DNS_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns.json")
-DNS_RUNTIME_CONFIG_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns-runtime.json")
-DNS_PIHOLE_STATE_PATH = os.path.join(LOCAL_ADMIN_TOKEN_DIR, "dns-pihole-state.json")
+GAME_SERVERS_CONFIG_PATH = os.path.join(STATE_DIRECTORY, "servers.json")
+GATE_CONFIG_PATH = os.path.join(STATE_DIRECTORY, "gate.json")
+SECURITY_CONFIG_PATH = os.path.join(STATE_DIRECTORY, "security.json")
+DNS_CONFIG_PATH = os.path.join(STATE_DIRECTORY, "dns.json")
+DNS_RUNTIME_CONFIG_PATH = os.path.join(STATE_DIRECTORY, "dns-runtime.json")
+DNS_PIHOLE_STATE_PATH = os.path.join(STATE_DIRECTORY, "dns-pihole-state.json")
 DNS_SERVICE_NAME = "game-mover-dns.service"
 PIHOLE_SERVICE_NAME = "pihole-FTL.service"
 GATE_DATA_DIRECTORY = os.path.realpath(
@@ -155,6 +159,9 @@ CURSEFORGE_API_KEY_PATH = os.getenv(
     "GAME_MOVER_CURSEFORGE_API_KEY_PATH",
     os.path.join(LOCAL_ADMIN_TOKEN_DIR, "curseforge.key"),
 )
+PRIVILEGED_HELPER_ENABLED = os.getenv(
+    "GAME_MOVER_PRIVILEGED_HELPER", "0",
+).strip() == "1"
 WORKLOAD_LOCKS = {}
 WORKLOAD_LOCKS_GUARD = threading.Lock()
 OPERATIONS = OperationRegistry()
@@ -177,6 +184,78 @@ DNS_CONFIG_LOCK = threading.Lock()
 CGNAT_IPV4_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 MINECRAFT_INSTALL_PORT_START = 25570
 MINECRAFT_INSTALL_PORT_END = 65535
+
+
+def _privileged_systemd(verb, unit, timeout=30):
+    result = privileged_call(
+        "systemd", {"verb": verb, "unit": unit, "timeout": timeout},
+        timeout=timeout + 5,
+    )
+    return (
+        int(result.get("returncode", 1)),
+        str(result.get("stdout", "")).strip(),
+        str(result.get("stderr", "")).strip(),
+    )
+
+
+def workload_command_runner(command, timeout=30):
+    """Route system services through the broker; keep rootless Podman local."""
+    if not PRIVILEGED_HELPER_ENABLED:
+        return run_command(command, timeout)
+    executable = os.path.basename(str(command[0])) if command else ""
+    try:
+        if executable == "podman":
+            return run_command(command, timeout)
+        if executable == "systemctl" and len(command) == 3:
+            rc, output, error = _privileged_systemd(command[1], command[2], timeout)
+            return BackendResult(rc, output, error)
+        if executable == "journalctl" and len(command) == 7:
+            unit = command[2]
+            tail = command[6]
+            result = privileged_call(
+                "systemd", {"verb": "logs", "unit": unit, "tail": tail, "timeout": timeout},
+                timeout=timeout + 5,
+            )
+            return BackendResult(
+                int(result.get("returncode", 1)),
+                str(result.get("stdout", "")).strip(),
+                str(result.get("stderr", "")).strip(),
+            )
+    except PrivilegedError as error:
+        return BackendResult(126, error=str(error))
+    return BackendResult(126, error="Příkaz není povolen privilegovaným brokerem")
+
+
+def backend_for(workload, *, podman_user, runner=None, podman_socket_path=None):
+    return make_backend(
+        workload,
+        podman_user=podman_user,
+        runner=runner or workload_command_runner,
+        podman_socket_path=podman_socket_path,
+    )
+
+
+def pihole_command_runner(command, **_kwargs):
+    if not PRIVILEGED_HELPER_ENABLED:
+        return subprocess.run(
+            command, capture_output=True, text=True, timeout=20, check=False,
+        )
+    try:
+        if len(command) not in (3, 4) or command[1:3] != ["--config", "dns.hosts"]:
+            raise PrivilegedError("Pi-hole příkaz není povolen")
+        parameters = {}
+        if len(command) == 4:
+            records = json.loads(command[3])
+            parameters["records"] = records
+        result = privileged_call("pihole", parameters, timeout=25)
+        return subprocess.CompletedProcess(
+            command,
+            int(result.get("returncode", 1)),
+            str(result.get("stdout", "")),
+            str(result.get("stderr", "")),
+        )
+    except (PrivilegedError, ValueError, TypeError, json.JSONDecodeError) as error:
+        return subprocess.CompletedProcess(command, 126, "", str(error))
 
 
 def workload_lock(workload_id):
@@ -268,16 +347,12 @@ def load_game_servers():
 
 
 def save_game_servers(servers):
-    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(GAME_SERVERS_CONFIG_PATH), mode=0o750, exist_ok=True)
     temporary_path = f"{GAME_SERVERS_CONFIG_PATH}.tmp"
     with open(temporary_path, "w") as config_file:
         json.dump(servers, config_file, indent=2)
         config_file.write("\n")
-    try:
-        os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
-        os.chmod(temporary_path, 0o640)
-    except (KeyError, OSError):
-        os.chmod(temporary_path, 0o600)
+    os.chmod(temporary_path, 0o640)
     os.replace(temporary_path, GAME_SERVERS_CONFIG_PATH)
 
 
@@ -295,17 +370,13 @@ def load_security_config(servers=None):
 
 
 def save_security_config(config):
-    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(SECURITY_CONFIG_PATH), mode=0o750, exist_ok=True)
     temporary_path = f"{SECURITY_CONFIG_PATH}.tmp"
     with SECURITY_CONFIG_LOCK:
         with open(temporary_path, "w", encoding="utf-8") as config_file:
             json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
             config_file.write("\n")
-        try:
-            os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
-            os.chmod(temporary_path, 0o640)
-        except (KeyError, OSError):
-            os.chmod(temporary_path, 0o600)
+        os.chmod(temporary_path, 0o640)
         os.replace(temporary_path, SECURITY_CONFIG_PATH)
     return config
 
@@ -334,21 +405,22 @@ def sync_dns_runtime_config(config=None, gate_config=None):
     runtime = write_runtime_config(DNS_RUNTIME_CONFIG_PATH, config, gate_config)
     pihole_enabled = config["provider"] == "pihole_local"
     if pihole_enabled or os.path.exists(DNS_PIHOLE_STATE_PATH):
-        sync_pihole_records(
-            runtime["records"], DNS_PIHOLE_STATE_PATH, enabled=pihole_enabled,
-        )
+        sync_options = {"enabled": pihole_enabled}
+        if PRIVILEGED_HELPER_ENABLED:
+            sync_options["runner"] = pihole_command_runner
+        sync_pihole_records(runtime["records"], DNS_PIHOLE_STATE_PATH, **sync_options)
     return runtime
 
 
 def save_dns_config(config):
     config = normalize_dns_config(config)
-    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(DNS_CONFIG_PATH), mode=0o750, exist_ok=True)
     temporary_path = f"{DNS_CONFIG_PATH}.tmp"
     with DNS_CONFIG_LOCK:
         with open(temporary_path, "w", encoding="utf-8") as config_file:
             json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
             config_file.write("\n")
-        os.chmod(temporary_path, 0o644)
+        os.chmod(temporary_path, 0o640)
         sync_dns_runtime_config(config=config)
         os.replace(temporary_path, DNS_CONFIG_PATH)
     return config
@@ -475,16 +547,12 @@ def wait_for_minecraft_install_ready(host, port, backend, workload, timeout=600)
 
 def save_gate_config(config):
     config = normalize_gate_config(config)
-    os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(GATE_CONFIG_PATH), mode=0o750, exist_ok=True)
     temporary_path = f"{GATE_CONFIG_PATH}.tmp"
     with open(temporary_path, "w", encoding="utf-8") as config_file:
         json.dump(config, config_file, ensure_ascii=False, indent=2, sort_keys=True)
         config_file.write("\n")
-    try:
-        os.chown(temporary_path, 0, grp.getgrnam(GROUP_NAME).gr_gid)
-        os.chmod(temporary_path, 0o640)
-    except (KeyError, OSError):
-        os.chmod(temporary_path, 0o600)
+    os.chmod(temporary_path, 0o640)
     os.replace(temporary_path, GATE_CONFIG_PATH)
     try:
         sync_dns_runtime_config(gate_config=config)
@@ -808,6 +876,10 @@ def set_group_perms(path):
 
 
 def ensure_local_admin_token():
+    if PRIVILEGED_HELPER_ENABLED:
+        if not os.path.isfile(LOCAL_ADMIN_TOKEN_PATH):
+            raise RuntimeError("Instalátor nevytvořil lokální administrační token")
+        return load_local_admin_token()
     os.makedirs(LOCAL_ADMIN_TOKEN_DIR, exist_ok=True)
     created = False
     if not os.path.exists(LOCAL_ADMIN_TOKEN_PATH):
@@ -842,6 +914,10 @@ ensure_local_admin_token()
 
 
 def ensure_read_token():
+    if PRIVILEGED_HELPER_ENABLED:
+        if not os.path.isfile(READ_TOKEN_PATH):
+            raise RuntimeError("Instalátor nevytvořil vzdálený read-only token")
+        return
     token_dir = os.path.dirname(READ_TOKEN_PATH)
     os.makedirs(token_dir, exist_ok=True)
     if not os.path.exists(READ_TOKEN_PATH):
@@ -909,6 +985,11 @@ def restrict_remote_api():
 # Systemctl helpers
 # ------------------------------------------------------------
 def systemctl_is_active(service_name: str):
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return _privileged_systemd("is-active", service_name, 15)
+        except PrivilegedError as error:
+            return 126, "unknown", str(error)
     try:
         proc = subprocess.run(
             ["systemctl", "is-active", service_name],
@@ -925,6 +1006,11 @@ def systemctl_is_active(service_name: str):
 
 
 def systemctl_action(action: str, service_name: str):
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return _privileged_systemd(action, service_name, 60)
+        except PrivilegedError as error:
+            return 126, "", str(error)
     try:
         proc = subprocess.run(
             ["systemctl", action, service_name],
@@ -944,6 +1030,11 @@ def systemctl_stop(service_name: str):
 
 
 def systemctl_enable_now(service_name: str):
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return _privileged_systemd("enable-now", service_name, 60)
+        except PrivilegedError as error:
+            return 126, "", str(error)
     try:
         proc = subprocess.run(
             ["systemctl", "enable", "--now", service_name],
@@ -959,6 +1050,11 @@ def systemctl_enable_now(service_name: str):
 
 
 def systemctl_disable_now(service_name: str):
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return _privileged_systemd("disable-now", service_name, 60)
+        except PrivilegedError as error:
+            return 126, "", str(error)
     try:
         proc = subprocess.run(
             ["systemctl", "disable", "--now", service_name],
@@ -1339,6 +1435,16 @@ TIMEKPRA_CAPS = detect_timekpr()
 
 def run_timekpra(args: list[str]):
     """Spustí timekpra s předanými argy, vrací (rc, stdout, stderr)."""
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            result = privileged_call("timekpr", {"args": args}, timeout=35)
+            return (
+                int(result.get("returncode", 1)),
+                str(result.get("stdout", "")).strip(),
+                str(result.get("stderr", "")).strip(),
+            )
+        except PrivilegedError as error:
+            return 126, "", str(error)
     try:
         command = TIMEKPRA_BIN_RESOLVED or [TIMEKPRA_BIN]
         proc = subprocess.run(command + args, text=True, capture_output=True, check=False)
@@ -1497,6 +1603,16 @@ def require_local_server_action(req, server, action):
 
 def limit_for_today(user: str) -> Optional[int]:
     """Vrátí limit pro dnešní den (v sekundách) z timekpr configu uživatele."""
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            result = privileged_call(
+                "timekpr-config",
+                {"user": user, "day": datetime.date.today().isoweekday()},
+            )
+            value = result.get("limit")
+            return int(value) if value is not None else None
+        except (PrivilegedError, TypeError, ValueError):
+            return None
     cfg_path = f"/var/lib/timekpr/config/timekpr.{user}.conf"
     if not os.path.exists(cfg_path):
         return None
@@ -1530,6 +1646,15 @@ def limit_for_today(user: str) -> Optional[int]:
 
 
 def allowed_hours_for_day(user: str, day_idx: int) -> Optional[str]:
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            result = privileged_call(
+                "timekpr-config", {"user": user, "day": day_idx},
+            )
+            value = result.get("hours")
+            return str(value) if value is not None else None
+        except PrivilegedError:
+            return None
     cfg_path = f"/var/lib/timekpr/config/timekpr.{user}.conf"
     if not os.path.exists(cfg_path):
         return None
@@ -1545,6 +1670,15 @@ def allowed_hours_for_day(user: str, day_idx: int) -> Optional[str]:
 
 def ensure_day_allowed(user: str, day_idx: int) -> None:
     """Přidá aktuální den do ALLOWED_WEEKDAYS, pokud tam chybí."""
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            privileged_call(
+                "timekpr-config",
+                {"operation": "ensure-day", "user": user, "day": day_idx},
+            )
+        except PrivilegedError:
+            pass
+        return
     cfg_path = f"/var/lib/timekpr/config/timekpr.{user}.conf"
     if not os.path.exists(cfg_path):
         return
@@ -1629,6 +1763,13 @@ def move_game():
         return jsonify({"message": "Missing parameters"}), 400
     if platform != "steam":
         return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return jsonify(privileged_call("move-game", {
+                "platform": platform, "game_name": game_name, "user": user,
+            }, timeout=180))
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
 
     try:
         safe_path_component(game_name, "game name")
@@ -1672,6 +1813,13 @@ def create_symlink():
         return jsonify({"message": "Missing parameters"}), 400
     if platform != "steam":
         return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return jsonify(privileged_call("create-symlink", {
+                "platform": platform, "game_name": game_name, "user": user,
+            }))
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
 
     try:
         safe_path_component(game_name, "game name")
@@ -1716,6 +1864,13 @@ def fix_perms():
     target_id = data.get("target")
     if not target_id or "path" in data:
         return jsonify({"message": "Invalid permission target"}), 400
+    if PRIVILEGED_HELPER_ENABLED:
+        if target_id != "steam-library":
+            return jsonify({"message": "Unknown permission target"}), 400
+        try:
+            return jsonify(privileged_call("fix-permissions", {} , timeout=180))
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
     try:
         path = permission_target_path(target_id)
         set_group_perms(path)
@@ -1730,6 +1885,13 @@ def steam_cache_status():
     user = request.args.get("user", "")
     if not user:
         return jsonify({"message": "Missing user"}), 400
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return jsonify(privileged_call(
+                "set-steam-cache", {"user": user}, timeout=180,
+            ))
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
 
     try:
         steamapps = steamapps_dir(user)
@@ -1951,8 +2113,16 @@ def health():
 
 @app.route("/launchers/status", methods=["GET"])
 def launchers_status():
+    launchers = launcher_statuses()
+    if PRIVILEGED_HELPER_ENABLED:
+        for launcher in launchers:
+            if launcher.get("id") == "heroic":
+                launcher["update_supported"] = False
+                launcher["update_disabled_reason"] = (
+                    "Nepodepsané upstream RPM vyžaduje ruční sudo dnf install"
+                )
     return jsonify({
-        "launchers": launcher_statuses(),
+        "launchers": launchers,
         "update_policy": operation_policy("launcher.update"),
         "updated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
     })
@@ -1985,6 +2155,13 @@ def system_resources():
 def launcher_update(launcher_id):
     if not require_local_operation(request, "launcher.update"):
         return jsonify({"message": "Unauthorized"}), 403
+    if PRIVILEGED_HELPER_ENABLED:
+        return jsonify({
+            "message": (
+                "Automatická root instalace nepodepsaného Heroic RPM je vypnutá; "
+                "použijte ruční sudo dnf install"
+            ),
+        }), 409
     try:
         return jsonify(update_launcher(launcher_id))
     except LauncherError as error:
@@ -2705,7 +2882,7 @@ def minecraft_install():
             create_result = proxy_backend.create_container(
                 workload,
                 config["image"],
-                environment=container_environment(config),
+                environment=container_environment(config, owner_user=PODMAN_USER),
                 mounts=[{"source": data_directory, "target": "/data"}],
                 ports=[{
                     "host": "0.0.0.0",
@@ -2720,6 +2897,7 @@ def minecraft_install():
                 },
                 restart_policy="unless-stopped",
                 networks=[gate_config["network"]],
+                userns="keep-id",
             )
             if create_result.returncode != 0:
                 raise InstallError(
@@ -3481,13 +3659,19 @@ def timekpr_auth():
             response.headers["Retry-After"] = str(retry_after)
             return response, 429
         try:
-            import pam
-        except ImportError:
-            app.logger.error("PAM authentication module is unavailable")
-            return jsonify({"message": "Ověřovací služba není dostupná"}), 503
-
-        try:
-            authenticated = bool(pam.pam().authenticate(username, password))
+            if PRIVILEGED_HELPER_ENABLED:
+                result = privileged_call(
+                    "pam-auth", {"username": username, "password": password},
+                    timeout=30,
+                )
+                authenticated = bool(result.get("authenticated"))
+            else:
+                try:
+                    import pam
+                except ImportError:
+                    app.logger.error("PAM authentication module is unavailable")
+                    return jsonify({"message": "Ověřovací služba není dostupná"}), 503
+                authenticated = bool(pam.pam().authenticate(username, password))
         except Exception:
             app.logger.exception(
                 "PAM authentication service failed for user=%r source=%s",

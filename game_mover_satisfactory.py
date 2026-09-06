@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+import os
 import subprocess
+
+from game_mover_privileged import PrivilegedError, privileged_call
 
 
 DEFAULT_GAME_PORT = 7777
@@ -43,18 +46,36 @@ def parse_satisfactory_exec_start(value):
     }
 
 
-def discover_satisfactory_endpoints(unit, timeout=3):
+def discover_satisfactory_endpoints(unit, timeout=3, *, runner=None):
     """Read the effective systemd command without interpreting it through a shell."""
     unit = str(unit or "").strip()
     if not _SYSTEMD_UNIT_RE.fullmatch(unit):
         raise ValueError("Neplatná systemd jednotka pro Satisfactory adaptér")
-    completed = subprocess.run(
-        ["systemctl", "show", "--property=ExecStart", "--value", "--no-pager", unit],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-    )
+    command = [
+        "systemctl", "show", "--property=ExecStart", "--value", "--no-pager", unit,
+    ]
+    if runner is None and os.getenv("GAME_MOVER_PRIVILEGED_HELPER", "0") == "1":
+        try:
+            result = privileged_call(
+                "systemd", {"verb": "show-execstart", "unit": unit, "timeout": timeout},
+                timeout=timeout + 5,
+            )
+            completed = subprocess.CompletedProcess(
+                command,
+                int(result.get("returncode", 1)),
+                str(result.get("stdout", "")),
+                str(result.get("stderr", "")),
+            )
+        except PrivilegedError as error:
+            raise RuntimeError(str(error)) from error
+    else:
+        completed = (runner or subprocess.run)(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
     if completed.returncode != 0:
         raise RuntimeError(
             completed.stderr.strip() or "Nelze načíst ExecStart Satisfactory služby"

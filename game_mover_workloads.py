@@ -269,6 +269,7 @@ class PodmanBackend:
         labels: dict | None = None,
         restart_policy: str = "no",
         networks: list[str] | None = None,
+        userns: str | None = None,
     ) -> BackendResult:
         """Create one validated adopted container without accepting raw CLI arguments."""
         container = self.reference(workload)
@@ -281,6 +282,10 @@ class PodmanBackend:
         arguments = [
             "create", "--name", container, "--restart", restart_policy,
         ]
+        if userns is not None:
+            if userns != "keep-id":
+                raise ValueError("Nepovolený režim user namespace")
+            arguments.extend(["--userns", "keep-id"])
         for network in networks or []:
             network = str(network).strip()
             if not NETWORK_NAME_RE.fullmatch(network):

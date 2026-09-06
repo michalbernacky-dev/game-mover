@@ -23,7 +23,7 @@ regression tests have been reviewed.
 |---|---|---|---|
 | GM-SA-2026-001 | Critical | Fixed | Arbitrary recursive permission changes by the root API |
 | GM-SA-2026-002 | High | Fixed | Path traversal in privileged Game Mover operations |
-| GM-SA-2026-003 | High | Mitigated | Excessive privileges and insufficient isolation of the API service |
+| GM-SA-2026-003 | High | Fixed | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
@@ -142,16 +142,16 @@ was subsequently verified by moving and successfully running a Steam game.
 ## GM-SA-2026-003: Excessive privileges and insufficient service isolation
 
 - Severity: **High**
-- Status: **Mitigated** (deployment verified)
+- Status: **Fixed** (deployment verified)
 - Relevant weakness class: CWE-250
 - Affected component: `game_mover.service`
 
 ### Description
 
-The complete Flask application runs as root and combines HTTP parsing, file
-operations, systemd control, Podman orchestration, package installation, DNS,
-Timekpr, backup processing, and external downloads. The service unit currently
-has no meaningful systemd sandboxing directives.
+Before remediation, the complete Flask application ran as root and combined
+HTTP parsing, file operations, systemd control, Podman orchestration, package
+installation, DNS, Timekpr, backup processing, and external downloads. The
+service unit had no meaningful systemd sandboxing directives.
 
 ### Impact
 
@@ -167,19 +167,44 @@ privileges and affect the entire host.
 4. Measure the resulting unit with `systemd-analyze security` on the target
    host and record accepted exceptions.
 
-### Mitigation applied
+### Resolution
 
-The first hardening stage was added on 2026-08-23. The service now uses a
-restrictive group-readable umask, `NoNewPrivileges`, a private temporary
-directory, native system-call architecture, an explicit address-family
-allowlist, SUID/SGID and realtime restrictions, and protection for the host
-clock, hostname, kernel logs, kernel modules, and control groups. Capabilities
-unrelated to the documented orchestration duties are removed from the bounding
-set.
+Resolved and deployed on 2026-09-06. The network-facing Flask process now runs
+as the dedicated `gameplatform` user with an empty capability set,
+`NoNewPrivileges`, `ProtectSystem=strict`, explicit writable state paths, a
+private temporary directory and devices, native system-call architecture, an
+address-family allowlist, SUID/SGID and realtime restrictions, and protection
+for the host clock, hostname, kernel logs, kernel modules, and control groups.
+Mutable application state was migrated from `/etc/game_mover` to the
+service-owned `/var/lib/game-mover`; credentials and the root-owned service
+allowlist remain under `/etc/game_mover`.
 
-`systemd-analyze verify` accepts the unit. Its offline exposure score improved
-from **9.4 UNSAFE** to **6.4 MEDIUM**. Regression tests pin the baseline so it
-cannot disappear silently.
+Privileged host mutations were moved into `game-mover-privileged.service`, a
+separate root broker with no network address families, private devices, a
+bounded capability set without `CAP_SYS_ADMIN`, and a root-owned Unix socket.
+The broker accepts peers only when `SO_PEERCRED` identifies the configured
+`gameplatform` UID. Its protocol exposes semantic, validated operations rather
+than arbitrary commands. Systemd targets must match built-in units or a small,
+root-owned, non-writable allowlist; the network API and broker units themselves
+cannot be targeted. PAM passwords are bounded and transmitted only over the
+local socket. Rootless Podman remains in the unprivileged service and managed
+containers use `keep-id` ownership. Steam filesystem operations run in a fixed
+internal worker after dropping to the selected player's UID with only the
+`gemers` supplementary group, so player-writable paths are never traversed as
+root. Automatic installation of Heroic's
+unsigned upstream RPM was removed from the privileged workflow and replaced by
+an explicit administrator-run DNF instruction.
+
+`systemd-analyze verify` accepts both units. On the deployed Fedora host,
+`systemd-analyze security` reports **3.7 OK** for `game_mover.service` and
+**4.9 OK** for the root broker. The broker's explicit ambient `CAP_SETUID` is
+an accepted exception: it is bounded together with `CAP_SETGID` and used to
+drop Steam filesystem workers to the selected player, never to raise the
+network service's privileges. The running process table confirmed UID 955
+(`gameplatform`) for Flask and UID 0 only for the broker. Runtime checks also
+confirmed socket mode `0660 root:gameplatform`, successful allowlisted service
+status, rejection of a UID 0 peer, rejection of `ssh.service`, migrated state
+ownership, and a healthy version 0.31.0 API response.
 
 Deployment testing initially exposed an incompatibility between
 `RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
@@ -195,12 +220,11 @@ and verified through both the local application path and the managed SSH tunnel
 to the host. Mover operations and the surrounding host/client functionality
 remained operational in both contexts.
 
-The finding remains mitigated rather than fixed because the API still runs as
-root. `ProtectHome` would prevent the Mover from maintaining per-user Steam
-links, while `ProtectSystem` would prevent the current in-process DNF, Pi-hole,
-Timekpr and host-configuration workflows. Closing this finding requires moving
-those mutations into small allowlisted helpers and then running the HTTP
-service as an unprivileged account with explicit writable paths.
+Regression coverage exercises protocol size limits, peer authorization,
+allowlists, traversal and symlink rejection, production routing of PAM and host
+operations, service sandbox directives, rootless container identity, and the
+disabled automatic Heroic update path. A clean RPM build and an upgrade from
+0.30.1 completed successfully with both services active.
 
 ## GM-SA-2026-004: Missing PAM authentication rate limiting
 
@@ -404,10 +428,11 @@ metadata uses the matching SPDX identifier, and both RPM and `install.sh`
 deployments include the license, notice, security policy, and branding policy.
 
 CurseForge remains an optional bring-your-own-key integration: operators must
-obtain their own approved key, which stays in a root-only host file and is not
-distributed with the source or packages. API and newly required CDN requests
-use that key only after validating the official CurseForge destination; an
-unapproved redirect is rejected before the key can be sent to it.
+obtain their own approved key, which stays in a root-provisioned host file
+readable only by the backend account and is not distributed with the source or
+packages. API and newly required CDN requests use that key only after validating
+the official CurseForge destination; an unapproved redirect is rejected before
+the key can be sent to it.
 
 Regression coverage verifies the license and reporting files, their inclusion
 in both deployment paths, mandatory host-side CDN authentication, authenticated
@@ -435,7 +460,7 @@ findings:
 - Subprocess calls use argument arrays; no `shell=True` use was found.
 - Backup restoration, modpack archive extraction, RCON commands, and managed
   server deletion contain targeted validation and size or scope limits.
-- At the time of the GM-SA-2026-008 remediation, 240 automated tests passed.
+- After the GM-SA-2026-003 remediation, 259 automated tests passed.
 
 ## Publication gate
 

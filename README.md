@@ -26,10 +26,10 @@ bars remain in Mover.
 
 The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
 shows whether their installed versions are current. Heroic releases are checked
-against the official GitHub project. A confirmed update downloads only the exact
-official x86_64 RPM, validates its identity (and GitHub digest when available),
-then installs it through DNF under the `launcher.update` security policy, which
-requires PAM by default. Heroic must be closed first.
+against the official GitHub project. The upstream RPM is not signed for the
+host RPM trust store, so the split-service backend reports the update but does
+not install it as root. Installation remains an explicit manual administrator
+action with `sudo dnf install`; Heroic should be closed first.
 
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
@@ -177,9 +177,9 @@ administration and changes to the security registry itself are
 shown in the same table style as fixed, disabled controls with the only policy
 **Requires PAM**; they cannot be weakened in the GUI or API.
 
-Policies are stored atomically in `/etc/game_mover/security.json`. On the first
+Policies are stored atomically in `/var/lib/game-mover/security.json`. On the first
 load, per-server values are migrated in memory from legacy `permissions` or
-`control_auth` fields in `/etc/game_mover/servers.json`; saving the Security tab
+`control_auth` fields in `/var/lib/game-mover/servers.json`; saving the Security tab
 creates the central file. The service registry no longer edits authorization.
 The same tab contains the otherwise hidden local-PAM and managed-tunnel controls.
 Local PAM authorizes protected Mover actions and creation of the SSH tunnel;
@@ -252,8 +252,9 @@ server. Game Mover does not download or install client modpacks or client mods.
 CurseForge support is optional and uses a bring-your-own-key model. Each host
 operator must obtain their own approved third-party API key; Game Mover does
 not distribute or share a project-wide key. Store it only on the host
-as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
-`game_mover.service`. The key is read only by the backend and is never returned
+as `/etc/game_mover/curseforge.key`, owned by `root:gameplatform` with mode
+`0640`, and restart `game_mover.service`. The key is read only by the
+unprivileged backend account and is never returned
 to the GUI, remote clients or logs. The path can be overridden with
 `GAME_MOVER_CURSEFORGE_API_KEY_PATH`. In accordance with the CurseForge third-
 party API terms, Game Mover does not persist or cache catalog responses and
@@ -295,8 +296,8 @@ as a restricted nameserver without requiring players to select an exit node.
 ### Rootless Podman workloads
 
 The Podman backend adopts existing containers and exposes status/start/stop/restart.
-Podman runs as the dedicated `gameplatform` account;
-the root Flask service reaches its private Unix socket. The socket is never
+Podman and the unprivileged Flask service run as the dedicated `gameplatform`
+account. The socket is never
 exposed to clients, and remote API access remains read-only.
 
 Host defaults:
@@ -309,7 +310,7 @@ data root: /var/lib/game-platform/servers
 backups:   /var/lib/game-platform/backups/<workload-id>
 ```
 
-Example entry in `/etc/game_mover/servers.json`:
+Example entry in `/var/lib/game-mover/servers.json`:
 
 ```json
 {
@@ -328,6 +329,11 @@ Example entry in `/etc/game_mover/servers.json`:
   "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods"
 }
 ```
+
+Systemd workloads are additionally constrained by the root-owned
+`/etc/game_mover/allowed-services.json`. Add a custom adopted `.service` unit
+there manually as root before registering it in the UI. The API cannot edit
+this file and always rejects its own unit and the privileged broker unit.
 
 Every workload type can register host-facing TCP/UDP endpoints. They are shown
 in server cards and management views and checked for host port conflicts when
@@ -476,7 +482,8 @@ cd ~/Projects/game-mover-rpm
 What installer does:
 - copies scripts + logo into `/opt/game_mover`
 - ensures the `gemers` group and shared directories `/var/Games` and `/var/Games_links` exist with group ownership and inheritable POSIX ACLs
-- installs and enables the `game_mover.service` systemd unit (Flask API on `127.0.0.1:5000`)
+- installs the unprivileged `game_mover.service` API on `127.0.0.1:5000` and its local, peer-checked `game-mover-privileged.service` broker
+- migrates mutable backend configuration to `/var/lib/game-mover`; `/etc/game_mover` retains only root-provisioned credentials and the root-owned systemd allowlist
 - installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
 - optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
 - exposes the CLI helper via `/usr/local/bin/game-mover` and also in `/opt/game_mover/game-mover`
@@ -488,11 +495,14 @@ To uninstall:
 
 ```bash
 sudo systemctl disable --now game_mover.service
+sudo systemctl disable --now game-mover-privileged.service
 sudo rm /etc/systemd/system/game_mover.service
+sudo rm /etc/systemd/system/game-mover-privileged.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
 sudo rm /usr/share/applications/game-mover.desktop
 sudo rm -rf /opt/game_mover
 sudo rm -rf /etc/game_mover
+sudo rm -rf /var/lib/game-mover
 sudo systemctl daemon-reload
 ```
 
@@ -687,17 +697,18 @@ serverové, Minecraft, Gate a DNS volby jsou schované. Po otevření spravovan�
 SSH tunelu lze samostatně přepnout na globální operace hostitele a zásady
 spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent` používá
 místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
-operaci odmítne přímo backend. Aktualizace Heroicu se vždy řídí místní zásadou
-`launcher.update`, nikdy oprávněním vzdáleného hostitele. Místní PAM tlačítka
+operaci odmítne přímo backend. Backend pouze hlásí novou verzi Heroicu;
+nepodepsané upstream RPM musí správce nainstalovat ručně přes `sudo dnf install`.
+Místní PAM tlačítka
 jsou modrozelená a hostitelská fialová; hranice je současně napsaná přímo v
 jejich popisku. V režimu SSH tunelu může PAM relace autorizovat i
 tichou operaci, takže `api.token` nikdy neopustí hostitele. Správa Timekpr a změny
 samotného zabezpečení jsou kvůli jednotnému vzhledu zobrazené ve stejné tabulce
 jako pevné neaktivní volby **Vyžaduje PAM**; přes GUI ani API je nelze oslabit.
 
-Zásady se atomicky ukládají do `/etc/game_mover/security.json`. Při prvním
+Zásady se atomicky ukládají do `/var/lib/game-mover/security.json`. Při prvním
 načtení se serverové hodnoty v paměti převezmou ze starších polí `permissions`
-nebo `control_auth` v `/etc/game_mover/servers.json`; prvním uložením záložky
+nebo `control_auth` v `/var/lib/game-mover/servers.json`; prvním uložením záložky
 Zabezpečení vznikne centrální soubor. Registr služeb už autorizaci neupravuje.
 Ve stejné záložce jsou jinak skryté ovládací prvky spravovaného tunelu. Jejich
 zobrazení vyžaduje PAM proti místní službě Game Mover na laptopu; otevření tunelu
@@ -776,8 +787,9 @@ modpacky nebo klientské mody.
 Integrace CurseForge je volitelná a používá model přines si vlastní klíč. Každý
 provozovatel hostitele musí získat vlastní schválený API klíč třetí strany;
 Game Mover žádný společný projektový klíč nedistribuuje ani nesdílí. Klíč patří
-pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim
-`0600`; poté je třeba restartovat `game_mover.service`. Backend jej nikdy
+pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník
+`root:gameplatform`, režim `0640`; poté je třeba restartovat
+`game_mover.service`. Klíč čte pouze neprivilegovaný účet backendu a ten jej nikdy
 nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
 `GAME_MOVER_CURSEFORGE_API_KEY_PATH`. V souladu s podmínkami CurseForge Game
 Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
@@ -814,8 +826,8 @@ kterýkoli provider použít jako Restricted nameserver bez exit nodu u hráčů
 ### Rootless Podman workloady
 
 Podman backend přebírá existující containery a zpřístupňuje status/start/stop/restart.
-Podman běží pod dedikovaným účtem `gameplatform`;
-root Flask služba používá jeho privátní Unix socket. Socket není dostupný
+Podman i neprivilegovaná Flask služba běží pod dedikovaným účtem
+`gameplatform`. Socket není dostupný
 klientům a vzdálené API zůstává read-only.
 
 Výchozí hostitelské uspořádání:
@@ -828,7 +840,7 @@ data root: /var/lib/game-platform/servers
 zálohy:    /var/lib/game-platform/backups/<id-workloadu>
 ```
 
-Příklad záznamu v `/etc/game_mover/servers.json`:
+Příklad záznamu v `/var/lib/game-mover/servers.json`:
 
 ```json
 {
@@ -847,6 +859,12 @@ Příklad záznamu v `/etc/game_mover/servers.json`:
   "mods_dir": "/var/lib/game-platform/servers/mc-test/data/mods"
 }
 ```
+
+Systemd workload musí být navíc v root-owned souboru
+`/etc/game_mover/allowed-services.json`. Vlastní adoptovanou `.service`
+jednotku tam správce přidá ručně jako root ještě před registrací v GUI. API
+tento allowlist neumí měnit a vždy odmítne vlastní jednotku i jednotku
+privilegovaného brokeru.
 
 Každý typ workloadu může registrovat hostitelské TCP/UDP endpointy. Zobrazují se
 na kartách a ve správě serveru a při uložení registru se kontrolují kolize portů:
@@ -990,7 +1008,8 @@ cd ~/Projects/game-mover-rpm
 Co instalátor dělá:
 - kopíruje skripty a logo do `/opt/game_mover`
 - zajistí skupinu `gemers` a sdílené adresáře `/var/Games` a `/var/Games_links` se skupinovým vlastnictvím a dědičnými POSIX ACL
-- nainstaluje a zapne systemd jednotku `game_mover.service` (Flask API na `127.0.0.1:5000`)
+- nainstaluje neprivilegované API `game_mover.service` na `127.0.0.1:5000` a jeho lokální peer-checked broker `game-mover-privileged.service`
+- přesune měnitelnou konfiguraci backendu do `/var/lib/game-mover`; v `/etc/game_mover` zůstanou jen přístupové údaje vytvořené rootem a root-owned allowlist systemd služeb
 - nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
 - volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`
 - zpřístupní CLI helper přes `/usr/local/bin/game-mover` a také v `/opt/game_mover/game-mover`
@@ -1002,11 +1021,14 @@ Odinstalace:
 
 ```bash
 sudo systemctl disable --now game_mover.service
+sudo systemctl disable --now game-mover-privileged.service
 sudo rm /etc/systemd/system/game_mover.service
+sudo rm /etc/systemd/system/game-mover-privileged.service
 sudo rm /etc/xdg/autostart/game-mover.desktop
 sudo rm /usr/share/applications/game-mover.desktop
 sudo rm -rf /opt/game_mover
 sudo rm -rf /etc/game_mover
+sudo rm -rf /var/lib/game-mover
 sudo systemctl daemon-reload
 ```
 

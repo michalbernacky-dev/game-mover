@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.30.1
+Version:        0.31.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -57,8 +57,13 @@ install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo
 
 install -Dpm0755 game-mover %{buildroot}%{_bindir}/game-mover
 install -Dpm0644 game_mover.service %{buildroot}%{_unitdir}/game_mover.service
+install -Dpm0644 game-mover-privileged.service \
+    %{buildroot}%{_unitdir}/game-mover-privileged.service
 install -Dpm0644 game-mover-dns.service %{buildroot}%{_unitdir}/game-mover-dns.service
+install -Dpm0644 game-mover.sysusers \
+    %{buildroot}%{_sysusersdir}/game-mover.conf
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
+install -d -m 0750 %{buildroot}%{_sharedstatedir}/game-mover
 
 %pre
 getent group gemers >/dev/null || groupadd -r gemers
@@ -66,7 +71,7 @@ getent passwd gameplatform >/dev/null || \
     useradd -r -m -d /var/lib/game-platform -s /usr/sbin/nologin gameplatform
 
 %post
-%systemd_post game_mover.service
+%systemd_post game-mover-privileged.service game_mover.service
 
 # Runtime bytecode is not packaged and can survive an RPM replacement. Remove
 # it after installing new sources; normal launchers use -B and do not recreate it.
@@ -87,6 +92,29 @@ fi
 chgrp gemers /etc/game_mover/read.token || :
 chmod 0640 /etc/game_mover/read.token || :
 
+if [ -f /etc/game_mover/curseforge.key ]; then
+    chown root:gameplatform /etc/game_mover/curseforge.key || :
+    chmod 0640 /etc/game_mover/curseforge.key || :
+fi
+
+if [ ! -f /etc/game_mover/allowed-services.json ]; then
+    printf '%s\n' '["forge-srv.service", "satisfactory.service"]' \
+        > /etc/game_mover/allowed-services.json
+fi
+chown root:root /etc/game_mover/allowed-services.json || :
+chmod 0644 /etc/game_mover/allowed-services.json || :
+
+install -d -m 0750 -o gameplatform -g gameplatform /var/lib/game-mover
+for config in servers.json gate.json security.json dns.json dns-runtime.json dns-pihole-state.json; do
+    if [ -f "/etc/game_mover/${config}" ] && [ ! -e "/var/lib/game-mover/${config}" ]; then
+        mv "/etc/game_mover/${config}" "/var/lib/game-mover/${config}"
+    fi
+    if [ -f "/var/lib/game-mover/${config}" ]; then
+        chown gameplatform:gameplatform "/var/lib/game-mover/${config}" || :
+        chmod 0640 "/var/lib/game-mover/${config}" || :
+    fi
+done
+
 mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
 chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
 chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache || :
@@ -100,21 +128,22 @@ install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform/proxies || :
 PYTHONPATH=/opt/game_mover python3 -c \
     'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
-chown root:gemers /var/lib/game-platform/game-mover-notes.sqlite3 || :
-chmod 0640 /var/lib/game-platform/game-mover-notes.sqlite3 || :
+chown gameplatform:gameplatform /var/lib/game-platform/game-mover-notes.sqlite3 || :
+chmod 0600 /var/lib/game-platform/game-mover-notes.sqlite3 || :
 loginctl enable-linger gameplatform >/dev/null 2>&1 || :
 gameplatform_uid="$(id -u gameplatform)"
 runuser -u gameplatform -- env XDG_RUNTIME_DIR="/run/user/${gameplatform_uid}" \
     systemctl --user enable --now podman.socket podman-restart.service >/dev/null 2>&1 || :
 
 %preun
-%systemd_preun game_mover.service game-mover-dns.service
+%systemd_preun game_mover.service game-mover-privileged.service game-mover-dns.service
 
 %postun
-%systemd_postun_with_restart game_mover.service game-mover-dns.service
+%systemd_postun_with_restart game_mover.service game-mover-privileged.service game-mover-dns.service
 if [ "$1" -eq 0 ]; then
     rm -f /etc/game_mover/api.token || :
     rm -f /etc/game_mover/read.token || :
+    rm -f /etc/game_mover/allowed-services.json || :
     rmdir /etc/game_mover 2>/dev/null || :
 fi
 
@@ -129,10 +158,18 @@ fi
 /opt/game_mover/game_mover_logo.jpg
 %{_bindir}/game-mover
 %{_unitdir}/game_mover.service
+%{_unitdir}/game-mover-privileged.service
 %{_unitdir}/game-mover-dns.service
+%{_sysusersdir}/game-mover.conf
 %{_datadir}/applications/game-mover.desktop
+%attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Sun Sep 06 2026 Game Mover Packager <packager@example.invalid> - 0.31.0-1
+- Run the network API without root and delegate bounded host operations to a local broker
+- Add a root-owned systemd service allowlist and keep managed Podman data host-owned
+- Move mutable backend state to /var/lib/game-mover
+
 * Sun Aug 23 2026 Game Mover Packager <packager@example.invalid> - 0.30.1-1
 - Shorten RAM and swap labels so their values remain readable in the global strip
 - Distinguish local and tunneled-host capacity with blue and purple context panels

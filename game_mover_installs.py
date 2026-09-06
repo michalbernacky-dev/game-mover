@@ -141,15 +141,16 @@ def normalize_install_request(raw: dict) -> dict:
     }
 
 
-def container_environment(config: dict) -> dict:
+def container_environment(config: dict, *, owner_user: str | None = None) -> dict:
     config = normalize_install_request(config)
+    owner = pwd.getpwnam(owner_user) if owner_user else None
     environment = {
         "EULA": "TRUE",
         "TYPE": config["loader"],
         "VERSION": config["version"],
         "MEMORY": f"{config['memory_mb']}M",
-        "UID": "1000",
-        "GID": "1000",
+        "UID": str(owner.pw_uid if owner else 1000),
+        "GID": str(owner.pw_gid if owner else 1000),
     }
     loader_key = LOADER_VERSION_ENV.get(config["loader"])
     if loader_key and config["loader_version"]:

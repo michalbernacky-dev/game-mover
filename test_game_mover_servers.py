@@ -155,6 +155,26 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(after_success.status_code, 401)
         self.assertEqual(pam_module.pam.return_value.authenticate.call_count, 4)
 
+    def test_production_pam_password_goes_only_to_local_broker(self):
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(
+                backend, "privileged_call", return_value={"authenticated": True},
+            ) as broker,
+            patch.object(backend, "user_in_wheel", return_value=True),
+        ):
+            response = self.client.post(
+                "/timekpr/auth",
+                json={"username": "alice", "password": "local-password"},
+                **self.local_options(),
+            )
+        self.assertEqual(response.status_code, 200)
+        broker.assert_called_once_with(
+            "pam-auth",
+            {"username": "alice", "password": "local-password"},
+            timeout=30,
+        )
+
     def test_pam_auth_backoff_and_tracking_are_bounded(self):
         now = 300.0
         for attempt in range(10):
@@ -345,6 +365,24 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(proxy.resolve(), shared)
         self.assertEqual(source.resolve(), shared)
 
+    def test_production_mover_routes_semantic_request_to_root_broker(self):
+        result = {"message": "Přesunuto"}
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(backend, "privileged_call", return_value=result) as broker,
+        ):
+            response = self.client.post(
+                "/move_game",
+                json={"platform": "steam", "game_name": "Safe Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200)
+        broker.assert_called_once_with(
+            "move-game",
+            {"platform": "steam", "game_name": "Safe Game", "user": "alice"},
+            timeout=180,
+        )
+
     def test_create_symlink_uses_only_validated_roots(self):
         home = Path(self.temp_dir.name) / "home"
         common = home / ".local/share/Steam/steamapps/common"
@@ -435,6 +473,24 @@ class ServerRegistryTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 200)
         stop.assert_called_once_with("dnsmasq")
+
+    def test_production_systemd_runner_uses_only_broker(self):
+        broker_result = {"returncode": 0, "stdout": "active", "stderr": ""}
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(backend, "privileged_call", return_value=broker_result) as broker,
+            patch.object(backend, "run_command") as local,
+        ):
+            result = backend.workload_command_runner(
+                ["systemctl", "is-active", "forge-srv.service"], 15,
+            )
+        self.assertEqual(result.returncode, 0)
+        broker.assert_called_once_with(
+            "systemd",
+            {"verb": "is-active", "unit": "forge-srv.service", "timeout": 15},
+            timeout=20,
+        )
+        local.assert_not_called()
 
     def test_local_policy_catalog_is_local_only(self):
         response = self.client.get(
