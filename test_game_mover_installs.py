@@ -130,10 +130,14 @@ class MinecraftInstallTest(unittest.TestCase):
         with patch("game_mover_installs._chown_tree"):
             install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="redirect-pack",
-                owner_user="gameplatform", requester=requester,
+                owner_user="gameplatform", api_key="api-secret", requester=requester,
             )
 
         self.assertEqual(requester.call_count, 2)
+        self.assertTrue(all(
+            item.kwargs["headers"]["x-api-key"] == "api-secret"
+            for item in requester.call_args_list
+        ))
         self.assertTrue(redirect.close.called)
 
     def test_rejects_curseforge_redirect_to_unapproved_host(self):
@@ -146,12 +150,34 @@ class MinecraftInstallTest(unittest.TestCase):
         redirect = self.curseforge_response(
             b"", status=302, headers={"Location": "https://example.invalid/server.zip"},
         )
+        requester = Mock(return_value=redirect)
         with self.assertRaisesRegex(InstallError, "nepovolenou adresu"):
             install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="unsafe-redirect",
-                owner_user="gameplatform", requester=Mock(return_value=redirect),
+                owner_user="gameplatform", api_key="api-secret",
+                requester=requester,
             )
+        requester.assert_called_once()
+        self.assertEqual(requester.call_args.args[0], descriptor["download_url"])
+        self.assertEqual(requester.call_args.kwargs["headers"]["x-api-key"], "api-secret")
         self.assertTrue(redirect.close.called)
+
+    def test_download_requires_host_api_key_before_network_access(self):
+        descriptor = {
+            "project_id": 123, "file_id": 790,
+            "download_url": "https://edge.forgecdn.net/files/1/server.zip",
+            "file_length": 3,
+            "hashes": [{"algorithm": 1, "value": hashlib.sha1(b"zip").hexdigest()}],
+        }
+        requester = Mock()
+
+        with self.assertRaisesRegex(InstallError, "klíč není nakonfigurovaný"):
+            install_curseforge_server_pack(
+                descriptor, data_root=str(self.data_root), target_id="missing-key",
+                owner_user="gameplatform", api_key="", requester=requester,
+            )
+
+        requester.assert_not_called()
 
     def test_installs_verified_curseforge_server_pack_atomically(self):
         stream = io.BytesIO()
@@ -170,7 +196,7 @@ class MinecraftInstallTest(unittest.TestCase):
         with patch("game_mover_installs._chown_tree"):
             result = install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="family-pack",
-                owner_user="gameplatform", requester=requester,
+                owner_user="gameplatform", api_key="api-secret", requester=requester,
             )
 
         data = Path(result["data_directory"])
@@ -192,7 +218,7 @@ class MinecraftInstallTest(unittest.TestCase):
         with self.assertRaisesRegex(InstallError, "mimo datový"):
             install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="unsafe-pack",
-                owner_user="gameplatform",
+                owner_user="gameplatform", api_key="api-secret",
                 requester=Mock(return_value=self.curseforge_response(payload)),
             )
         self.assertFalse((self.data_root / "unsafe-pack").exists())
@@ -214,7 +240,7 @@ class MinecraftInstallTest(unittest.TestCase):
         with self.assertRaisesRegex(InstallError, "resolver není dostupný"):
             install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="recipe-pack",
-                owner_user="gameplatform",
+                owner_user="gameplatform", api_key="api-secret",
                 requester=Mock(return_value=self.curseforge_response(payload)),
             )
         self.assertFalse((self.data_root / "recipe-pack").exists())
@@ -254,7 +280,7 @@ class MinecraftInstallTest(unittest.TestCase):
         with patch("game_mover_installs._chown_tree"):
             result = install_curseforge_server_pack(
                 descriptor, data_root=str(self.data_root), target_id="recipe-pack",
-                owner_user="gameplatform", requester=requester,
+                owner_user="gameplatform", api_key="api-secret", requester=requester,
                 recipe_resolver=resolver, recipe_progress=progress,
             )
 
@@ -292,6 +318,7 @@ class MinecraftInstallTest(unittest.TestCase):
                     install_curseforge_server_pack(
                         descriptor, data_root=str(self.data_root),
                         target_id="unsafe-recipe", owner_user="gameplatform",
+                        api_key="api-secret",
                         requester=Mock(return_value=self.curseforge_response(payload)),
                         recipe_resolver=resolver,
                     )

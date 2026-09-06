@@ -80,9 +80,15 @@ rsync -a --delete \
   --include='/game-mover' \
   --include='/requirements.txt' \
   --include='/game_mover_logo.jpg' \
+  --include='/LICENSE' \
+  --include='/NOTICE' \
+  --include='/SECURITY.md' \
+  --include='/TRADEMARKS.md' \
   --exclude='*' \
   "${SCRIPT_DIR}/" "${INSTALL_DIR}/"
 chmod 0644 "${INSTALL_DIR}"/game_mover_*.py
+chmod 0644 "${INSTALL_DIR}/LICENSE" "${INSTALL_DIR}/NOTICE" \
+  "${INSTALL_DIR}/SECURITY.md" "${INSTALL_DIR}/TRADEMARKS.md"
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
 find "${INSTALL_DIR}" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 

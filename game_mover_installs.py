@@ -264,7 +264,7 @@ def _expected_curseforge_hash(hashes: list[dict]) -> tuple[str, str] | None:
 
 
 def _download_curseforge_archive(
-    descriptor: dict, target: Path, requester=None, *, label="server pack",
+    descriptor: dict, target: Path, api_key: str, requester=None, *, label="server pack",
 ) -> dict:
     expected_size = int(descriptor.get("file_length") or 0)
     if not 1 <= expected_size <= CURSEFORGE_DOWNLOAD_MAX_BYTES:
@@ -275,6 +275,9 @@ def _download_curseforge_archive(
     hash_name, expected_digest = expected_hash
     digest = hashlib.new(hash_name)
     url = _validated_curseforge_url(descriptor.get("download_url", ""))
+    api_key = str(api_key or "").strip()
+    if not api_key or len(api_key) > 4096 or any(ord(character) < 0x20 for character in api_key):
+        raise InstallError("CurseForge API klíč není nakonfigurovaný")
     if requester is None:
         session = requests.Session()
         session.trust_env = False
@@ -285,7 +288,7 @@ def _download_curseforge_archive(
         try:
             response = requester(
                 url, stream=True, allow_redirects=False, timeout=(5, 120),
-                headers={"Accept": "application/zip"},
+                headers={"Accept": "application/zip", "x-api-key": api_key},
             )
         except requests.RequestException as error:
             raise InstallError(f"CurseForge {label} nelze stáhnout") from error
@@ -419,7 +422,7 @@ def _server_recipe_entries(root: Path) -> dict | None:
 
 
 def _install_server_recipe(
-    root: Path, entries: list[dict], resolver, requester=None, progress=None,
+    root: Path, entries: list[dict], resolver, api_key: str, requester=None, progress=None,
 ) -> dict:
     if resolver is None:
         raise InstallError(
@@ -445,7 +448,7 @@ def _install_server_recipe(
             raise InstallError("Setup recept se pokouší přepsat existující serverový mod")
         destination.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         _download_curseforge_archive(
-            descriptor, destination, requester=requester, label="mod receptu",
+            descriptor, destination, api_key, requester=requester, label="mod receptu",
         )
         destination.chmod(0o640)
         downloaded += int(descriptor.get("file_length") or 0)
@@ -492,8 +495,8 @@ def _safe_zip_members(archive: zipfile.ZipFile) -> tuple[list[zipfile.ZipInfo], 
 
 
 def install_curseforge_server_pack(
-    descriptor: dict, *, data_root: str, target_id: str, owner_user: str, requester=None,
-    recipe_resolver=None, recipe_progress=None,
+    descriptor: dict, *, data_root: str, target_id: str, owner_user: str, api_key: str,
+    requester=None, recipe_resolver=None, recipe_progress=None,
 ) -> dict:
     """Download, verify and atomically publish one CurseForge server-pack ZIP."""
     if not INSTALL_ID_RE.fullmatch(target_id):
@@ -508,7 +511,9 @@ def install_curseforge_server_pack(
     archive_path = staging / "server-pack.zip"
     published = False
     try:
-        verification = _download_curseforge_archive(descriptor, archive_path, requester=requester)
+        verification = _download_curseforge_archive(
+            descriptor, archive_path, api_key, requester=requester,
+        )
         extracted = staging / "extracted"
         extracted.mkdir(mode=0o750)
         try:
@@ -538,7 +543,7 @@ def install_curseforge_server_pack(
         recipe = _server_recipe_entries(extracted)
         if recipe is not None:
             recipe_result = _install_server_recipe(
-                extracted, recipe["entries"], recipe_resolver,
+                extracted, recipe["entries"], recipe_resolver, api_key,
                 requester=requester, progress=recipe_progress,
             )
             if recipe["loader_version"]:

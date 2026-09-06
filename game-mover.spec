@@ -3,7 +3,7 @@ Version:        0.30.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
-License:        Proprietary
+License:        PolyForm-Noncommercial-1.0.0
 Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
@@ -119,7 +119,9 @@ if [ "$1" -eq 0 ]; then
 fi
 
 %files
+%license LICENSE NOTICE
 %doc README.md ARCHITECTURE.md
+%doc SECURITY.md TRADEMARKS.md
 %dir /opt/game_mover
 /opt/game_mover/game_mover*.py
 /opt/game_mover/game-mover

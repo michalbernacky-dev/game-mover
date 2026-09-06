@@ -1788,6 +1788,7 @@ class ServerRegistryTest(unittest.TestCase):
         fake_backend.create_container.return_value = BackendResult(0, "family-pack")
         fake_backend.start.return_value = BackendResult(0)
         provider = Mock()
+        provider.api_key = "api-secret"
         descriptor = {
             "project_id": 123, "file_id": 790,
             "download_url": "https://edge.forgecdn.net/files/1/server.zip",
@@ -1823,7 +1824,7 @@ class ServerRegistryTest(unittest.TestCase):
         provider.resolve_server_pack.assert_called_once_with(123, 789)
         install_pack.assert_called_once_with(
             descriptor, data_root=str(data_root), target_id="family-pack",
-            owner_user=backend.PODMAN_USER,
+            owner_user=backend.PODMAN_USER, api_key="api-secret",
             recipe_resolver=provider.resolve_recipe_files,
             recipe_progress=install_pack.call_args.kwargs["recipe_progress"],
         )

@@ -9,6 +9,10 @@ DEPENDABOT_PATH = ROOT / ".github" / "dependabot.yml"
 RUFF_CONFIG_PATH = ROOT / "ruff.toml"
 INSTALLER_PATH = ROOT / "install.sh"
 RPM_SPEC_PATH = ROOT / "game-mover.spec"
+LICENSE_PATH = ROOT / "LICENSE"
+NOTICE_PATH = ROOT / "NOTICE"
+SECURITY_PATH = ROOT / "SECURITY.md"
+TRADEMARKS_PATH = ROOT / "TRADEMARKS.md"
 
 
 class CiSecurityTest(unittest.TestCase):
@@ -62,6 +66,33 @@ class CiSecurityTest(unittest.TestCase):
             re.search(rf"(?m)^install .*\b{re.escape(module)}\b", specification)
             for module in modules
         ))
+
+    def test_publication_policy_is_complete_and_packaged(self):
+        license_text = LICENSE_PATH.read_text(encoding="utf-8")
+        self.assertIn("# PolyForm Noncommercial License 1.0.0", license_text)
+        self.assertIn("## Noncommercial Purposes", license_text)
+        self.assertIn("## Changes and New Works License", license_text)
+        self.assertRegex(
+            NOTICE_PATH.read_text(encoding="utf-8"),
+            r"^Required Notice: Copyright 2026 \S+\n$",
+        )
+
+        security = SECURITY_PATH.read_text(encoding="utf-8")
+        self.assertIn("security/advisories/new", security)
+        self.assertIn("current release", security)
+        self.assertIn("bring-your-own-key", security)
+        self.assertIn("unofficial fork", TRADEMARKS_PATH.read_text(encoding="utf-8"))
+
+        specification = RPM_SPEC_PATH.read_text(encoding="utf-8")
+        self.assertIn("License:        PolyForm-Noncommercial-1.0.0", specification)
+        self.assertIn("%license LICENSE NOTICE", specification)
+
+        installer = INSTALLER_PATH.read_text(encoding="utf-8")
+        for filename in ("LICENSE", "NOTICE", "SECURITY.md", "TRADEMARKS.md"):
+            self.assertIn(f"--include='/{filename}'", installer)
+
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("*.key", gitignore.splitlines())
 
 
 if __name__ == "__main__":

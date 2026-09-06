@@ -1,4 +1,8 @@
 *.bck
+*.key
+.env
+.env.*
+!.env.example
 .venv/
 __pycache__/
-*.pyc   
+*.pyc

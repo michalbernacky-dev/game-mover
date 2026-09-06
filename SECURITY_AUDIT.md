@@ -28,7 +28,7 @@ regression tests have been reviewed.
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
-| GM-SA-2026-008 | Informational | Open | Public security and licensing policy is incomplete |
+| GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 
@@ -377,7 +377,7 @@ passed.
 ## GM-SA-2026-008: Public security and licensing policy is incomplete
 
 - Severity: **Informational**
-- Status: **Open**
+- Status: **Mitigated**
 
 ### Description
 
@@ -394,6 +394,33 @@ source-visible but would not grant an open-source license.
 3. Enable repository secret scanning, push protection, dependency alerts, and
    branch protection before changing visibility.
 
+### Mitigation
+
+Mitigated locally on 2026-09-06. The repository now carries the unmodified
+PolyForm Noncommercial License 1.0.0, its required copyright notice, a private
+vulnerability-reporting policy with supported-version guidance, and separate
+branding rules that distinguish official builds from modified forks. The RPM
+metadata uses the matching SPDX identifier, and both RPM and `install.sh`
+deployments include the license, notice, security policy, and branding policy.
+
+CurseForge remains an optional bring-your-own-key integration: operators must
+obtain their own approved key, which stays in a root-only host file and is not
+distributed with the source or packages. API and newly required CDN requests
+use that key only after validating the official CurseForge destination; an
+unapproved redirect is rejected before the key can be sent to it.
+
+Regression coverage verifies the license and reporting files, their inclusion
+in both deployment paths, mandatory host-side CDN authentication, authenticated
+allowlisted redirects, and rejection of downloads without a key. On 2026-09-06,
+the repository owner enabled Dependabot vulnerability alerts and automated
+security updates through the authenticated GitHub API. GitHub rejected secret
+scanning and push protection as unavailable for this private repository, and
+reported that branch protection and rulesets require GitHub Pro or a public
+repository. Private vulnerability reporting must be enabled when the repository
+is made public. The finding remains `Mitigated` until the publication-time
+controls are enabled or their absence is explicitly accepted with a written
+rationale.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open
@@ -408,8 +435,7 @@ findings:
 - Subprocess calls use argument arrays; no `shell=True` use was found.
 - Backup restoration, modpack archive extraction, RCON commands, and managed
   server deletion contain targeted validation and size or scope limits.
-- At the time of review, 218 automated tests passed and the working tree was
-  clean.
+- At the time of the GM-SA-2026-008 remediation, 240 automated tests passed.
 
 ## Publication gate
 

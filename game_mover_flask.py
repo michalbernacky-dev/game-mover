@@ -2649,6 +2649,7 @@ def minecraft_install():
                     data_root=PODMAN_DATA_ROOT,
                     target_id=config["id"],
                     owner_user=PODMAN_USER,
+                    api_key=catalog_provider.api_key,
                     recipe_resolver=catalog_provider.resolve_recipe_files,
                     recipe_progress=recipe_progress,
                 )

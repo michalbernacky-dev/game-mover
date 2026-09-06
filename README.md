@@ -55,6 +55,15 @@ to receive a new entry without manually inventing an ID.
 
 Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
 
+## License and official builds
+
+Game Mover is source-available under the
+[PolyForm Noncommercial License 1.0.0](LICENSE). Noncommercial use,
+modification, and redistribution are allowed; commercial use is not. Modified
+distributions must follow the [name and branding policy](TRADEMARKS.md) and may
+not present themselves as official Game Mover builds. Report vulnerabilities
+privately according to [SECURITY.md](SECURITY.md).
+
 ## Security model
 
 This project is intended for a trusted local environment:
@@ -240,7 +249,9 @@ summary and compatible file metadata. A host administrator can select a release
 with a server pack and use it as the initial data of a new managed Minecraft
 server. Game Mover does not download or install client modpacks or client mods.
 
-CurseForge requires an approved third-party API key. Store it only on the host
+CurseForge support is optional and uses a bring-your-own-key model. Each host
+operator must obtain their own approved third-party API key; Game Mover does
+not distribute or share a project-wide key. Store it only on the host
 as `/etc/game_mover/curseforge.key`, owned by root with mode `0600`, and restart
 `game_mover.service`. The key is read only by the backend and is never returned
 to the GUI, remote clients or logs. The path can be overridden with
@@ -248,7 +259,8 @@ to the GUI, remote clients or logs. The path can be overridden with
 party API terms, Game Mover does not persist or cache catalog responses and
 marks its catalog API responses `Cache-Control: no-store`. Download URLs remain
 inside the host backend. Installation revalidates the project distribution
-permission and server-pack relationship, streams the official ZIP with strict
+permission and server-pack relationship, authenticates official CDN downloads
+with the same host-only key, streams the ZIP with strict
 size and hash verification, rejects unsafe archive entries and publishes data
 atomically. Declarative server packs containing a `mods.csv` download recipe
 are also supported: every referenced mod is resolved again through the official
@@ -541,6 +553,15 @@ starší data zúžení rozsahu nikdy automaticky nemaže.
 
 Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
 
+## Licence a oficiální sestavení
+
+Game Mover je source-available pod licencí
+[PolyForm Noncommercial 1.0.0](LICENSE). Nekomerční používání, úpravy a šíření
+jsou povoleny; komerční využití povoleno není. Upravené distribuce musí
+dodržovat [pravidla názvu a značky](TRADEMARKS.md) a nesmějí se vydávat za
+oficiální sestavení Game Moveru. Zranitelnosti hlaste neveřejně podle
+[SECURITY.md](SECURITY.md).
+
 Pod všemi záložkami zůstává viditelný kompaktní ukazatel RAM a SWAP. Bez
 spravovaného SSH tunelu popisuje místní počítač, s aktivním tunelem načítá přes
 něj prostředky hostitele herních serverů. Obnovuje se každých deset sekund a je
@@ -752,7 +773,9 @@ může vybrat vydání se server packem a použít jej jako počáteční data n
 spravovaného Minecraft serveru. Game Mover nestahuje ani neinstaluje klientské
 modpacky nebo klientské mody.
 
-CurseForge vyžaduje schválený API klíč pro aplikaci třetí strany. Klíč patří
+Integrace CurseForge je volitelná a používá model přines si vlastní klíč. Každý
+provozovatel hostitele musí získat vlastní schválený API klíč třetí strany;
+Game Mover žádný společný projektový klíč nedistribuuje ani nesdílí. Klíč patří
 pouze na hostitele do `/etc/game_mover/curseforge.key`, vlastník `root`, režim
 `0600`; poté je třeba restartovat `game_mover.service`. Backend jej nikdy
 nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
@@ -760,7 +783,8 @@ nevrací GUI, vzdálenému klientovi ani do logů. Cestu lze změnit proměnnou
 Mover odpovědi katalogu neukládá ani necachuje a své API odpovědi označuje
 `Cache-Control: no-store`. Download URL zůstává pouze uvnitř backendu hostitele.
 Instalace znovu ověří svolení autora k distribuci i vazbu na server pack,
-zkontroluje velikost a hash ZIPu, odmítne nebezpečné položky archivu a data
+stejným hostitelským klíčem autentizuje stažení z oficiálního CDN, zkontroluje
+velikost a hash ZIPu, odmítne nebezpečné položky archivu a data
 publikuje atomicky. Podporované jsou také deklarativní server packy s receptem
 `mods.csv`: každý odkazovaný mod se znovu dohledá přes oficiální API a ověří se
 svolení projektu k distribuci, původ, velikost i hash; stahují se pouze JAR
