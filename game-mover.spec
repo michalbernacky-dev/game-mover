@@ -44,34 +44,14 @@ Game Mover provides:
 %install
 mkdir -p %{buildroot}/opt/game_mover
 
-install -Dpm0755 game_mover_flask.py %{buildroot}/opt/game_mover/game_mover_flask.py
-install -Dpm0755 game_mover.py %{buildroot}/opt/game_mover/game_mover.py
-install -Dpm0644 game_mover_mods.py %{buildroot}/opt/game_mover/game_mover_mods.py
-install -Dpm0644 game_mover_catalog.py %{buildroot}/opt/game_mover/game_mover_catalog.py
-install -Dpm0755 game_mover_dns.py %{buildroot}/opt/game_mover/game_mover_dns.py
-install -Dpm0644 game_mover_pihole.py %{buildroot}/opt/game_mover/game_mover_pihole.py
-install -Dpm0644 game_mover_minecraft.py %{buildroot}/opt/game_mover/game_mover_minecraft.py
-install -Dpm0644 game_mover_gate.py %{buildroot}/opt/game_mover/game_mover_gate.py
-install -Dpm0644 game_mover_backups.py %{buildroot}/opt/game_mover/game_mover_backups.py
-install -Dpm0644 game_mover_installs.py %{buildroot}/opt/game_mover/game_mover_installs.py
-install -Dpm0644 game_mover_jobs.py %{buildroot}/opt/game_mover/game_mover_jobs.py
-install -Dpm0644 game_mover_endpoints.py %{buildroot}/opt/game_mover/game_mover_endpoints.py
-install -Dpm0644 game_mover_satisfactory.py %{buildroot}/opt/game_mover/game_mover_satisfactory.py
-install -Dpm0644 game_mover_connections.py %{buildroot}/opt/game_mover/game_mover_connections.py
-install -Dpm0644 game_mover_security.py %{buildroot}/opt/game_mover/game_mover_security.py
-install -Dpm0644 game_mover_properties.py %{buildroot}/opt/game_mover/game_mover_properties.py
-install -Dpm0644 game_mover_logs.py %{buildroot}/opt/game_mover/game_mover_logs.py
-install -Dpm0644 game_mover_launchers.py %{buildroot}/opt/game_mover/game_mover_launchers.py
-install -Dpm0644 game_mover_notes.py %{buildroot}/opt/game_mover/game_mover_notes.py
-install -Dpm0644 game_mover_tip_checks.py %{buildroot}/opt/game_mover/game_mover_tip_checks.py
-install -Dpm0644 game_mover_game_inventory.py %{buildroot}/opt/game_mover/game_mover_game_inventory.py
-install -Dpm0644 game_mover_game_filters.py %{buildroot}/opt/game_mover/game_mover_game_filters.py
-install -Dpm0644 game_mover_users.py %{buildroot}/opt/game_mover/game_mover_users.py
-install -Dpm0644 game_mover_operators.py %{buildroot}/opt/game_mover/game_mover_operators.py
-install -Dpm0644 game_mover_whitelist.py %{buildroot}/opt/game_mover/game_mover_whitelist.py
-install -Dpm0644 game_mover_version.py %{buildroot}/opt/game_mover/game_mover_version.py
+for module in game_mover*.py; do
+    mode=0644
+    case "$module" in
+        game_mover.py|game_mover_flask.py|game_mover_dns.py) mode=0755 ;;
+    esac
+    install -Dpm"$mode" "$module" %{buildroot}/opt/game_mover/"$module"
+done
 install -Dpm0755 game-mover %{buildroot}/opt/game_mover/game-mover
-install -Dpm0644 game_mover_workloads.py %{buildroot}/opt/game_mover/game_mover_workloads.py
 install -Dpm0644 requirements.txt %{buildroot}/opt/game_mover/requirements.txt
 install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo.jpg
 
@@ -141,34 +121,8 @@ fi
 %files
 %doc README.md ARCHITECTURE.md
 %dir /opt/game_mover
-/opt/game_mover/game_mover_flask.py
-/opt/game_mover/game_mover.py
-/opt/game_mover/game_mover_mods.py
-/opt/game_mover/game_mover_catalog.py
-/opt/game_mover/game_mover_dns.py
-/opt/game_mover/game_mover_pihole.py
-/opt/game_mover/game_mover_minecraft.py
-/opt/game_mover/game_mover_gate.py
-/opt/game_mover/game_mover_backups.py
-/opt/game_mover/game_mover_installs.py
-/opt/game_mover/game_mover_jobs.py
-/opt/game_mover/game_mover_endpoints.py
-/opt/game_mover/game_mover_satisfactory.py
-/opt/game_mover/game_mover_connections.py
-/opt/game_mover/game_mover_security.py
-/opt/game_mover/game_mover_properties.py
-/opt/game_mover/game_mover_logs.py
-/opt/game_mover/game_mover_launchers.py
-/opt/game_mover/game_mover_notes.py
-/opt/game_mover/game_mover_tip_checks.py
-/opt/game_mover/game_mover_game_inventory.py
-/opt/game_mover/game_mover_game_filters.py
-/opt/game_mover/game_mover_users.py
-/opt/game_mover/game_mover_operators.py
-/opt/game_mover/game_mover_whitelist.py
-/opt/game_mover/game_mover_version.py
+/opt/game_mover/game_mover*.py
 /opt/game_mover/game-mover
-/opt/game_mover/game_mover_workloads.py
 /opt/game_mover/requirements.txt
 /opt/game_mover/game_mover_logo.jpg
 %{_bindir}/game-mover

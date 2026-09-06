@@ -76,29 +76,7 @@ ensure_local_admin_token() {
 echo "[1/8] Kopíruji aplikaci do ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 rsync -a --delete \
-  --include='/game_mover_flask.py' \
-  --include='/game_mover_jobs.py' \
-  --include='/game_mover.py' \
-  --include='/game_mover_mods.py' \
-  --include='/game_mover_catalog.py' \
-  --include='/game_mover_dns.py' \
-  --include='/game_mover_minecraft.py' \
-  --include='/game_mover_gate.py' \
-  --include='/game_mover_backups.py' \
-  --include='/game_mover_installs.py' \
-  --include='/game_mover_version.py' \
-  --include='/game_mover_workloads.py' \
-  --include='/game_mover_connections.py' \
-  --include='/game_mover_security.py' \
-  --include='/game_mover_properties.py' \
-  --include='/game_mover_logs.py' \
-  --include='/game_mover_notes.py' \
-  --include='/game_mover_tip_checks.py' \
-  --include='/game_mover_game_inventory.py' \
-  --include='/game_mover_game_filters.py' \
-  --include='/game_mover_users.py' \
-  --include='/game_mover_operators.py' \
-  --include='/game_mover_whitelist.py' \
+  --include='/game_mover*.py' \
   --include='/game-mover' \
   --include='/requirements.txt' \
   --include='/game_mover_logo.jpg' \

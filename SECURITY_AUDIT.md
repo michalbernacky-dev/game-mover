@@ -27,7 +27,7 @@ regression tests have been reviewed.
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
 | GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
-| GM-SA-2026-007 | Low | Open | Installer source list can drift from the RPM payload |
+| GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Open | Public security and licensing policy is incomplete |
 
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
@@ -112,7 +112,7 @@ directories and symlinks outside the intended game-library hierarchy.
 
 1. Resolve users through `pwd.getpwnam()` and use the account's canonical home.
 2. Require game names to be one safe path component; preferably use an opaque
-   inventory identifier selected from a server-generated list.
+   inventory identifier selecte GM-SA-2026-007d from a server-generated list.
 3. Introduce one shared `resolve_beneath(root, candidate)` validation helper.
 4. Reject absolute paths, `.` and `..`, separators, NUL bytes, and symlink
    escapes.
@@ -338,7 +338,7 @@ rewritten commit IDs differ from the existing remote history.
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
 - Severity: **Low**
-- Status: **Open**
+- Status: **Fixed**
 - Affected component: `install.sh`
 
 ### Description
@@ -356,6 +356,23 @@ paths, making the deployed behavior differ from the reviewed source.
 
 Generate both payloads from one source of truth, or make RPM deployment the
 only supported installation method and remove the alternate installer.
+
+### Resolution
+
+Resolved on 2026-09-06. The source tree naming convention is now the single
+source of truth for Python payloads: both `install.sh` and the RPM `%install`
+section consume every root-level `game_mover*.py` module through the same glob,
+and the RPM `%files` section owns the corresponding installed glob. This also
+adds the four modules that the alternate installer previously omitted:
+`game_mover_endpoints.py`, `game_mover_launchers.py`,
+`game_mover_pihole.py`, and `game_mover_satisfactory.py`.
+
+A regression test requires both installation paths to derive their payloads
+from the source glob and rejects a return to per-module include/install lists.
+The complete suite of 238 tests passed. An isolated installer staging run and
+a clean RPM build each contained exactly the same 27 Python modules as the
+source tree; the CI-scoped Ruff check and full-history Gitleaks scan also
+passed.
 
 ## GM-SA-2026-008: Public security and licensing policy is incomplete
 
