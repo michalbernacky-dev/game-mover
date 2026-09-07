@@ -59,6 +59,15 @@ class ServiceHardeningTest(unittest.TestCase):
         self.assertIn('SETFACL_PATH = "/usr/bin/setfacl"', backend)
         self.assertNotIn("os.fchmod(directory_fd, 0o2775)", backend)
 
+    def test_deploy_repairs_legacy_rootless_server_data_without_following_symlinks(self):
+        specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
+        installer = pathlib.Path("install.sh").read_text(encoding="utf-8")
+
+        self.assertIn("setfacl -R -P -m 'u:gameplatform:rwX,m::rwX'", specification)
+        self.assertIn('setfacl -R -P -m "u:${PODMAN_USER}:rwX,m::rwX"', installer)
+        self.assertIn("-L /var/lib/game-platform/servers", specification)
+        self.assertIn('-L "${PODMAN_HOME}/servers"', installer)
+
     def test_rpm_provides_the_service_account_through_sysusers(self):
         specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
         sysusers = pathlib.Path("game-mover.sysusers").read_text(encoding="utf-8")

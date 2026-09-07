@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.2
+Version:        0.31.3
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -122,12 +122,20 @@ chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache || :
 setfacl -m 'g:gemers:rwx,m::rwx,d:g:gemers:rwx,d:m::rwx' \
     /var/Games /var/Games_links /var/Games/steam-cache || :
 
+if [ -L /var/lib/game-platform/servers ]; then
+    echo "Managed server directory must not be a symbolic link" >&2
+    exit 1
+fi
 install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform \
     /var/lib/game-platform/servers \
     /var/lib/game-platform/backups \
     /var/lib/game-platform/proxies \
     /var/lib/game-platform/runtime || :
+setfacl -R -P -m 'u:gameplatform:rwX,m::rwX' \
+    /var/lib/game-platform/servers
+setfacl -R -P -d -m 'u:gameplatform:rwx,m::rwx' \
+    /var/lib/game-platform/servers
 PYTHONPATH=/opt/game_mover python3 -c \
     'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
 chown gameplatform:gameplatform /var/lib/game-platform/game-mover-notes.sqlite3 || :
@@ -167,6 +175,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.3-1
+- Repair API access to legacy rootless Podman server data with scoped ACLs
+
 * Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.2-1
 - Read registered systemd server status without requiring lifecycle allowlisting
 

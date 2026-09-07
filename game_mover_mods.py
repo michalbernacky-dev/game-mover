@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import zipfile
 
 try:
@@ -98,7 +99,11 @@ def inspect_mod_jar(path: str) -> dict:
 
 
 def scan_mod_directory(path: str) -> dict:
-    if not os.path.isdir(path):
+    try:
+        metadata = os.stat(path)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Adresář s mody neexistuje: {path}") from None
+    if not stat.S_ISDIR(metadata.st_mode):
         raise FileNotFoundError(f"Adresář s mody neexistuje: {path}")
     jars = []
     for filename in sorted(os.listdir(path), key=str.casefold):

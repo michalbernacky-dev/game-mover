@@ -219,6 +219,14 @@ control. The unprivileged host API can report `is-active` for every registered
 unit, while lifecycle operations and journal access still cross the root broker
 and require its root-owned unit allowlist.
 
+Version 0.31.3 repairs legacy rootless Podman data that predates `keep-id` and
+is owned by subordinate host UIDs. Deployment grants the dedicated
+`gameplatform` account an explicit ACL only below its fixed managed servers
+root, installs a default ACL for newly created data, and uses a physical walk
+that does not follow nested symbolic links. This restores mod inventory and
+other intended management reads without making server data public or changing
+container-visible ownership.
+
 Deployment testing initially exposed an incompatibility between
 `RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
 The restriction remains enabled: shared-library inheritance was migrated to
