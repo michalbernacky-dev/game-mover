@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.2
+Version:        0.31.3
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -167,6 +167,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.3-1
+- Allow remote mod comparison before a server creates its mods directory
+
 * Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.2-1
 - Read registered systemd server status without requiring lifecycle allowlisting
 

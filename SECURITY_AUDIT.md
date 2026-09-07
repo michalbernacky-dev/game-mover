@@ -219,6 +219,11 @@ control. The unprivileged host API can report `is-active` for every registered
 unit, while lifecycle operations and journal access still cross the root broker
 and require its root-owned unit allowlist.
 
+Version 0.31.3 keeps the authenticated read-only mod inventory available to
+direct clients even when a new or stopped server has not created its `mods`
+directory yet. The API returns an explicit empty inventory in that case; it
+does not broaden filesystem access or expose file contents.
+
 Deployment testing initially exposed an incompatibility between
 `RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
 The restriction remains enabled: shared-library inheritance was migrated to
