@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.1
+Version:        0.31.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -167,6 +167,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.2-1
+- Read registered systemd server status without requiring lifecycle allowlisting
+
 * Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.1-1
 - Restore rootless Podman access through the hardened API service sandbox
 

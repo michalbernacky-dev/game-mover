@@ -474,23 +474,30 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         stop.assert_called_once_with("dnsmasq")
 
-    def test_production_systemd_runner_uses_only_broker(self):
+    def test_production_systemd_runner_reads_status_locally_and_controls_via_broker(self):
         broker_result = {"returncode": 0, "stdout": "active", "stderr": ""}
+        local_result = BackendResult(0, "inactive", "")
         with (
             patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
             patch.object(backend, "privileged_call", return_value=broker_result) as broker,
-            patch.object(backend, "run_command") as local,
+            patch.object(backend, "run_command", return_value=local_result) as local,
         ):
-            result = backend.workload_command_runner(
-                ["systemctl", "is-active", "forge-srv.service"], 15,
+            status = backend.workload_command_runner(
+                ["systemctl", "is-active", "v-hra.service"], 15,
             )
-        self.assertEqual(result.returncode, 0)
+            restarted = backend.workload_command_runner(
+                ["systemctl", "restart", "v-hra.service"], 60,
+            )
+        self.assertEqual(status, local_result)
+        self.assertEqual(restarted.returncode, 0)
+        local.assert_called_once_with(
+            ["systemctl", "is-active", "v-hra.service"], 15,
+        )
         broker.assert_called_once_with(
             "systemd",
-            {"verb": "is-active", "unit": "forge-srv.service", "timeout": 15},
-            timeout=20,
+            {"verb": "restart", "unit": "v-hra.service", "timeout": 60},
+            timeout=65,
         )
-        local.assert_not_called()
 
     def test_local_policy_catalog_is_local_only(self):
         response = self.client.get(

@@ -331,9 +331,11 @@ Example entry in `/var/lib/game-mover/servers.json`:
 }
 ```
 
-Systemd workloads are additionally constrained by the root-owned
+The status of every registered systemd workload is read directly by the
+unprivileged host API. Lifecycle operations and privileged log access are
+additionally constrained by the root-owned
 `/etc/game_mover/allowed-services.json`. Add a custom adopted `.service` unit
-there manually as root before registering it in the UI. The API cannot edit
+there manually as root before controlling it in the UI. The API cannot edit
 this file and always rejects its own unit and the privileged broker unit.
 
 Every workload type can register host-facing TCP/UDP endpoints. They are shown
@@ -862,11 +864,12 @@ Příklad záznamu v `/var/lib/game-mover/servers.json`:
 }
 ```
 
-Systemd workload musí být navíc v root-owned souboru
-`/etc/game_mover/allowed-services.json`. Vlastní adoptovanou `.service`
-jednotku tam správce přidá ručně jako root ještě před registrací v GUI. API
-tento allowlist neumí měnit a vždy odmítne vlastní jednotku i jednotku
-privilegovaného brokeru.
+Stav každého registrovaného systemd workloadu čte přímo neprivilegované API
+hostitele. Operace nad životním cyklem a privilegovaný přístup k logům jsou
+navíc omezené root-owned souborem `/etc/game_mover/allowed-services.json`.
+Vlastní adoptovanou `.service` jednotku tam správce přidá ručně jako root před
+jejím ovládáním v GUI. API tento allowlist neumí měnit a vždy odmítne vlastní
+jednotku i jednotku privilegovaného brokeru.
 
 Každý typ workloadu může registrovat hostitelské TCP/UDP endpointy. Zobrazují se
 na kartách a ve správě serveru a při uložení registru se kontrolují kolize portů:

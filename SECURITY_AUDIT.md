@@ -214,6 +214,11 @@ inspecting rootless Podman containers because `ProtectHome=read-only` also made
 a private runtime below the already allowlisted `/var/lib/game-platform`
 hierarchy while retaining the rest of the service sandbox.
 
+Version 0.31.2 separates read-only systemd status from privileged systemd
+control. The unprivileged host API can report `is-active` for every registered
+unit, while lifecycle operations and journal access still cross the root broker
+and require its root-owned unit allowlist.
+
 Deployment testing initially exposed an incompatibility between
 `RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
 The restriction remains enabled: shared-library inheritance was migrated to

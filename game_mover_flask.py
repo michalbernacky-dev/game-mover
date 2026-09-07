@@ -206,6 +206,11 @@ def workload_command_runner(command, timeout=30):
     try:
         if executable == "podman":
             return run_command(command, timeout)
+        if executable == "systemctl" and len(command) == 3 and command[1] == "is-active":
+            # Reading a registered host unit's state is unprivileged.  Keep it
+            # out of the root broker so visibility does not depend on the
+            # separate allowlist that protects lifecycle operations.
+            return run_command(command, timeout)
         if executable == "systemctl" and len(command) == 3:
             rc, output, error = _privileged_systemd(command[1], command[2], timeout)
             return BackendResult(rc, output, error)
