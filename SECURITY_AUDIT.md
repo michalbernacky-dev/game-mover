@@ -208,6 +208,12 @@ confirmed socket mode `0660 root:gameplatform`, successful allowlisted service
 status, rejection of a UID 0 peer, rejection of `ssh.service`, migrated state
 ownership, and a healthy version 0.31.0 API response.
 
+A post-deployment regression in 0.31.0 prevented the unprivileged API from
+inspecting rootless Podman containers because `ProtectHome=read-only` also made
+`/run/user/<uid>/libpod` read-only. Version 0.31.1 gives the remote Podman client
+a private runtime below the already allowlisted `/var/lib/game-platform`
+hierarchy while retaining the rest of the service sandbox.
+
 Deployment testing initially exposed an incompatibility between
 `RestrictSUIDSGID` and the Mover's former `chmod 2775` inheritance mechanism.
 The restriction remains enabled: shared-library inheritance was migrated to

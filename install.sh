@@ -121,7 +121,7 @@ if ! getent passwd "${PODMAN_USER}" >/dev/null; then
 fi
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" \
   "${PODMAN_HOME}" "${PODMAN_HOME}/servers" "${PODMAN_HOME}/backups" \
-  "${PODMAN_HOME}/proxies"
+  "${PODMAN_HOME}/proxies" "${PODMAN_HOME}/runtime"
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" "${STATE_DIR}"
 for config in servers.json gate.json security.json dns.json dns-runtime.json dns-pihole-state.json; do
   if [[ -f "${LOCAL_ADMIN_DIR}/${config}" && ! -e "${STATE_DIR}/${config}" ]]; then

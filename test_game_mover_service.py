@@ -28,6 +28,7 @@ class ServiceHardeningTest(unittest.TestCase):
             "CapabilityBoundingSet=\n",
             "AmbientCapabilities=\n",
             "ReadWritePaths=/var/lib/game-mover /var/lib/game-platform",
+            "Environment=XDG_RUNTIME_DIR=/var/lib/game-platform/runtime",
             "Environment=GAME_MOVER_PRIVILEGED_HELPER=1",
         )
         for directive in required:
@@ -35,6 +36,7 @@ class ServiceHardeningTest(unittest.TestCase):
                 self.assertIn(directive, unit)
 
         self.assertNotIn("User=root", unit)
+        self.assertNotIn("ReadWritePaths=/run/user/", unit)
 
     def test_root_broker_has_no_network_and_a_bounded_capability_set(self):
         unit = pathlib.Path("game-mover-privileged.service").read_text(encoding="utf-8")

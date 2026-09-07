@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.0
+Version:        0.31.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -126,7 +126,8 @@ install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform \
     /var/lib/game-platform/servers \
     /var/lib/game-platform/backups \
-    /var/lib/game-platform/proxies || :
+    /var/lib/game-platform/proxies \
+    /var/lib/game-platform/runtime || :
 PYTHONPATH=/opt/game_mover python3 -c \
     'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
 chown gameplatform:gameplatform /var/lib/game-platform/game-mover-notes.sqlite3 || :
@@ -166,6 +167,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.1-1
+- Restore rootless Podman access through the hardened API service sandbox
+
 * Sun Sep 06 2026 Game Mover Packager <packager@example.invalid> - 0.31.0-1
 - Run the network API without root and delegate bounded host operations to a local broker
 - Add a root-owned systemd service allowlist and keep managed Podman data host-owned

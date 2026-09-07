@@ -41,6 +41,7 @@ ReadWritePaths=/var/Games /var/Games_links
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=GAME_PLATFORM_PODMAN_USER=gameplatform
+Environment=XDG_RUNTIME_DIR=/var/lib/game-platform/runtime
 Environment=GAME_PLATFORM_DATA_ROOT=/var/lib/game-platform/servers
 Environment=GAME_PLATFORM_BACKUP_ROOT=/var/lib/game-platform/backups
 Environment=GAME_MOVER_STATE_DIRECTORY=/var/lib/game-mover
