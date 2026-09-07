@@ -1,3 +1,3 @@
 """Application version shared by the GUI and API."""
 
-__version__ = "0.31.3"
+__version__ = "0.31.2"

@@ -697,7 +697,6 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertTrue(statuses["forge"]["has_mods"])
         self.assertTrue(statuses["pixelmon"]["has_mods"])
         self.assertFalse(statuses["satisfactory"]["has_mods"])
-
         self.assertTrue(statuses["forge"]["backup_supported"])
         self.assertTrue(statuses["pixelmon"]["backup_supported"])
         self.assertFalse(statuses["satisfactory"]["backup_supported"])
@@ -706,30 +705,6 @@ class ServerRegistryTest(unittest.TestCase):
         })
         self.assertEqual(statuses["forge"]["permissions"]["start"], "pam")
         self.assertEqual(statuses["pixelmon"]["permissions"]["backup"], "pam")
-
-    def test_remote_mod_comparison_gets_empty_inventory_when_mods_directory_is_absent(self):
-        missing_data = Path(self.temp_dir.name) / "not-started"
-        missing_mods = missing_data / "mods"
-        backend.save_game_servers([{
-            "id": "not-started",
-            "name": "Not Started",
-            "backend": "systemd",
-            "service": "not-started.service",
-            "kind": "minecraft",
-            "mods_dir": str(missing_mods),
-            "data": {"directory": str(missing_data)},
-        }])
-        with patch.object(backend, "load_read_token", return_value="read-secret"):
-            response = self.client.get(
-                "/servers/minecraft/mods?server_id=not-started",
-                headers={backend.READ_TOKEN_HEADER: "read-secret"},
-                environ_base={"REMOTE_ADDR": "192.0.2.10"},
-            )
-
-        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
-        self.assertFalse(response.json["directory_present"])
-        self.assertEqual(response.json["jar_count"], 0)
-        self.assertEqual(response.json["jars"], [])
 
     def test_notes_api_persists_platform_specific_server_guidance(self):
         notes = [{

@@ -3287,10 +3287,7 @@ def minecraft_mods():
         return jsonify({"message": "Minecraft server not found"}), 404
     mods_dir = server.get("mods_dir", MINECRAFT_MODS_DIR)
     try:
-        # A new, vanilla, or not-yet-started server may legitimately have no
-        # mods directory.  Return an empty inventory so a remote client can
-        # still compare its local mods without requiring a management tunnel.
-        inventory = scan_mod_directory(mods_dir, missing_ok=True)
+        inventory = scan_mod_directory(mods_dir)
     except FileNotFoundError as e:
         return jsonify({"message": str(e)}), 404
     except PermissionError:

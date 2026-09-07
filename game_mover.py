@@ -6954,12 +6954,7 @@ class GameMover(QWidget):
         table.setSortingEnabled(True)
         table.sortItems(0, Qt.AscendingOrder)
         count = inventory.get("jar_count", len(inventory.get("jars", [])))
-        if inventory.get("directory_present", True):
-            entry["mods_summary"].setText(f"Server obsahuje {count} JAR souborů")
-        else:
-            entry["mods_summary"].setText(
-                "Server zatím nemá adresář mods; porovnává se s 0 JAR soubory"
-            )
+        entry["mods_summary"].setText(f"Server obsahuje {count} JAR souborů")
         entry["compare_mods"].setEnabled(True)
 
     def choose_client_mods(self, server_id):

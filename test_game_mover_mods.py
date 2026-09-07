@@ -22,16 +22,6 @@ displayName="{mod_id}"
 
 
 class ModInventoryTest(unittest.TestCase):
-    def test_missing_server_directory_can_be_an_explicit_empty_inventory(self):
-        with tempfile.TemporaryDirectory() as directory:
-            missing = os.path.join(directory, "mods")
-            inventory = scan_mod_directory(missing, missing_ok=True)
-
-        self.assertEqual(inventory["path"], missing)
-        self.assertFalse(inventory["directory_present"])
-        self.assertEqual(inventory["jar_count"], 0)
-        self.assertEqual(inventory["jars"], [])
-
     def test_scan_reads_forge_metadata(self):
         with tempfile.TemporaryDirectory() as directory:
             write_forge_mod(directory, "carryon.jar", "carryon", "2.1.2.7")
