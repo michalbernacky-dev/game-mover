@@ -26,6 +26,8 @@ import subprocess
 import sys
 from typing import Any
 
+from game_mover_steam_cache import inspect_steam_cache
+
 
 SOCKET_PATH = os.getenv(
     "GAME_MOVER_PRIVILEGED_SOCKET", "/run/game-mover/privileged.sock",
@@ -69,7 +71,9 @@ DENIED_SYSTEM_UNITS = {
     "game_mover", "game_mover.service", "game-mover-privileged",
     "game-mover-privileged.service",
 }
-USER_FILESYSTEM_ACTIONS = {"move-game", "create-symlink", "set-steam-cache"}
+USER_FILESYSTEM_ACTIONS = {
+    "move-game", "create-symlink", "set-steam-cache", "steam-cache-status",
+}
 
 
 class PrivilegedError(RuntimeError):
@@ -160,7 +164,7 @@ def _beneath(root: str, *components: str, allow_missing: bool = False) -> str:
     return candidate
 
 
-def _steamapps(username: str) -> str:
+def _steamapps(username: str, *, missing_ok: bool = False) -> str | None:
     home = pwd.getpwnam(username).pw_dir
     candidates = (
         os.path.join(home, ".steam/steam/steamapps"),
@@ -172,6 +176,8 @@ def _steamapps(username: str) -> str:
             continue
         if os.path.isdir(real) and not os.path.islink(candidate):
             return real
+    if missing_ok:
+        return None
     raise PrivilegedError("Steam knihovna nebyla nalezena")
 
 
@@ -260,6 +266,11 @@ def _create_symlink(parameters: dict) -> dict:
         os.symlink(target, proxy)
     os.symlink(proxy, source)
     return {"message": "Steam odkaz byl vytvořen přes spravovanou proxy"}
+
+
+def _steam_cache_status(parameters: dict) -> dict:
+    username = _safe_username(parameters.get("user"))
+    return inspect_steam_cache(_steamapps(username, missing_ok=True), GAMES_ROOT)
 
 
 def _set_steam_cache(parameters: dict) -> dict:
@@ -534,6 +545,7 @@ def dispatch(action: str, parameters: dict) -> dict:
         "move-game": _move_game,
         "create-symlink": _create_symlink,
         "set-steam-cache": _set_steam_cache,
+        "steam-cache-status": _steam_cache_status,
         "fix-permissions": _fix_permissions,
     }
     handler = handlers.get(action)

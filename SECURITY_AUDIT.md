@@ -30,7 +30,7 @@ regression tests have been reviewed.
 | GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
-| GM-SA-2026-009 | High | Open | Steam cache status GET invokes an unauthorized mutation |
+| GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
 | GM-SA-2026-010 | Medium | Open | Legacy server ACL migration widens existing access and affects hardlinked files |
 
 ## Regression review: 2026-09-09
@@ -66,7 +66,7 @@ separate lease-protected push and must be reported with its actual result.
 ## GM-SA-2026-009: Steam cache status GET invokes an unauthorized mutation
 
 - Severity: **High**
-- Status: **Open**
+- Status: **Fixed** (source and regression tests verified; deployment pending)
 - Affected component: `GET /steam_cache_status`, with the privileged helper enabled
 
 The production branch of `steam_cache_status()` calls the broker action
@@ -90,6 +90,31 @@ Required remediation: introduce an inspection-only production path and retain
 mutations solely behind the authorized POST operation. Add production-mode tests
 proving GET leaves filesystem state unchanged and cannot bypass disabled/PAM
 policy through a mutating action.
+
+### Resolution
+
+Resolved in source on 2026-09-09. The GET now calls a distinct
+`steam-cache-status` broker action. The broker runs that inspection through its
+existing filesystem worker after dropping to the selected player's UID/GID;
+the root process does not inspect player-controlled paths. The worker and the
+local API fallback share the same inspection-only helper. Missing libraries
+return 404; a missing downloads directory remains a valid `missing` status.
+Local, shared, custom and unexpected-file states retain the GUI response fields.
+
+The `set-steam-cache` mutation is now routed from the POST endpoint, after its
+existing `steam.cache` authorization check. Disabled policy, absent credentials,
+and an admin token without the required PAM session cannot dispatch the mutation.
+Authorized sharing still uses the unprivileged player worker.
+
+Six added regression tests exercise real temporary filesystem fixtures through
+the production API/handler routing (substituting the transport and user switch),
+verify unchanged inode metadata and symlinks for status reads under all policy
+modes, cover missing libraries and invalid users, verify POST authorization and
+successful cache movement, reject remote requests, and check the worker's
+requested UID/GID and supplementary group. All 269 tests pass, along with Ruff,
+the full-history Gitleaks scan and Bash syntax checks. This is source verification,
+not a live root-broker, installed RPM, or deployed-host verification. The separate
+legacy server ACL finding GM-SA-2026-010 remains open.
 
 ## GM-SA-2026-010: Legacy server ACL migration has unintended effects
 
