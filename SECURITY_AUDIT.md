@@ -1,10 +1,11 @@
 # Game Mover security audit register
 
-Last review: 2026-09-06
+Last review: 2026-09-09 (source and history regression review)
 
-Reviewed version: 0.30.1
+Reviewed version: 0.31.3
 
-Reviewed commit: `e81c2f0`
+Reviewed source: 0.31.3 before the documentation and identity-only history update.
+Historical commit identifiers in this register may predate metadata rewriting.
 
 Publication verdict: **not ready for a public repository**
 
@@ -29,6 +30,90 @@ regression tests have been reviewed.
 | GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
+| GM-SA-2026-009 | High | Open | Steam cache status GET invokes an unauthorized mutation |
+| GM-SA-2026-010 | Medium | Open | Legacy server ACL migration widens existing access and affects hardlinked files |
+
+## Regression review: 2026-09-09
+
+The review compared the current source against the previous resolutions,
+including the privilege split preceding the latest Podman fixes. The API remains
+unprivileged, the broker retains peer and systemd allowlist validation, and
+Podman socket and broker peer UIDs are resolved from the local account database.
+The runtime-directory fix does not disable the service sandbox. The fixed API
+permission target, traversal checks, PAM throttling, CI configuration and shared
+installer module glob remain present. This does not establish that every
+filesystem migration is confined; see GM-SA-2026-010.
+
+Ruff passed, Gitleaks scanned 138 commits without finding a secret, all 263 unit
+tests passed, and Bash syntax checks passed. Additional temporary-directory
+reproductions exposed the gaps below despite that green suite. No live deployment,
+new RPM build, or GitHub publication-control verification was performed in this
+review. Source-text tests and mocked privileged calls do not substitute for
+production-path behavioral coverage.
+
+GM-SA-2026-006 also regressed: five recent commits used the owner's personal
+email again. The repository-local identity on this workstation was already the
+no-reply identity. With the owner's authorization, all five affected commits in
+the project branches were rewritten to the no-reply author and committer
+identity. Their content trees were verified unchanged, and all project branches,
+tags and remote-tracking branches were checked for the old email. A private
+recovery bundle and commit mapping were kept outside the repository; internal
+application snapshots and recovery data are not publication refs. `AGENTS.md`
+now requires identity verification on each machine before every commit. Gitleaks
+alone does not detect this privacy regression. Remote synchronization is a
+separate lease-protected push and must be reported with its actual result.
+
+## GM-SA-2026-009: Steam cache status GET invokes an unauthorized mutation
+
+- Severity: **High**
+- Status: **Open**
+- Affected component: `GET /steam_cache_status`, with the privileged helper enabled
+
+The production branch of `steam_cache_status()` calls the broker action
+`set-steam-cache` instead of inspecting status. `_set_steam_cache()` can move a
+player's downloads into shared storage, replace the local path with a symlink,
+and change shared permissions. The GET does not enforce the `steam.cache`
+operation policy, local admin token, or PAM authorization. Direct non-loopback
+requests are blocked by the network filter, but a local caller can reach it
+without credentials. This predates the latest four commits and was introduced
+during the broker integration. It violates the read-only principle documented
+under GM-SA-2026-002 and the policy boundary for mutations; it does not establish
+that the earlier path-traversal flaw itself returned.
+
+A temporary-directory reproduction routed the Flask test client's unauthenticated
+loopback GET to the actual cache mutation handler, substituting fixture account
+paths and suppressing ACL changes. It returned 200, never called the operation
+authorization guard, moved a fixture file into shared cache and created a symlink.
+This was not a live root-broker exploit test.
+
+Required remediation: introduce an inspection-only production path and retain
+mutations solely behind the authorized POST operation. Add production-mode tests
+proving GET leaves filesystem state unchanged and cannot bypass disabled/PAM
+policy through a mutating action.
+
+## GM-SA-2026-010: Legacy server ACL migration has unintended effects
+
+- Severity: **Medium**
+- Status: **Open**
+- Affected components: recursive server ACL migration in `install.sh` and RPM `%post`
+
+The 0.31.3 migration intentionally restores `gameplatform` access to subordinate-ID
+owned data. However, setting `m::rwX` can also activate previously masked rights
+of existing groups or named ACL entries. In a temporary fixture, an existing
+group entry changed from effectively `---` to `rw-`. This requires pre-existing
+masked rights; it is not an unconditional public-data exposure.
+
+`setfacl -R -P` skips symbolic links but does not isolate hardlinks: processing an
+existing file hardlink inside the server tree also changes the ACL of the same
+inode reachable outside that tree. This was reproduced on temporary files. It
+requires an existing hardlink on the same filesystem and does not imply that an
+unprivileged caller can create links to arbitrary root-owned files.
+
+Required remediation: preserve intended legacy account access while retaining
+other principals' effective permissions, reject or safely handle multiply linked
+files, and validate confinement under concurrent path changes. Add behavioral
+filesystem tests; the existing test only checks script text. Do not revert to a
+root API or remove the needed Podman access repair as a workaround.
 
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 
