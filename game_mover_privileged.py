@@ -47,7 +47,8 @@ ALLOWED_UNITS_PATH = os.getenv(
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,160}$")
-USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+# Existing Linux account names are case-sensitive; preserve their exact spelling.
+USERNAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,31}$")
 GAME_NAME_RE = re.compile(r"^[^/\\\x00]{1,255}$")
 DNS_NAME_RE = re.compile(
     r"^(?=.{1,253}\.?$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"

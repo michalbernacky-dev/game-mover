@@ -494,6 +494,15 @@ What installer does:
 
 `deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
 
+Version 0.31.4 repairs legacy server ACLs through a shared deployment helper.
+Run data migrations with server-data writers stopped. The helper preserves
+other accounts' effective ACL permissions and container-visible ownership;
+symlinks are skipped, while hardlinked files or nested filesystem boundaries
+stop migration with an error. Resolve the reported condition and rerun rather
+than using recursive chmod/chown as a workaround. Migration is repeatable but
+not transactional: an error may leave earlier entries repaired. The deploy
+script does not stop data writers automatically.
+
 To uninstall:
 
 ```bash
@@ -1021,6 +1030,15 @@ Co instalátor dělá:
 - chrání mutující lokální API volání náhodným tokenem v `/etc/game_mover/api.token`, který je čitelný jen pro členy skupiny `gemers`
 
 `deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+
+Verze 0.31.4 opravuje starší serverová ACL společným instalačním helperem.
+Migraci dat prováděj se zastavenými procesy, které do serverových dat zapisují.
+Helper zachová efektivní ACL práva ostatních účtů i vlastnictví viditelné z
+kontejneru. Symlinky přeskočí; hardlinky a vnořené jiné souborové systémy migraci
+zastaví s chybou. Vyřeš hlášenou příčinu a migraci zopakuj, nepoužívej jako
+náhradu plošný chmod/chown. Migrace je opakovatelná, ale není transakční:
+dřívější položky mohou být po chybě již opravené. Deploy skript zapisující
+procesy automaticky nezastavuje.
 
 Odinstalace:
 

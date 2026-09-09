@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.3
+Version:        0.31.4
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -128,14 +128,11 @@ if [ -L /var/lib/game-platform/servers ]; then
 fi
 install -d -m 0750 -o gameplatform -g gameplatform \
     /var/lib/game-platform \
-    /var/lib/game-platform/servers \
     /var/lib/game-platform/backups \
     /var/lib/game-platform/proxies \
     /var/lib/game-platform/runtime || :
-setfacl -R -P -m 'u:gameplatform:rwX,m::rwX' \
-    /var/lib/game-platform/servers
-setfacl -R -P -d -m 'u:gameplatform:rwx,m::rwx' \
-    /var/lib/game-platform/servers
+# Do not continue an upgrade with a failed or unsafe ACL migration.
+python3 -I -B /opt/game_mover/game_mover_acl.py || exit 1
 PYTHONPATH=/opt/game_mover python3 -c \
     'from game_mover_notes import initialize_notes_database; initialize_notes_database("/var/lib/game-platform/game-mover-notes.sqlite3")'
 chown gameplatform:gameplatform /var/lib/game-platform/game-mover-notes.sqlite3 || :
@@ -175,6 +172,11 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Wed Sep 09 2026 Game Mover Packager <packager@example.invalid> - 0.31.4-1
+- Preserve effective ACL rights and reject hardlinked legacy server data
+- Keep Steam cache inspection separate from authorized mutations
+- Accept existing mixed-case account names in the privileged Timekpr workflow
+
 * Mon Sep 07 2026 Game Mover Packager <packager@example.invalid> - 0.31.3-1
 - Repair API access to legacy rootless Podman server data with scoped ACLs
 

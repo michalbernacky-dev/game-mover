@@ -124,13 +124,11 @@ if [[ -L "${PODMAN_HOME}/servers" ]]; then
   exit 1
 fi
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" \
-  "${PODMAN_HOME}" "${PODMAN_HOME}/servers" "${PODMAN_HOME}/backups" \
+  "${PODMAN_HOME}" "${PODMAN_HOME}/backups" \
   "${PODMAN_HOME}/proxies" "${PODMAN_HOME}/runtime"
-# Legacy rootless containers may have changed data ownership to subordinate
-# UIDs. Keep the API account able to manage its fixed server-data root without
-# changing container-visible ownership or following nested symlinks.
-setfacl -R -P -m "u:${PODMAN_USER}:rwX,m::rwX" "${PODMAN_HOME}/servers"
-setfacl -R -P -d -m "u:${PODMAN_USER}:rwx,m::rwx" "${PODMAN_HOME}/servers"
+# Repair legacy subordinate-ID data through descriptor-based ACL migration.
+# Failure aborts installation; no broad setfacl/chown fallback is permitted.
+python3 -I -B "${INSTALL_DIR}/game_mover_acl.py"
 install -d -m 0750 -o "${PODMAN_USER}" -g "${PODMAN_USER}" "${STATE_DIR}"
 for config in servers.json gate.json security.json dns.json dns-runtime.json dns-pihole-state.json; do
   if [[ -f "${LOCAL_ADMIN_DIR}/${config}" && ! -e "${STATE_DIR}/${config}" ]]; then

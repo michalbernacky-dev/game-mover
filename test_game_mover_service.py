@@ -63,8 +63,10 @@ class ServiceHardeningTest(unittest.TestCase):
         specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
         installer = pathlib.Path("install.sh").read_text(encoding="utf-8")
 
-        self.assertIn("setfacl -R -P -m 'u:gameplatform:rwX,m::rwX'", specification)
-        self.assertIn('setfacl -R -P -m "u:${PODMAN_USER}:rwX,m::rwX"', installer)
+        self.assertIn("python3 -I -B /opt/game_mover/game_mover_acl.py || exit 1", specification)
+        self.assertIn('python3 -I -B "${INSTALL_DIR}/game_mover_acl.py"', installer)
+        self.assertNotIn("setfacl -R -P", specification)
+        self.assertNotIn("setfacl -R -P", installer)
         self.assertIn("-L /var/lib/game-platform/servers", specification)
         self.assertIn('-L "${PODMAN_HOME}/servers"', installer)
 

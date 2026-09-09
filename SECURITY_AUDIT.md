@@ -2,9 +2,9 @@
 
 Last review: 2026-09-09 (source and history regression review)
 
-Reviewed version: 0.31.3
+Reviewed version: 0.31.4 (source; deployment pending)
 
-Reviewed source: 0.31.3 before the documentation and identity-only history update.
+Reviewed source: working tree containing the GM-SA-2026-009/010 remediations.
 Historical commit identifiers in this register may predate metadata rewriting.
 
 Publication verdict: **not ready for a public repository**
@@ -31,7 +31,7 @@ regression tests have been reviewed.
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 | GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
-| GM-SA-2026-010 | Medium | Open | Legacy server ACL migration widens existing access and affects hardlinked files |
+| GM-SA-2026-010 | Medium | Fixed | Legacy server ACL migration widens existing access and affects hardlinked files |
 
 ## Regression review: 2026-09-09
 
@@ -62,6 +62,21 @@ application snapshots and recovery data are not publication refs. `AGENTS.md`
 now requires identity verification on each machine before every commit. Gitleaks
 alone does not detect this privacy regression. Remote synchronization is a
 separate lease-protected push and must be reported with its actual result.
+
+## Compatibility regression: mixed-case login names (2026-09-09)
+
+The privileged broker rejected existing interactive accounts with uppercase
+letters before invoking Timekpr, although account discovery offered those users
+in the GUI. Version 0.31.4 permits ASCII uppercase letters in the shared username
+validator and retains the exact spelling for account lookup and command arguments.
+Account existence and interactive UID/home checks, action allowlists and argument
+bounds remain enforced; usernames are not lowercased or accepted as shell input.
+
+A new regression test failed against the previous validator, then passed for
+status, bonus time and schedule arguments after the fix. A second test verifies
+rejection of path/option/shell-like input, missing accounts and system accounts.
+All 280 tests, Ruff and full-history Gitleaks passed. No live Timekpr settings or
+user sessions were changed; installed-host verification is pending.
 
 ## GM-SA-2026-009: Steam cache status GET invokes an unauthorized mutation
 
@@ -114,12 +129,12 @@ successful cache movement, reject remote requests, and check the worker's
 requested UID/GID and supplementary group. All 269 tests pass, along with Ruff,
 the full-history Gitleaks scan and Bash syntax checks. This is source verification,
 not a live root-broker, installed RPM, or deployed-host verification. The separate
-legacy server ACL finding GM-SA-2026-010 remains open.
+legacy server ACL finding GM-SA-2026-010 is addressed below.
 
 ## GM-SA-2026-010: Legacy server ACL migration has unintended effects
 
 - Severity: **Medium**
-- Status: **Open**
+- Status: **Fixed** (source and RPM verified; deployment pending)
 - Affected components: recursive server ACL migration in `install.sh` and RPM `%post`
 
 The 0.31.3 migration intentionally restores `gameplatform` access to subordinate-ID
@@ -139,6 +154,48 @@ other principals' effective permissions, reject or safely handle multiply linked
 files, and validate confinement under concurrent path changes. Add behavioral
 filesystem tests; the existing test only checks script text. Do not revert to a
 root API or remove the needed Podman access repair as a workaround.
+
+### Resolution
+
+Resolved in source on 2026-09-09 for version 0.31.4. Both installation methods
+invoke the same deployment-only `game_mover_acl.py` helper with isolated Python
+imports. It resolves the real `gameplatform` account locally and preserves
+existing file ownership. Before expanding the target account's access, it
+intersects other group-class ACL entries with their old mask, retaining their
+effective permissions. This applies to existing default ACLs as well. When no
+default exists, new defaults grant the future owner and `gameplatform` access,
+without copying directory group/other permissions that could otherwise bypass
+a restrictive creation umask. File creation modes and subsequent explicit chmod
+still limit inherited access; the migration does not override application policy.
+
+Every root path component is opened without following symlinks. Children are
+selected with directory-relative `O_PATH|O_NOFOLLOW` descriptors and inspected
+before reopening that same inode. ACL reads/writes use file descriptors and
+POSIX ACL extended attributes; no recursive pathname-based setfacl is used.
+Symlinks and special files are skipped. Multiply linked regular files and
+different-filesystem descendants cause an error before their ACL is changed.
+Inode/link-count checks also reject detected changes during processing. The
+installer aborts on errors, and the RPM scriptlet explicitly returns failure;
+there is no permissive fallback. Existing server-root ACLs are no longer
+preemptively changed by `install -d` before migration.
+
+The migration is idempotent but not transactional and does not lock out writers.
+Run it with server-data writers stopped for a stable whole-tree result. A held
+descriptor protects against pathname redirection, not against another process
+moving that selected inode or creating new hardlinks after the final check.
+Already repaired entries remain repaired after an error; resolve the cause and
+rerun. Neither installation method automatically deletes links or rewrites
+container-visible owners to force success.
+
+Nine new tests cover mask preservation for named users/groups, owner versus
+default ACL behavior, real ACLs and inheritance, repeatability, external symlinks,
+special files, hardlinks, symlinked root components, and path/hardlink replacement
+after inode selection. The ACL suite also passed outside the single-UID sandbox
+with a distinct target UID. All 278 tests, Ruff, full-history Gitleaks, and Bash
+syntax checks passed. A local Fedora 44 RPM/SRPM build succeeded; the RPM contains
+all 30 Python modules and calls the shared helper from its postinstall scriptlet.
+No live host installation, service restart, or active-container migration was
+performed. Fedora 43 CI and deployed-host verification are separate checks.
 
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 

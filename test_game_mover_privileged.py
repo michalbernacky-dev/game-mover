@@ -59,6 +59,35 @@ class PrivilegedBrokerTest(unittest.TestCase):
                     with self.assertRaises(privileged.PrivilegedError):
                         privileged._timekpr_args(args)
 
+    def test_timekpr_preserves_case_of_existing_interactive_account(self):
+        account = Mock(pw_uid=1001, pw_dir="/home/Alice")
+        with patch.object(privileged.pwd, "getpwnam", return_value=account) as lookup:
+            for args in (
+                ["--userinfo", "Alice"],
+                ["--settimeleft", "Alice", "+", "1800"],
+                ["--setallowedhours", "Alice", "3", "13:00-22:00"],
+            ):
+                with self.subTest(args=args):
+                    self.assertEqual(privileged._timekpr_args(args), args)
+            self.assertEqual(privileged._safe_username("Alice"), "Alice")
+        self.assertTrue(lookup.call_args_list)
+        for invocation in lookup.call_args_list:
+            self.assertEqual(invocation.args, ("Alice",))
+
+    def test_timekpr_still_rejects_unsafe_missing_and_system_accounts(self):
+        with patch.object(privileged.pwd, "getpwnam") as lookup:
+            for username in ("../Alice", "-Alice", "Alice;id", "Alice Smith", "Alice\n"):
+                with self.subTest(username=username):
+                    with self.assertRaises(privileged.PrivilegedError):
+                        privileged._timekpr_args(["--userinfo", username])
+            lookup.assert_not_called()
+        with patch.object(privileged.pwd, "getpwnam", side_effect=KeyError):
+            with self.assertRaises(privileged.PrivilegedError):
+                privileged._timekpr_args(["--userinfo", "MissingUser"])
+        with patch.object(privileged.pwd, "getpwnam", return_value=Mock(pw_uid=99, pw_dir="/var/lib/Service")):
+            with self.assertRaises(privileged.PrivilegedError):
+                privileged._timekpr_args(["--userinfo", "Service"])
+
     def test_pihole_rejects_non_dns_configuration(self):
         with self.assertRaises(privileged.PrivilegedError):
             privileged.dispatch("pihole", {"records": ["127.0.0.1 bad/name"]})
