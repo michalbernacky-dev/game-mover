@@ -108,6 +108,10 @@ class CiSecurityTest(unittest.TestCase):
         self.assertIn("green hosted run for that exact commit", agent_instructions)
         self.assertIn("Do not push\ndirectly to `main`", agent_instructions)
         self.assertIn("requiring a\npull request and the `build-rpm` status check", agent_instructions)
+        self.assertIn("CI builds packages but does not authorize or perform deployment", agent_instructions)
+        self.assertIn("Do not use\n   `deploy.sh` for a publication or production deployment", agent_instructions)
+        self.assertIn("verify `rpm -V`", agent_instructions)
+        self.assertIn("Report source verification, hosted build, artifact inspection", agent_instructions)
 
         specification = RPM_SPEC_PATH.read_text(encoding="utf-8")
         self.assertIn("License:        PolyForm-Noncommercial-1.0.0", specification)

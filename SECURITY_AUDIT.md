@@ -785,6 +785,15 @@ ordinary direct pushes, bypassing checks, and force-pushing or deleting `main`.
 After visibility changes, GitHub protection must technically require pull
 requests and the `build-rpm` check and must block force pushes and deletion.
 
+The deployment policy now separates build provenance from authorization and
+host mutation. Normal publication/production deployment requires the exact
+post-merge `main` CI RPM and SRPM, recorded hashes and payload/scriptlet review,
+an explicit host and rollback plan, RPM installation, and distinct post-install
+identity, ownership, service, version, and functional checks. `deploy.sh` is
+documented as a same-machine development tool because it rebuilds the current
+working tree; CI must not receive production credentials or deploy automatically.
+Regression coverage requires these deployment gates to remain in `AGENTS.md`.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open

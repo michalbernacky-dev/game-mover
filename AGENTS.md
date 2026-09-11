@@ -156,12 +156,14 @@ next machine and session. Never publish an uncoordinated vulnerability report.
 
 ## Packaging and deployment
 
-Use the RPM workflow (`build_rpm.sh` / `deploy.sh`) for normal deployment;
-`install.sh` is the manual bootstrap alternative. These are Bash scripts: use
-`./install.sh` or `bash install.sh`, not `sh install.sh`. Both installation paths
-must include all `game_mover*.py` modules, required policy/license files, units,
-dependencies, and equivalent state/ownership migrations. Keep the version in
-`game_mover_version.py` synchronized with `game-mover.spec`.
+RPM is the normal packaging and deployment unit. `build_rpm.sh` creates a local
+development package, `deploy.sh` builds and installs that working tree on the
+same development machine, and `install.sh` is the manual bootstrap alternative.
+These are Bash scripts: use `./install.sh` or `bash install.sh`, not
+`sh install.sh`. Both installation paths must include all `game_mover*.py`
+modules, required policy/license files, units, dependencies, and equivalent
+state/ownership migrations. Keep the version in `game_mover_version.py`
+synchronized with `game-mover.spec`.
 
 Treat workstation builds as potentially contaminated by machine-local state.
 `build_rpm.sh` packages the current source directory and its explicit exclusions
@@ -193,6 +195,50 @@ source archive. For anything intended for publication:
    author/committer, remote/ref, example-data, and package-payload review. After
    pushing, require a green hosted run for that exact commit and publish only
    the inspected artifacts from that run.
+
+### Deployment flow
+
+CI builds packages but does not authorize or perform deployment. Do not add
+production credentials, SSH deployment, package installation, service restart,
+or other host mutation to a pull-request or push workflow. Every deployment is
+a separate, explicitly authorized operation with a named target host and exact
+source commit.
+
+For a normal deployment:
+
+1. Merge the reviewed change through a pull request, update the deployment
+   checkout to the resulting `origin/main`, and verify that the hosted `RPM
+   Build` succeeded for that exact merge commit. A green branch or pre-merge PR
+   run is not sufficient.
+2. Download that run's binary RPM and SRPM into a fresh staging directory.
+   Record their hashes and inspect their identity, version/release, digests,
+   license, file lists, source archive, dependencies, and scriptlets. Do not
+   substitute a similarly named laptop artifact or an older successful run.
+3. Before changing the host, record the currently installed package and service
+   state, confirm configuration/data backup and rollback arrangements, verify
+   free space and the intended maintenance impact, and state which services may
+   be restarted. Never include secrets or player data in the deployment record.
+4. Install the inspected RPM through the documented RPM path. Do not use
+   `deploy.sh` for a publication or production deployment: it rebuilds the local
+   working tree and is only for an explicitly authorized same-machine
+   development deployment. Do not replace RPM scriptlets with ad hoc copies,
+   ownership changes, or permission broadening.
+5. Treat package installation, migrations, service enablement, and restarts as
+   mutations requiring deployment authorization. Do not touch live player data,
+   PAM state, credentials, containers, or services merely to validate a build.
+6. After installation, verify `rpm -V`, the installed version, unit syntax,
+   actual API/broker process identities, socket and credential ownership,
+   service health, the loopback health/version endpoint, and the functionality
+   affected by the change. For Podman changes, test under the service sandbox
+   and `gameplatform` identity rather than only from a root shell.
+7. If a migration, package verification, service, or functional check fails,
+   stop and preserve sanitized diagnostics. Follow only the rollback plan agreed
+   before deployment; do not improvise destructive cleanup, restore data, or
+   weaken a security control to make the service start.
+8. Report source verification, hosted build, artifact inspection, installation,
+   migrations, restarts, and live verification as distinct results. Record the
+   exact commit, package NEVRA and hashes, target class, failures, rollback, and
+   remaining limitations without recording private host details or credentials.
 
 Before an authorized deployment, establish the intended host and exact source
 revision, inspect uncommitted changes, and finish applicable checks. Build and
