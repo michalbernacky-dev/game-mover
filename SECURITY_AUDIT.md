@@ -8,9 +8,10 @@ Reviewed source: `d7bf92aa150cab77ba15784c1221aea696ab0679` plus the
 CI-fixture and audit updates described in the 2026-09-11 review below.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: **not ready for a public repository**. Old rewritten
-commits containing the owner's personal e-mail remain retrievable from GitHub;
-see the GM-SA-2026-006 regression below.
+Publication verdict: **ready for the final pre-publication checks in the clean
+`game-mover` repository**. The hosted-history blocker was isolated by creating
+a new private repository containing only the reviewed reachable history; see
+GM-SA-2026-006 and the remaining publication gate below.
 
 This document is the working register for security findings discovered during
 periodic source-code reviews. Finding identifiers use the project-local format
@@ -30,7 +31,7 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Fixed | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 | GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
@@ -64,8 +65,8 @@ protection/rulesets require a public repository or a paid plan; private
 vulnerability reporting is likewise unavailable. Those publication-time
 controls therefore remain part of GM-SA-2026-008.
 
-The re-review initially found two publication blockers. The CI blocker is now
-resolved; the hosted-history blocker remains:
+The re-review initially found two publication blockers. Both are now resolved
+for the clean publication repository:
 
 1. The earlier GitHub Actions runs were red because two tests implicitly
    depended on the deployment account existing in the Fedora CI container. The
@@ -74,13 +75,14 @@ resolved; the hosted-history blocker remains:
    Ruff, all 280 tests, RPM/SRPM build, and artifact upload, including a run
    using the updated Node 24 Actions.
 2. Five commits rewritten during the 2026-09-09 identity repair remain directly
-   retrievable from GitHub by their old SHA, including the personal author and
-   committer e-mail. Historical Actions runs make those SHAs discoverable. This
-   is a reproduced GM-SA-2026-006 regression in the hosted repository, even
-   though none of the objects is reachable from a branch or tag. GitHub must
-   purge the cached/dangling objects and associated references, or publication
-   must use a newly created repository containing only the reviewed history.
-   Verify that every old SHA returns unavailable before changing visibility.
+   retrievable from the old private `game-mover-rpm` repository by their old
+   SHA. That repository is not the publication target and must remain private.
+   A new private `game-mover` repository was created with a distinct repository
+   identity and populated only from the reviewed reachable `main` history. All
+   five superseded SHAs, plus the tip of the unrelated legacy repository that
+   previously occupied the name, return GitHub's `No commit found` response in
+   the new repository. The reviewed tip is available and its initial hosted RPM
+   Build run passed.
 
 ## Regression review: 2026-09-09
 
@@ -580,7 +582,7 @@ must retain a green hosted run.
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**
-- Status: **Open** (hosted dangling objects remain accessible)
+- Status: **Fixed**
 - Relevant weakness class: CWE-200
 
 ### Description
@@ -639,6 +641,24 @@ their discoverable references, or publish a newly created repository populated
 only from the reviewed reachable history. Recheck each known old SHA through
 the unauthenticated/public boundary; it must be unavailable. Do not publish the
 old local recovery bundle or reconnect the superseded history.
+
+### Clean-repository isolation: 2026-09-11
+
+The repository selected for publication is now a newly created private
+`michalbernacky-dev/game-mover` repository with a distinct GitHub repository
+identity. It was populated by pushing only the reviewed reachable `main` ref;
+no mirror, tag, recovery ref, or unreachable local object was pushed. The old
+`game-mover-rpm` repository remains private and is not a publication candidate.
+
+GitHub returned `No commit found` for each of the five known superseded SHAs in
+the new repository. The former tip of the unrelated legacy repository that
+previously used the `game-mover` name returned the same result. The current
+reviewed tip returned successfully, and the first hosted RPM Build on the new
+repository passed. A complete recovery bundle of the deleted legacy repository
+is stored privately outside the project. This isolates the publication history
+and closes the hosted-history regression for the new repository; the old
+`game-mover-rpm` repository must not be made public without a separate purge and
+review.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
@@ -755,28 +775,25 @@ findings:
 
 ## Publication gate
 
-The repository must remain private while any Critical/High finding or the
-GM-SA-2026-006 hosted-history regression is open. Before publication, other
-findings must be fixed or explicitly accepted with a written rationale. The
-current concrete gates are:
+The repository must remain private while any Critical/High finding is open.
+Before publication, other findings must be fixed or explicitly accepted with a
+written rationale. The current concrete gates are:
 
-1. remove or isolate every hosted superseded commit recorded under
-   GM-SA-2026-006, then verify the old SHAs are unavailable;
-2. commit and push the CI fixture repair and require a green RPM Build run for
-   the exact publication commit;
-3. repeat Gitleaks and identity/example-data review over every remote branch
+1. repeat Gitleaks and identity/example-data review over every remote branch
    and tag immediately before the visibility change;
-4. inspect the exact binary and source RPM produced by the green run; and
-5. immediately after changing visibility, enable and verify private
+2. require a green RPM Build run for the exact publication commit and inspect
+   its exact binary and source RPM; and
+3. immediately after changing visibility, enable and verify private
    vulnerability reporting, secret scanning, push protection, and `main`
-   branch/ruleset protection.
+   branch/ruleset protection, and repeat the known-old-SHA checks through the
+   unauthenticated public boundary.
 
 The 2026-09-11 review completed the current-tree, remote-ref, package,
 deployment-documentation, local-host, and CI portions of this gate. Item 2 is
-complete, and the exact Fedora 43 CI artifacts satisfy item 4. Publication is
-blocked by item 1; item 3 must be repeated immediately before visibility changes,
-and item 5 is necessarily a coordinated post-visibility step on the current
-GitHub plan.
+complete for the reviewed pre-migration tip, including the exact Fedora 43 CI
+artifacts. The hosted-history isolation is also complete. Items 1 and 2 must be
+repeated for the exact final publication commit, and item 3 is necessarily a
+coordinated post-visibility step on the current GitHub plan.
 
 This review is a source, configuration, and Git-history assessment. It is not
 a penetration test of a deployed host and does not certify that installed
