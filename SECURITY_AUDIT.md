@@ -1,13 +1,16 @@
 # Game Mover security audit register
 
-Last review: 2026-09-09 (source and history regression review)
+Last review: 2026-09-11 (publication readiness re-review)
 
-Reviewed version: 0.31.4 (source; deployment pending)
+Reviewed version: 0.31.4 (source, RPM, and local deployment)
 
-Reviewed source: working tree containing the GM-SA-2026-009/010 remediations.
+Reviewed source: `d7bf92aa150cab77ba15784c1221aea696ab0679` plus the
+CI-fixture and audit updates described in the 2026-09-11 review below.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: **not ready for a public repository**
+Publication verdict: **not ready for a public repository**. Old rewritten
+commits containing the owner's personal e-mail remain retrievable from GitHub;
+see the GM-SA-2026-006 regression below.
 
 This document is the working register for security findings discovered during
 periodic source-code reviews. Finding identifiers use the project-local format
@@ -27,11 +30,57 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Fixed | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | Open | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 | GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
 | GM-SA-2026-010 | Medium | Fixed | Legacy server ACL migration widens existing access and affects hardlinked files |
+
+## Publication readiness re-review: 2026-09-11
+
+The current tree, reachable local and remote refs, Git metadata, binary RPM
+payload, installation scriptlets, CI configuration, security and licensing
+documents, service identities, and the deployed 0.31.4 backend were reviewed.
+The remote has only `main`, at
+`d7bf92aa150cab77ba15784c1221aea696ab0679`, and no tags. All reachable commit
+authors and committers use the intended no-reply or neutral identities. Gitleaks
+scanned all 141 reachable commits without finding a secret. Ruff, all 280 unit
+tests, Bash syntax checks, `git diff --check`, systemd unit verification, and a
+fresh Fedora 44 RPM/SRPM build passed locally. The binary RPM contains the
+expected 30 Python modules and policy/license files.
+
+The deployed `game-mover-0.31.4-1.fc44.noarch` package passes `rpm -V`. Its ACL
+helper is byte-for-byte identical to the reviewed source. Both API and broker
+are active under `gameplatform:gameplatform` and `root:gameplatform`
+respectively, and the loopback health endpoint reports 0.31.4. A root-authorized
+read-only dry run of the production ACL migration traversed the managed server
+tree with ACL writes disabled and proposed zero changes. It also encountered no
+unsafe hardlink, inode replacement, or filesystem-boundary condition. No player
+file contents, credentials, PAM state, or service data were changed during
+verification.
+
+GitHub dependency alerts and automated security fixes are enabled. While the
+repository remains private on the current account, GitHub reports that branch
+protection/rulesets require a public repository or a paid plan; private
+vulnerability reporting is likewise unavailable. Those publication-time
+controls therefore remain part of GM-SA-2026-008.
+
+Two publication blockers were found:
+
+1. The GitHub Actions run for the current commit, and the preceding runs, is
+   red. Its two failures were tests that implicitly depended on the deployment
+   account existing in the Fedora CI container. The production paths were not
+   failing. The tests now inject a neutral fixture account, and the formerly
+   failing cases pass without consulting the host account database. A remote
+   green run is still required after these changes are committed and pushed.
+2. Five commits rewritten during the 2026-09-09 identity repair remain directly
+   retrievable from GitHub by their old SHA, including the personal author and
+   committer e-mail. Historical Actions runs make those SHAs discoverable. This
+   is a reproduced GM-SA-2026-006 regression in the hosted repository, even
+   though none of the objects is reachable from a branch or tag. GitHub must
+   purge the cached/dangling objects and associated references, or publication
+   must use a newly created repository containing only the reviewed history.
+   Verify that every old SHA returns unavailable before changing visibility.
 
 ## Regression review: 2026-09-09
 
@@ -81,7 +130,7 @@ user sessions were changed; installed-host verification is pending.
 ## GM-SA-2026-009: Steam cache status GET invokes an unauthorized mutation
 
 - Severity: **High**
-- Status: **Fixed** (source and regression tests verified; deployment pending)
+- Status: **Fixed** (source, RPM, and deployed artifact verified)
 - Affected component: `GET /steam_cache_status`, with the privileged helper enabled
 
 The production branch of `steam_cache_status()` calls the broker action
@@ -131,10 +180,16 @@ the full-history Gitleaks scan and Bash syntax checks. This is source verificati
 not a live root-broker, installed RPM, or deployed-host verification. The separate
 legacy server ACL finding GM-SA-2026-010 is addressed below.
 
+The 0.31.4 deployment was verified on 2026-09-11: the installed package and
+helper match the reviewed source, both services are active under their intended
+identities, and the backend health endpoint reports 0.31.4. The status endpoint
+was not invoked against live player data; its no-mutation property remains
+verified by the production-path filesystem fixtures above.
+
 ## GM-SA-2026-010: Legacy server ACL migration has unintended effects
 
 - Severity: **Medium**
-- Status: **Fixed** (source and RPM verified; deployment pending)
+- Status: **Fixed** (source, RPM, and deployment verified)
 - Affected components: recursive server ACL migration in `install.sh` and RPM `%post`
 
 The 0.31.3 migration intentionally restores `gameplatform` access to subordinate-ID
@@ -196,6 +251,14 @@ syntax checks passed. A local Fedora 44 RPM/SRPM build succeeded; the RPM contai
 all 30 Python modules and calls the shared helper from its postinstall scriptlet.
 No live host installation, service restart, or active-container migration was
 performed. Fedora 43 CI and deployed-host verification are separate checks.
+
+Deployment verification completed on 2026-09-11. The installed helper is
+byte-for-byte identical to the reviewed source, `rpm -V` is clean, systemd unit
+verification passes, and both services are active under the expected accounts.
+A root-authorized read-only dry run over the production managed server tree,
+with the ACL writer replaced by a counter, completed without a confinement
+error and proposed zero ACL changes. This verifies that the deployed migration
+reached an idempotent state without modifying live player data during review.
 
 ## GM-SA-2026-001: Arbitrary recursive permission changes by the root API
 
@@ -499,10 +562,21 @@ The complete CI sequence was reproduced in a clean Fedora 43 container. Ruff
 passed, Gitleaks scanned all 125 commits without finding a secret, all 237 tests
 passed, and the RPM build produced `game-mover-0.30.1-1.fc43.noarch.rpm`.
 
+### CI regression review: 2026-09-11
+
+The latest ten hosted workflow runs were failing, including the run for 0.31.4.
+The workflow correctly reached and executed the complete test suite; two
+Minecraft installation tests then tried to resolve the production
+`gameplatform` account, which does not exist in the clean Fedora CI container.
+The tests now inject a neutral UID/GID fixture while continuing to exercise the
+real environment construction. Both formerly failing cases and the complete
+local suite pass. This finding remains fixed in the reviewed tree, but a green
+hosted run is a mandatory publication gate after commit and push.
+
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**
-- Status: **Fixed**
+- Status: **Open** (hosted dangling objects remain accessible)
 - Relevant weakness class: CWE-200
 
 ### Description
@@ -546,6 +620,21 @@ metadata and found no match. Gitleaks scanned the same history without finding
 a secret, all 237 tests passed, and the CI-scoped Ruff check passed. Publishing
 the rewritten history still requires a coordinated force-push because all
 rewritten commit IDs differ from the existing remote history.
+
+### Hosted-history regression: 2026-09-11
+
+The rewritten `main` branch is present on GitHub and is the remote's only
+branch; the remote has no tags. Nevertheless, five superseded commits remain
+retrievable from the GitHub API by their old SHA and expose the owner's personal
+author and committer e-mail. Those SHAs are discoverable in retained historical
+Actions runs. This is hosted evidence, not merely a local unreachable-object
+artifact, and it reopens the finding for publication.
+
+Before visibility changes, have GitHub purge the cached/dangling commits and
+their discoverable references, or publish a newly created repository populated
+only from the reviewed reachable history. Recheck each known old SHA through
+the unauthenticated/public boundary; it must be unavailable. Do not publish the
+old local recovery bundle or reconnect the superseded history.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
@@ -634,6 +723,16 @@ is made public. The finding remains `Mitigated` until the publication-time
 controls are enabled or their absence is explicitly accepted with a written
 rationale.
 
+The 2026-09-11 API recheck confirms that dependency vulnerability alerts and
+automated security fixes remain enabled. GitHub still rejects rulesets and
+branch protection for this private repository on the current plan, and private
+vulnerability reporting is not available before the visibility change. When
+the history privacy blocker is resolved, change visibility in a coordinated
+maintenance window and immediately enable private vulnerability reporting,
+secret scanning with push protection, and `main` protection requiring the RPM
+Build workflow. Verify each control through the API before announcing the
+repository as public.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open
@@ -652,11 +751,26 @@ findings:
 
 ## Publication gate
 
-The repository must remain private while GM-SA-2026-001 or GM-SA-2026-002 is
-open. Before publication, GM-SA-2026-003 through GM-SA-2026-008 must either be
-fixed or explicitly accepted with a written rationale. A final review must
-include the current tree, all branches and tags, packaged RPM contents, CI
-configuration, and deployment documentation.
+The repository must remain private while any Critical/High finding or the
+GM-SA-2026-006 hosted-history regression is open. Before publication, other
+findings must be fixed or explicitly accepted with a written rationale. The
+current concrete gates are:
+
+1. remove or isolate every hosted superseded commit recorded under
+   GM-SA-2026-006, then verify the old SHAs are unavailable;
+2. commit and push the CI fixture repair and require a green RPM Build run for
+   the exact publication commit;
+3. repeat Gitleaks and identity/example-data review over every remote branch
+   and tag immediately before the visibility change;
+4. inspect the exact binary and source RPM produced by the green run; and
+5. immediately after changing visibility, enable and verify private
+   vulnerability reporting, secret scanning, push protection, and `main`
+   branch/ruleset protection.
+
+The 2026-09-11 review completed the current-tree, remote-ref, package,
+deployment-documentation, and local-host portions of this gate. Publication is
+blocked by items 1 and 2; item 5 is necessarily a coordinated post-visibility
+step on the current GitHub plan.
 
 This review is a source, configuration, and Git-history assessment. It is not
 a penetration test of a deployed host and does not certify that installed

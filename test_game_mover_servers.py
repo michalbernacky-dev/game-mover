@@ -1765,6 +1765,10 @@ class ServerRegistryTest(unittest.TestCase):
         with (
             patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
             patch.object(backend, "BACKUP_ROOT", str(backup_root)),
+            patch(
+                "game_mover_installs.pwd.getpwnam",
+                return_value=Mock(pw_uid=os.getuid(), pw_gid=os.getgid()),
+            ),
             patch.object(backend, "load_game_servers", return_value=[]),
             patch.object(backend, "save_game_servers") as save_servers,
             patch.object(backend, "check_host_port_available"),
@@ -1865,6 +1869,10 @@ class ServerRegistryTest(unittest.TestCase):
         }
         with (
             patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch(
+                "game_mover_installs.pwd.getpwnam",
+                return_value=Mock(pw_uid=os.getuid(), pw_gid=os.getgid()),
+            ),
             patch.object(backend, "load_game_servers", return_value=[]),
             patch.object(backend, "save_game_servers"),
             patch.object(backend, "check_host_port_available"),
