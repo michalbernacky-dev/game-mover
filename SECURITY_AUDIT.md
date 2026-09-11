@@ -41,10 +41,9 @@ regression tests have been reviewed.
 The current tree, reachable local and remote refs, Git metadata, binary RPM
 payload, installation scriptlets, CI configuration, security and licensing
 documents, service identities, and the deployed 0.31.4 backend were reviewed.
-The remote has only `main`, at
-`d7bf92aa150cab77ba15784c1221aea696ab0679`, and no tags. All reachable commit
-authors and committers use the intended no-reply or neutral identities. Gitleaks
-scanned all 141 reachable commits without finding a secret. Ruff, all 280 unit
+The remote has only `main` and no tags. All reachable commit authors and
+committers use the intended no-reply or neutral identities. Gitleaks scanned the
+complete reachable history without finding a secret. Ruff, all 280 unit
 tests, Bash syntax checks, `git diff --check`, systemd unit verification, and a
 fresh Fedora 44 RPM/SRPM build passed locally. The binary RPM contains the
 expected 30 Python modules and policy/license files.
@@ -71,9 +70,9 @@ resolved; the hosted-history blocker remains:
 1. The earlier GitHub Actions runs were red because two tests implicitly
    depended on the deployment account existing in the Fedora CI container. The
    production paths were not failing. The tests now inject a neutral fixture
-   account. Hosted run 34628862422 for `b6cd5ff` passed the history scan, Ruff,
-   all 280 tests, RPM/SRPM build, and artifact upload using the updated Node 24
-   Actions.
+   account. Successive hosted runs after the repair passed the history scan,
+   Ruff, all 280 tests, RPM/SRPM build, and artifact upload, including a run
+   using the updated Node 24 Actions.
 2. Five commits rewritten during the 2026-09-09 identity repair remain directly
    retrievable from GitHub by their old SHA, including the personal author and
    committer e-mail. Historical Actions runs make those SHAs discoverable. This
