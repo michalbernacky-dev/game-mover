@@ -65,14 +65,15 @@ protection/rulesets require a public repository or a paid plan; private
 vulnerability reporting is likewise unavailable. Those publication-time
 controls therefore remain part of GM-SA-2026-008.
 
-Two publication blockers were found:
+The re-review initially found two publication blockers. The CI blocker is now
+resolved; the hosted-history blocker remains:
 
-1. The GitHub Actions run for the current commit, and the preceding runs, is
-   red. Its two failures were tests that implicitly depended on the deployment
-   account existing in the Fedora CI container. The production paths were not
-   failing. The tests now inject a neutral fixture account, and the formerly
-   failing cases pass without consulting the host account database. A remote
-   green run is still required after these changes are committed and pushed.
+1. The earlier GitHub Actions runs were red because two tests implicitly
+   depended on the deployment account existing in the Fedora CI container. The
+   production paths were not failing. The tests now inject a neutral fixture
+   account. Hosted run 34628862422 for `b6cd5ff` passed the history scan, Ruff,
+   all 280 tests, RPM/SRPM build, and artifact upload using the updated Node 24
+   Actions.
 2. Five commits rewritten during the 2026-09-09 identity repair remain directly
    retrievable from GitHub by their old SHA, including the personal author and
    committer e-mail. Historical Actions runs make those SHAs discoverable. This
@@ -772,9 +773,11 @@ current concrete gates are:
    branch/ruleset protection.
 
 The 2026-09-11 review completed the current-tree, remote-ref, package,
-deployment-documentation, and local-host portions of this gate. Publication is
-blocked by items 1 and 2; item 5 is necessarily a coordinated post-visibility
-step on the current GitHub plan.
+deployment-documentation, local-host, and CI portions of this gate. Item 2 is
+complete, and the exact Fedora 43 CI artifacts satisfy item 4. Publication is
+blocked by item 1; item 3 must be repeated immediately before visibility changes,
+and item 5 is necessarily a coordinated post-visibility step on the current
+GitHub plan.
 
 This review is a source, configuration, and Git-history assessment. It is not
 a penetration test of a deployed host and does not certify that installed
