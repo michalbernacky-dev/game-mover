@@ -570,8 +570,12 @@ Minecraft installation tests then tried to resolve the production
 `gameplatform` account, which does not exist in the clean Fedora CI container.
 The tests now inject a neutral UID/GID fixture while continuing to exercise the
 real environment construction. Both formerly failing cases and the complete
-local suite pass. This finding remains fixed in the reviewed tree, but a green
-hosted run is a mandatory publication gate after commit and push.
+local suite pass. Hosted run 34628562732 then passed Gitleaks, Ruff, all 280
+tests, the Fedora 43 RPM/SRPM build, and artifact upload for commit `19797f3`.
+Its only annotation reported that the pinned v4 Actions declared deprecated
+Node 20 runtimes. Both Actions were subsequently updated to their reviewed
+v7.0.1 full commit SHAs, which declare Node 24; the exact publication commit
+must retain a green hosted run.
 
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
