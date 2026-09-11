@@ -22,6 +22,15 @@ chat, a machine's global Git settings, or remembered numeric account IDs.
 
 ## Git identity and private data
 
+The canonical repository is `michalbernacky-dev/game-mover`. The former
+`game-mover-rpm` repository is historical, must remain private, and must never
+be used as a release source or made a remote of the canonical checkout. On every
+new workstation and before a release, inspect `git remote -v`, the repository
+owner/name, all local and remote branches and tags, and the exact upstream tip.
+Stop if a remote points at the old repository or if unexpected refs or history
+are present. Do not copy an old `.git` directory, objects, refs, tags, build
+directory, or recovery bundle into a clean clone.
+
 Before every commit, inspect `git status --short`, `git var GIT_AUTHOR_IDENT`,
 and `git var GIT_COMMITTER_IDENT`. For this owner's human/agent-authored commits,
 use the following repository-local identity:
@@ -128,6 +137,37 @@ Use the RPM workflow (`build_rpm.sh` / `deploy.sh`) for normal deployment;
 must include all `game_mover*.py` modules, required policy/license files, units,
 dependencies, and equivalent state/ownership migrations. Keep the version in
 `game_mover_version.py` synchronized with `game-mover.spec`.
+
+Treat workstation builds as potentially contaminated by machine-local state.
+`build_rpm.sh` packages the current source directory and its explicit exclusions
+do not automatically honor `.gitignore`; an ignored or untracked credential,
+editor file, patch, log, backup, or generated artifact can therefore enter the
+source archive. For anything intended for publication:
+
+1. Prefer the RPM and SRPM produced by the green GitHub `RPM Build` workflow for
+   the exact reviewed commit. A laptop build is a development artifact unless
+   the same clean-build and inspection requirements are completed.
+2. Start from a fresh canonical `game-mover` clone with only the intended
+   branch checked out. Verify `HEAD`, `origin/main`, `git remote -v`, every
+   branch/tag, and `git status --short --untracked-files=all`; do not build a
+   release from a dirty tree.
+3. Inspect ignored files as well as untracked files before building. Do not
+   assume `.gitignore`, Gitleaks, or the `rsync` exclusions keep machine-local
+   files out of the source archive. Never place credentials, recovery data,
+   production configuration, deployment logs, or personal fixtures anywhere
+   under the release checkout.
+4. Treat per-user RPM configuration such as `~/.rpmmacros`, environment
+   overrides, signing configuration, and cached build roots as inputs. Use a
+   clean Fedora build environment for official artifacts, and never reuse an
+   old repository's `.rpmbuild` output as publication evidence.
+5. Inspect the exact generated SRPM source archive, binary RPM file list,
+   scriptlets, metadata, license, and digests. Confirm that they contain only
+   reviewed files and that their version and source revision match the intended
+   publication commit. A successful `rpmbuild` alone is not approval to upload.
+6. Immediately before publishing, repeat full-history Gitleaks plus a separate
+   author/committer, remote/ref, example-data, and package-payload review. After
+   pushing, require a green hosted run for that exact commit and publish only
+   the inspected artifacts from that run.
 
 Before an authorized deployment, establish the intended host and exact source
 revision, inspect uncommitted changes, and finish applicable checks. Build and

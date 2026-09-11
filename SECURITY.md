@@ -9,7 +9,7 @@ problem against the newest version before reporting it when possible.
 ## Reporting a vulnerability
 
 Report vulnerabilities privately through
-[GitHub private vulnerability reporting](https://github.com/michalbernacky-dev/game-mover-rpm/security/advisories/new).
+[GitHub private vulnerability reporting](https://github.com/michalbernacky-dev/game-mover/security/advisories/new).
 Do not open a public issue for a vulnerability that has not been coordinated.
 
 Include the affected version or commit, required configuration, reproduction

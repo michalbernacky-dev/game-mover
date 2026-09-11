@@ -757,6 +757,26 @@ secret scanning with push protection, and `main` protection requiring the RPM
 Build workflow. Verify each control through the API before announcing the
 repository as public.
 
+The final clean-repository review found stale `game-mover-rpm` references in
+the README, development checkout examples, security-advisory URL, and CI
+artifact label. They were changed to the canonical `game-mover` repository and
+the neutral `game-mover-packages` artifact name. Regression coverage now checks
+the exact advisory destination and rejects the obsolete repository name in the
+public-facing README and security policy. Six README commands that incorrectly
+invoked the Bash installer through `sh` were also corrected to execute it
+directly, and the regression check rejects that unsupported invocation. These
+documentation corrections still require a green RPM Build for their exact final
+commit before publication.
+
+The repository instructions now also treat builds from laptops and other
+workstations as exposed to machine-local contamination. They require the
+canonical remote and clean history, a fresh clean checkout for publication,
+review of ignored and untracked files, isolation from per-user RPM macros and
+old build roots, and inspection of the exact SRPM/RPM payload and scriptlets.
+Official artifacts should come from the green hosted workflow for the exact
+reviewed commit. Regression coverage requires these safeguards to remain in
+`AGENTS.md`.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open

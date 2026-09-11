@@ -54,7 +54,8 @@ marked as possible remnants instead of being discarded. Launcher-only records ar
 SQLite notes are attached through stable aliases; games without notes are ready
 to receive a new entry without manually inventing an ID.
 
-Note: the original `game-mover` repository is no longer used for active development. This repository, `game-mover-rpm`, is the canonical source for code, packaging, and deployment.
+This `game-mover` repository is the canonical source for code, RPM packaging,
+and deployment.
 
 ## License and official builds
 
@@ -460,25 +461,25 @@ rejected by the application limiter do not reach PAM.
 2) Run the installer only for first-time/manual bootstrap (creates `/opt/game_mover`, the systemd service, and the desktop launcher). The script is idempotent, so you can run it again, but the normal deploy path is now the RPM:
 
 ```bash
-sudo sh ./install.sh
+sudo ./install.sh
 ```
 
 If you want to keep the service from being restarted/enabled immediately, use:
 
 ```bash
-sudo sh ./install.sh --no-restart
+sudo ./install.sh --no-restart
 ```
 
 If you want to enable GNOME autostart for the GUI, add:
 
 ```bash
-sudo sh ./install.sh --enable-autostart
+sudo ./install.sh --enable-autostart
 ```
 
 For the normal development deploy on the same PC, use:
 
 ```bash
-cd ~/Projects/game-mover-rpm
+cd ~/Projects/game-mover
 ./deploy.sh
 ```
 
@@ -573,7 +574,8 @@ inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádn�
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
 
-Poznámka: původní repozitář `game-mover` se už nepoužívá pro aktivní vývoj. Tento repozitář, `game-mover-rpm`, je kanonický zdroj pro kód, balíčkování i nasazení.
+Tento repozitář `game-mover` je kanonickým zdrojem kódu, RPM balíčkování i
+nasazení.
 
 ## Licence a oficiální sestavení
 
@@ -997,25 +999,25 @@ započítají, zatímco požadavky odmítnuté aplikačním limitem do PAM nevst
 2) Spusť instalátor pouze pro první ruční bootstrap (vytvoří `/opt/game_mover`, systemd službu a desktop launcher). Skript je idempotentní, takže jej můžeš spustit znovu, ale běžná deploy cesta je už přes RPM:
 
 ```bash
-sudo sh ./install.sh
+sudo ./install.sh
 ```
 
 Pokud chceš službu nespouštět ani neenableovat hned, použij:
 
 ```bash
-sudo sh ./install.sh --no-restart
+sudo ./install.sh --no-restart
 ```
 
 Pokud chceš zapnout GNOME autostart pro GUI, přidej:
 
 ```bash
-sudo sh ./install.sh --enable-autostart
+sudo ./install.sh --enable-autostart
 ```
 
 Pro běžný vývojový deploy na stejném PC použij:
 
 ```bash
-cd ~/Projects/game-mover-rpm
+cd ~/Projects/game-mover
 ./deploy.sh
 ```
 

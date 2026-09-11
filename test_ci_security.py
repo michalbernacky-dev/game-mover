@@ -7,6 +7,8 @@ ROOT = Path(__file__).parent
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "rpm-build.yml"
 DEPENDABOT_PATH = ROOT / ".github" / "dependabot.yml"
 RUFF_CONFIG_PATH = ROOT / "ruff.toml"
+README_PATH = ROOT / "README.md"
+AGENTS_PATH = ROOT / "AGENTS.md"
 INSTALLER_PATH = ROOT / "install.sh"
 RPM_SPEC_PATH = ROOT / "game-mover.spec"
 LICENSE_PATH = ROOT / "LICENSE"
@@ -78,10 +80,29 @@ class CiSecurityTest(unittest.TestCase):
         )
 
         security = SECURITY_PATH.read_text(encoding="utf-8")
-        self.assertIn("security/advisories/new", security)
+        self.assertIn(
+            "https://github.com/michalbernacky-dev/game-mover/security/advisories/new",
+            security,
+        )
+        self.assertNotIn("game-mover-rpm", security)
         self.assertIn("current release", security)
         self.assertIn("bring-your-own-key", security)
         self.assertIn("unofficial fork", TRADEMARKS_PATH.read_text(encoding="utf-8"))
+
+        readme = README_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("game-mover-rpm", readme)
+        self.assertIn("cd ~/Projects/game-mover\n", readme)
+        self.assertNotIn("sh ./install.sh", readme)
+
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        self.assertIn("name: game-mover-packages", workflow)
+        self.assertNotIn("name: game-mover-rpm", workflow)
+
+        agent_instructions = AGENTS_PATH.read_text(encoding="utf-8")
+        self.assertIn("canonical repository is `michalbernacky-dev/game-mover`", agent_instructions)
+        self.assertIn("must never\nbe used as a release source", agent_instructions)
+        self.assertIn("do not automatically honor `.gitignore`", agent_instructions)
+        self.assertIn("green hosted run for that exact commit", agent_instructions)
 
         specification = RPM_SPEC_PATH.read_text(encoding="utf-8")
         self.assertIn("License:        PolyForm-Noncommercial-1.0.0", specification)
