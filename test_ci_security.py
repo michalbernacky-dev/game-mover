@@ -9,6 +9,7 @@ DEPENDABOT_PATH = ROOT / ".github" / "dependabot.yml"
 RUFF_CONFIG_PATH = ROOT / "ruff.toml"
 README_PATH = ROOT / "README.md"
 AGENTS_PATH = ROOT / "AGENTS.md"
+BUILD_HELPER_PATH = ROOT / "build_rpm.sh"
 INSTALLER_PATH = ROOT / "install.sh"
 RPM_SPEC_PATH = ROOT / "game-mover.spec"
 LICENSE_PATH = ROOT / "LICENSE"
@@ -40,12 +41,28 @@ class CiSecurityTest(unittest.TestCase):
         tests = workflow.index("python3 -m unittest discover -v")
         build = workflow.index("rpmbuild --define")
         self.assertIn("            acl \\\n", workflow)
+        self.assertIn("          git archive \\\n", workflow)
+        self.assertIn("            HEAD\n", workflow)
+        self.assertNotIn("          rsync -a \\\n", workflow)
         self.assertLess(secret_scan, build)
         self.assertLess(static_scan, build)
         self.assertLess(tests, build)
 
         ruff_config = RUFF_CONFIG_PATH.read_text(encoding="utf-8")
         self.assertIn('select = ["S"]', ruff_config)
+
+        build_helper = BUILD_HELPER_PATH.read_text(encoding="utf-8")
+        for excluded_path in (
+            ".ruff_cache",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".coverage",
+            "htmlcov",
+            ".env",
+            "*.key",
+            "*.log",
+        ):
+            self.assertIn(f"--exclude '{excluded_path}'", build_helper)
 
     def test_dependabot_monitors_actions_and_python_dependencies(self):
         config = DEPENDABOT_PATH.read_text(encoding="utf-8")

@@ -27,8 +27,17 @@ rsync -a --no-owner --no-group \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '.vscode' \
+  --exclude '.ruff_cache' \
+  --exclude '.pytest_cache' \
+  --exclude '.mypy_cache' \
+  --exclude '.coverage' \
+  --exclude 'htmlcov' \
   --exclude '__pycache__' \
   --exclude '.rpmbuild' \
+  --exclude '.env' \
+  --exclude '.env.*' \
+  --exclude '*.key' \
+  --exclude '*.log' \
   --exclude '*.pyc' \
   --exclude '*.bck' \
   "${SCRIPT_DIR}/" "${pkgroot}/"

@@ -579,6 +579,23 @@ Node 20 runtimes. Both Actions were subsequently updated to their reviewed
 v7.0.1 full commit SHAs, which declare Node 24; the exact publication commit
 must retain a green hosted run.
 
+### Generated CI source artifact regression: 2026-09-11
+
+Inspection of the post-merge artifacts for commit `2b4afde` found that the SRPM
+source archive contained `.ruff_cache`. The workflow ran Ruff before copying the
+entire runner working tree with `rsync`, so generated runner state entered the
+source artifact even though it was not tracked by Git. The binary RPM payload
+was unaffected and no credential or private data was found, but that SRPM is not
+approved for publication.
+
+The workflow now creates its source tarball with `git archive HEAD`, so only
+files tracked by the exact checked-out commit can enter the SRPM. The local
+development build also explicitly excludes common analysis/test caches,
+coverage output, environment files, keys, and logs. Regression coverage rejects
+a return to CI working-tree `rsync` packaging and requires the local exclusions.
+The remediation is source-tested; a green post-merge hosted run and inspection
+of its exact SRPM remain mandatory before publication.
+
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**

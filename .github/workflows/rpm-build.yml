@@ -66,23 +66,13 @@ jobs:
           TOPDIR="$PWD/.rpmbuild"
           mkdir -p "$TOPDIR"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
-          TMPDIR_SRC="$(mktemp -d)"
-          PKGROOT="$TMPDIR_SRC/game-mover-${VERSION}"
-          mkdir -p "$PKGROOT"
-
-          rsync -a \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '.venv' \
-            --exclude '.vscode' \
-            --exclude '__pycache__' \
-            --exclude '.rpmbuild' \
-            --exclude '*.pyc' \
-            --exclude '*.bck' \
-            ./ "$PKGROOT"/
-
-          tar -C "$TMPDIR_SRC" -czf "$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" "game-mover-${VERSION}"
-          rm -rf "$TMPDIR_SRC"
+          # Archive only files tracked by the exact checked-out commit. Test
+          # caches and any other runner-local files must never enter the SRPM.
+          git archive \
+            --format=tar.gz \
+            --prefix="game-mover-${VERSION}/" \
+            --output="$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" \
+            HEAD
 
           cp game-mover.spec "$TOPDIR/SPECS/"
           rpmbuild --define "_topdir $TOPDIR" -ba "$TOPDIR/SPECS/game-mover.spec"
