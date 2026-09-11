@@ -20,6 +20,31 @@ chat, a machine's global Git settings, or remembered numeric account IDs.
   functional problem. Routine work within the authorized scope needs no new
   approval. Never mark a finding fixed solely to make documentation consistent.
 
+## Branch and merge workflow
+
+`main` is the protected integration and release branch. Start ordinary work
+from the current `origin/main` on a short-lived, descriptively named branch.
+Commit and push that branch, open a pull request targeting `main`, and require
+the complete `RPM Build` check to pass before review and merge. Do not push
+directly to `main`, bypass a failed or pending check, or force-push/delete
+`main`, except for an explicitly authorized emergency recovery with its reason
+and verification recorded.
+
+Review the complete pull-request diff, commit identities, audit impact, and any
+generated or vendored content before merging. A branch becoming public exposes
+all commits reachable from it, so secrets, personal data, production examples,
+and uncoordinated vulnerability details must never be committed even
+temporarily. After merging, require a new green `RPM Build` run for the exact
+resulting `main` commit; inspect and publish artifacts from that run, not from
+the pre-merge branch run. Delete the merged short-lived branch only after the
+result and remote state have been verified.
+
+When GitHub repository controls are available, protect `main` by requiring a
+pull request and the `build-rpm` status check, dismissing stale approvals when
+appropriate, and blocking force pushes and deletion. Until GitHub can enforce
+those settings, treat this section as a mandatory process gate rather than
+permission to merge directly.
+
 ## Git identity and private data
 
 The canonical repository is `michalbernacky-dev/game-mover`. The former

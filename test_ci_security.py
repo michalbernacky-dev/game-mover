@@ -32,6 +32,9 @@ class CiSecurityTest(unittest.TestCase):
     def test_workflow_scans_and_tests_before_building(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
+        self.assertIn('push:\n    branches:\n      - "main"', workflow)
+        self.assertIn('pull_request:\n    branches:\n      - "main"', workflow)
+        self.assertNotIn('- "**"', workflow)
         secret_scan = workflow.index("gitleaks detect")
         static_scan = workflow.index("ruff check game_mover*.py")
         tests = workflow.index("python3 -m unittest discover -v")
@@ -103,6 +106,8 @@ class CiSecurityTest(unittest.TestCase):
         self.assertIn("must never\nbe used as a release source", agent_instructions)
         self.assertIn("do not automatically honor `.gitignore`", agent_instructions)
         self.assertIn("green hosted run for that exact commit", agent_instructions)
+        self.assertIn("Do not push\ndirectly to `main`", agent_instructions)
+        self.assertIn("requiring a\npull request and the `build-rpm` status check", agent_instructions)
 
         specification = RPM_SPEC_PATH.read_text(encoding="utf-8")
         self.assertIn("License:        PolyForm-Noncommercial-1.0.0", specification)

@@ -777,6 +777,14 @@ Official artifacts should come from the green hosted workflow for the exact
 reviewed commit. Regression coverage requires these safeguards to remain in
 `AGENTS.md`.
 
+The development workflow now uses short-lived branches and pull requests into
+`main`. CI runs for pull requests targeting `main`, then runs again after merge
+for the exact resulting commit; only artifacts from the reviewed green `main`
+or version-tag run are publication candidates. Repository instructions prohibit
+ordinary direct pushes, bypassing checks, and force-pushing or deleting `main`.
+After visibility changes, GitHub protection must technically require pull
+requests and the `build-rpm` check and must block force pushes and deletion.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open
@@ -805,8 +813,9 @@ written rationale. The current concrete gates are:
    its exact binary and source RPM; and
 3. immediately after changing visibility, enable and verify private
    vulnerability reporting, secret scanning, push protection, and `main`
-   branch/ruleset protection, and repeat the known-old-SHA checks through the
-   unauthenticated public boundary.
+   branch/ruleset protection requiring pull requests and the `build-rpm` check
+   while blocking force pushes and deletion, and repeat the known-old-SHA checks
+   through the unauthenticated public boundary.
 
 The 2026-09-11 review completed the current-tree, remote-ref, package,
 deployment-documentation, local-host, and CI portions of this gate. Item 2 is

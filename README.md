@@ -545,18 +545,23 @@ Note: a manual RPM install may not start the service automatically. If the servi
 sudo systemctl restart game_mover.service
 ```
 
-## CI on push
+## Development and CI workflow
 
-Git itself does not build RPMs on push. The RPM build is handled by the CI workflow.
+Changes should be developed on a short-lived branch and merged into `main`
+through a pull request. Do not push ordinary changes directly to `main`.
 
-Repository now includes GitHub Actions workflow:
+The repository includes this GitHub Actions workflow:
 
 - `.github/workflows/rpm-build.yml`
 
 Behavior:
 
-- on every `push` and `pull_request`, the workflow builds an RPM and SRPM
-- the resulting artifacts are available in the Actions run as downloadable files
+- pull requests targeting `main` run all checks and build an RPM and SRPM;
+- after merge, a push to `main` runs the workflow again for the exact resulting
+  commit;
+- version tags matching `v*` also run the workflow;
+- publish only inspected artifacts from the green `main` or tag run, not from
+  the pre-merge branch run.
 
 ---
 
@@ -1083,9 +1088,10 @@ Poznámka: ruční instalace RPM nemusí službu automaticky spustit. Pokud je s
 sudo systemctl restart game_mover.service
 ```
 
-## CI při pushi
+## Vývojový a CI postup
 
-Git sám o sobě při pushi RPM nebuilduje. Build RPM zajišťuje CI workflow.
+Změny se mají vyvíjet v krátkodobé větvi a slučovat do `main` přes pull request.
+Běžné změny neposílej přímo do `main`.
 
 Repozitář obsahuje GitHub Actions workflow:
 
@@ -1093,5 +1099,8 @@ Repozitář obsahuje GitHub Actions workflow:
 
 Chování:
 
-- při každém `push` a `pull_request` workflow vytvoří RPM a SRPM
-- výsledné artefakty jsou dostupné v Actions běhu ke stažení
+- pull requesty mířící do `main` spustí všechny kontroly a sestaví RPM i SRPM;
+- po merge spustí push do `main` workflow znovu pro přesný výsledný commit;
+- workflow spouštějí také verzovací tagy odpovídající `v*`;
+- zveřejňují se pouze zkontrolované artefakty ze zeleného běhu pro `main` nebo
+  tag, nikoli z běhu větve před merge.
