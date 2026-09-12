@@ -596,6 +596,19 @@ a return to CI working-tree `rsync` packaging and requires the local exclusions.
 The remediation is source-tested; a green post-merge hosted run and inspection
 of its exact SRPM remain mandatory before publication.
 
+The first hosted pull-request run of this remediation failed before creating an
+archive because the Fedora container user did not own the Actions checkout and
+Git rejected it as a dubious repository. The archive command now supplies the
+exact current checkout as `safe.directory` in Git's command scope. It does not
+persist global configuration and does not use the unsafe wildcard value. Tests
+require the scoped exception and reject global or wildcard alternatives; hosted
+verification remains pending.
+
+Tracked CI configuration and the local VS Code launch profile had previously
+been excluded by the removed `rsync` rules. Repository export attributes retain
+those exclusions without returning to working-tree packaging; the attributes
+file itself is also excluded. Tests require all three `export-ignore` entries.
+
 ## GM-SA-2026-006: Personal and infrastructure metadata in Git history
 
 - Severity: **Low**

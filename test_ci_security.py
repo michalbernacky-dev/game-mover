@@ -41,7 +41,10 @@ class CiSecurityTest(unittest.TestCase):
         tests = workflow.index("python3 -m unittest discover -v")
         build = workflow.index("rpmbuild --define")
         self.assertIn("            acl \\\n", workflow)
-        self.assertIn("          git archive \\\n", workflow)
+        self.assertIn('            -c "safe.directory=$PWD" \\\n', workflow)
+        self.assertIn("            archive \\\n", workflow)
+        self.assertNotIn("safe.directory=*", workflow)
+        self.assertNotIn("git config --global", workflow)
         self.assertIn("            HEAD\n", workflow)
         self.assertNotIn("          rsync -a \\\n", workflow)
         self.assertLess(secret_scan, build)
@@ -63,6 +66,10 @@ class CiSecurityTest(unittest.TestCase):
             "*.log",
         ):
             self.assertIn(f"--exclude '{excluded_path}'", build_helper)
+
+        archive_attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        for excluded_path in ("/.gitattributes", "/.github", "/.vscode"):
+            self.assertIn(f"{excluded_path} export-ignore", archive_attributes)
 
     def test_dependabot_monitors_actions_and_python_dependencies(self):
         config = DEPENDABOT_PATH.read_text(encoding="utf-8")

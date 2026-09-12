@@ -68,7 +68,9 @@ jobs:
 
           # Archive only files tracked by the exact checked-out commit. Test
           # caches and any other runner-local files must never enter the SRPM.
-          git archive \
+          git \
+            -c "safe.directory=$PWD" \
+            archive \
             --format=tar.gz \
             --prefix="game-mover-${VERSION}/" \
             --output="$TOPDIR/SOURCES/game-mover-${VERSION}.tar.gz" \
