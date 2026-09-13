@@ -92,6 +92,27 @@ migrates them automatically. These providers remain visible in Mover's selector
 with an explicit read-only or externally managed state rather than disappearing
 from the product model.
 
+Epic-owned titles that delegate execution to EA App are a narrow launch adapter
+on top of the same ownership model, not a new prefix manager. Executable game
+metadata lives in the installed-game catalog (`launcher_type=ea_epic`, Epic app
+name, shared EA directory and logical EA prefix name); the SQLite knowledge base
+continues to store human procedures and declarative checks. The first verified
+entry is Battlefront II (`MtMassive`). The adapter resolves the dedicated EA App
+prefix and its Proton runner from Heroic sideload/GamesConfig metadata, supports
+both direct Wine and Proton `pfx` layouts, prefers Heroic's UMU runtime and uses
+Lutris UMU only as a fallback. The Qt client and installed generic helper run as
+the current desktop user. They never call the root broker, copy launcher state,
+or select another player's home.
+
+The launch chain is `Legendary --origin` → `link2ea://` → generic Wine wrapper →
+UMU → configured Proton → that player's EA App `start.exe`. Legendary owns the
+short-lived Epic exchange-code lifecycle. Its launch output is detached from
+the GUI and application logs; defensive error rendering redacts
+`AUTH_PASSWORD`. Only the transient process arguments needed by EA App carry
+the generated URL. Launch fails closed when Heroic/Legendary authentication,
+EA App, `start.exe`, UMU, the configured Proton runner, shared payload, or the
+player's symlink is missing.
+
 Adapters may discover endpoints from an authoritative game/runtime source and
 merge them with optional registry entries. Minecraft reads `server.properties`
 or Podman publication metadata. The Satisfactory systemd adapter reads the

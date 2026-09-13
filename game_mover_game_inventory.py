@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from game_mover_ea import ea_game_install_in_progress, heroic_ea_installations
+from game_mover_ea_epic import game_by_app_name, game_metadata_for_name
 from game_mover_game_filters import is_excluded_game
 
 
@@ -93,7 +94,13 @@ class Inventory:
     ):
         name = str(name).strip()
         path = os.path.realpath(str(path)) if path else ""
-        slug = game_slug(name)
+        metadata = game_metadata_for_name(name)
+        app_game = game_by_app_name(app_id) if app_id else None
+        if app_game:
+            metadata = game_metadata_for_name(app_game.name)
+        if metadata:
+            name = metadata["name"]
+        slug = metadata.get("id") or game_slug(name)
         if (
             not name or slug in LAUNCHER_SLUGS
             or is_excluded_game(platform, name)
@@ -107,7 +114,9 @@ class Inventory:
             "knowledge_aliases": set(knowledge_aliases(slug)),
             "verified": False,
             "possible_residue": False,
+            "_metadata": {},
         })
+        item["_metadata"].update(metadata)
         item["platforms"].add(str(platform).lower())
         item["paths"].add(path)
         if user:
@@ -132,6 +141,7 @@ class Inventory:
                 size += self.path_sizes[real]
             rows.append({
                 **item,
+                **item["_metadata"],
                 "platforms": sorted(item["platforms"]),
                 "users": sorted(item["users"]),
                 "paths": sorted(item["paths"]),
@@ -143,6 +153,7 @@ class Inventory:
                 ),
             })
             rows[-1].pop("verified", None)
+            rows[-1].pop("_metadata", None)
         return sorted(rows, key=lambda row: row["name"].casefold())
 
 

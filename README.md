@@ -18,6 +18,32 @@ read-only inventory providers, remain visible in Mover's platform selector, and
 expose no mutation until their storage workflows are explicitly implemented and
 tested. Existing legacy data is never removed by this scope restriction.
 
+### Epic-owned games launched by EA App
+
+The supported-game catalog now describes the exceptional `ea_epic` launch
+flow separately from ordinary EA payload sharing. The first verified entry is
+**STAR WARS Battlefront II: Celebration Edition** (`MtMassive`). Its one shared
+payload is `/var/Games/EA/STAR WARS Battlefront II`; each player keeps a
+separate Heroic-managed EA App prefix, Epic login and EA login.
+
+Select the game in **Tips and Notes** and use **Launch through Epic → EA App**,
+or use the generic per-user helper installed by the package:
+
+```bash
+game-mover-ea-epic check MtMassive
+game-mover-ea-epic launch MtMassive
+```
+
+The helper requires Heroic, the player's authenticated Legendary config, a
+dedicated Heroic EA App prefix with EA App and `start.exe`, the Proton runner
+recorded for that prefix, UMU, shared data and the correct per-user symlink. It
+prefers Heroic's UMU and falls back to Lutris' UMU. It invokes `legendary launch
+MtMassive --origin`, using itself as Legendary's Wine wrapper; the wrapper
+removes Legendary's `start` pseudo-command and launches the prefix's Windows
+`start.exe` through UMU. Legendary generates the Epic exchange code only for
+that launch. Game Mover never stores it, and Legendary output is not captured
+in the GUI or persistent application logs.
+
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -496,10 +522,14 @@ What installer does:
 - migrates mutable backend configuration to `/var/lib/game-mover`; `/etc/game_mover` retains only root-provisioned credentials and the root-owned systemd allowlist
 - installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
 - optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
-- exposes the CLI helper via `/usr/local/bin/game-mover` and also in `/opt/game_mover/game-mover`
+- exposes `game-mover` and the generic `game-mover-ea-epic` player helper via `/usr/local/bin`
 - protects mutating local API calls with a random token stored in `/etc/game_mover/api.token`, readable only by members of the `gemers` group
 
 `deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
+
+Version 0.33.0 adds the generic Epic-to-EA launch path, prerequisite reporting,
+and the verified Battlefront II `MtMassive` catalog entry. It keeps the dynamic
+Epic exchange code out of configuration, UI output, and persistent logs.
 
 Version 0.32.0 adds the bounded Heroic EA App workflow. Prefix discovery comes
 from Heroic's sideload configuration and rejects its global shared default.
@@ -596,6 +626,31 @@ Heroic. Ostatní launchery zůstávají jen zdrojem read-only
 inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
+
+### Hry vlastněné na Epicu a spouštěné přes EA App
+
+Katalog podporovaných her nově popisuje zvláštní flow `ea_epic` odděleně od
+běžného sdílení EA dat. První ověřený záznam je **STAR WARS Battlefront II:
+Celebration Edition** (`MtMassive`). Jediná sdílená kopie je v
+`/var/Games/EA/STAR WARS Battlefront II`; každý hráč má vlastní Heroic EA App
+prefix a vlastní přihlášení k Epicu i EA.
+
+Hru lze vybrat v **Tipy a poznámky** a stisknout **Spustit přes Epic → EA App**,
+nebo použít generický helper instalovaný balíčkem pro všechny místní hráče:
+
+```bash
+game-mover-ea-epic check MtMassive
+game-mover-ea-epic launch MtMassive
+```
+
+Helper ověří Heroic, přihlášenou Legendary konfiguraci daného hráče,
+samostatný Heroic EA App prefix s EA App a `start.exe`, Proton uvedený v
+metadatech prefixu, UMU, sdílená data a správný uživatelský symlink. Preferuje
+Heroic UMU a případně použije UMU z Lutrisu. Spustí `legendary launch MtMassive
+--origin` a sám funguje jako Wine wrapper: zahodí pseudo-příkaz `start` a přes
+UMU spustí Windows `start.exe` z prefixu. Krátkodobý Epic exchange code vznikne
+jen při tomto spuštění; Game Mover jej neukládá ani nevypisuje do UI či
+trvalých logů.
 
 Tento repozitář `game-mover` je kanonickým zdrojem kódu, RPM balíčkování i
 nasazení.
@@ -1051,10 +1106,14 @@ Co instalátor dělá:
 - přesune měnitelnou konfiguraci backendu do `/var/lib/game-mover`; v `/etc/game_mover` zůstanou jen přístupové údaje vytvořené rootem a root-owned allowlist systemd služeb
 - nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
 - volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`
-- zpřístupní CLI helper přes `/usr/local/bin/game-mover` a také v `/opt/game_mover/game-mover`
+- zpřístupní `game-mover` a generický hráčský helper `game-mover-ea-epic` přes `/usr/local/bin`
 - chrání mutující lokální API volání náhodným tokenem v `/etc/game_mover/api.token`, který je čitelný jen pro členy skupiny `gemers`
 
 `deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+
+Verze 0.33.0 přidává obecné spuštění Epic → EA, přehled prerequisites a ověřený
+katalogový záznam Battlefront II `MtMassive`. Dynamický Epic exchange code
+nezapisuje do konfigurace, UI ani trvalých logů.
 
 Verze 0.32.0 přidává úzce omezenou podporu EA App přes Heroic. Prefix se zjišťuje
 z Heroic sideload konfigurace a globální sdílený výchozí prefix se odmítá. Před

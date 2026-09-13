@@ -304,6 +304,24 @@ class ServerManagementGuiTest(unittest.TestCase):
             game_mover.QHeaderView.Interactive,
         )
 
+    def test_ea_epic_catalog_entry_enables_current_user_launch(self):
+        with patch.object(self.window, "load_knowledge_target"):
+            self.window.on_installed_knowledge_games({"games": [{
+                "id": "star-wars-battlefront-ii-celebration-edition",
+                "name": "STAR WARS Battlefront II: Celebration Edition",
+                "platforms": ["ea"], "users": ["alice"],
+                "paths": ["/var/Games/EA/STAR WARS Battlefront II"],
+                "knowledge_aliases": [
+                    "star-wars-battlefront-ii-celebration-edition",
+                ],
+                "launcher_type": "ea_epic", "epic_app_name": "MtMassive",
+                "size_bytes": 1, "possible_residue": False,
+            }]})
+
+        self.assertTrue(self.window.knowledge_launch_button.isEnabled())
+        marker = self.window.knowledge_games_table.item(0, 0)
+        self.assertEqual(marker.data(game_mover.Qt.UserRole + 2), "MtMassive")
+
     def tearDown(self):
         self.window.close()
         self.window.deleteLater()

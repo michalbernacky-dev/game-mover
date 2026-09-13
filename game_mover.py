@@ -27,6 +27,8 @@ from game_mover_ea import (
     heroic_ea_installations,
     heroic_ea_shared_default_detected,
 )
+from game_mover_ea_epic import launch as launch_ea_epic, redact_sensitive
+from game_mover_ea_epic import prerequisite_report as ea_epic_prerequisites
 from game_mover_users import interactive_usernames
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
@@ -1260,6 +1262,13 @@ class GameMover(QWidget):
         self.knowledge_games_table.itemSelectionChanged.connect(self.on_knowledge_game_selected)
         layout.addWidget(self.knowledge_games_table)
 
+        self.knowledge_launch_button = QPushButton(
+            "Spustit přes Epic → EA App", tab,
+        )
+        self.knowledge_launch_button.setEnabled(False)
+        self.knowledge_launch_button.clicked.connect(self.launch_selected_knowledge_game)
+        layout.addWidget(self.knowledge_launch_button, 0, Qt.AlignLeft)
+
         self.knowledge_manual_toggle = QPushButton("Ruční cíl…", tab)
         self.knowledge_manual_toggle.setCheckable(True)
         layout.addWidget(self.knowledge_manual_toggle, 0, Qt.AlignLeft)
@@ -1423,6 +1432,8 @@ class GameMover(QWidget):
             dot.setIcon(colored_dot_icon("#ff6b6b" if residue else "#69db7c"))
             dot.setData(Qt.UserRole, target)
             dot.setData(Qt.UserRole + 1, residue)
+            dot.setData(Qt.UserRole + 2, game.get("epic_app_name")
+                        if game.get("launcher_type") == "ea_epic" else None)
             dot.setToolTip(
                 "Pravděpodobný pozůstatek: malý adresář bez potvrzení launcherem."
                 if residue else "Instalace byla potvrzena launcherem nebo instalačními metadaty."
@@ -1452,6 +1463,7 @@ class GameMover(QWidget):
             dot.setIcon(colored_dot_icon("#f3f6f8"))
             dot.setData(Qt.UserRole, (target_type, target_id))
             dot.setData(Qt.UserRole + 1, False)
+            dot.setData(Qt.UserRole + 2, None)
             dot.setToolTip("Tip existuje, ale místní instalace nebyla nalezena.")
             for column, item in enumerate((
                 dot, QTableWidgetItem(target_id), QTableWidgetItem("—"),
@@ -1506,12 +1518,41 @@ class GameMover(QWidget):
     def on_knowledge_game_selected(self):
         rows = self.knowledge_games_table.selectionModel().selectedRows()
         if not rows:
+            self.knowledge_launch_button.setEnabled(False)
             return
         item = self.knowledge_games_table.item(rows[0].row(), 0)
+        self.knowledge_launch_button.setEnabled(
+            bool(item and item.data(Qt.UserRole + 2))
+        )
         target = item.data(Qt.UserRole) if item else None
         if isinstance(target, tuple) and len(target) == 2:
             self.set_knowledge_target(*target)
             self.load_knowledge_target()
+
+    def launch_selected_knowledge_game(self):
+        rows = self.knowledge_games_table.selectionModel().selectedRows()
+        item = self.knowledge_games_table.item(rows[0].row(), 0) if rows else None
+        app_name = item.data(Qt.UserRole + 2) if item else None
+        if not app_name:
+            return
+        try:
+            report = ea_epic_prerequisites(app_name)
+            missing = [check["message"] for check in report["checks"]
+                       if not check["ok"]]
+            if missing:
+                QMessageBox.warning(
+                    self, "EA/Epic – chybějící podmínky", "\n".join(missing),
+                )
+                return
+            launch_ea_epic(app_name)
+            QMessageBox.information(
+                self, "Spuštění hry",
+                "Požadavek byl předán Legendary a EA App pro tohoto uživatele.",
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            QMessageBox.critical(
+                self, "Spuštění selhalo", redact_sensitive(str(error)),
+            )
 
     def set_knowledge_target(self, target_type, target_id):
         index = self.knowledge_target_type.findData(target_type)

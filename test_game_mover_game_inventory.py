@@ -152,6 +152,21 @@ class InstalledGameInventoryTest(unittest.TestCase):
         self.assertFalse(by_id["complete-game"]["possible_residue"])
         self.assertTrue(by_id["example-game-ii"]["possible_residue"])
 
+    def test_battlefront_ea_payload_uses_supported_ea_epic_metadata(self):
+        battlefront = self.shared / "EA/STAR WARS Battlefront II"
+        battlefront.mkdir(parents=True)
+
+        items = scan_installed_games(str(self.homes), str(self.shared))
+        item = {item["id"]: item for item in items}[
+            "star-wars-battlefront-ii-celebration-edition"
+        ]
+        self.assertEqual(
+            item["name"], "STAR WARS Battlefront II: Celebration Edition",
+        )
+        self.assertEqual(item["launcher_type"], "ea_epic")
+        self.assertEqual(item["epic_app_name"], "MtMassive")
+        self.assertEqual(item["ea_prefix"], "EA_app")
+
     def test_slug_is_stable_and_ascii(self):
         self.assertEqual(game_slug("Zaklínač® 3"), "zaklinac-3")
 

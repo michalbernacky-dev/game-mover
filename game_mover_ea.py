@@ -43,6 +43,9 @@ class EaInstallation:
     prefix: str
     games_root: str
     install_data: str
+    wine_root: str = ""
+    config_root: str = ""
+    wine_version: dict | None = None
 
 
 def _heroic_config_roots(home: str) -> tuple[str, ...]:
@@ -126,6 +129,15 @@ def _shared_default_prefixes(config_root: str, home: str) -> set[str]:
     return paths
 
 
+def _wine_roots(prefix: str) -> tuple[str, ...]:
+    """Return supported Heroic/Proton Wine layouts without guessing a game path."""
+    roots = []
+    for candidate in (os.path.join(prefix, "pfx"), prefix):
+        if os.path.isdir(candidate) and candidate not in roots:
+            roots.append(candidate)
+    return tuple(roots)
+
+
 def heroic_ea_installations(
     home: str, *, allow_shared_default: bool = False,
 ) -> list[EaInstallation]:
@@ -144,22 +156,29 @@ def heroic_ea_installations(
             prefix = _beneath_home(home, prefix) if isinstance(prefix, str) else None
             if not prefix or not os.path.isdir(prefix) or prefix in seen:
                 continue
-            if not any(
-                os.path.isdir(os.path.join(prefix, marker))
-                for marker in EA_LAUNCHER_MARKERS
-            ):
+            wine_root = next((
+                root for root in _wine_roots(prefix)
+                if any(os.path.isdir(os.path.join(root, marker))
+                       for marker in EA_LAUNCHER_MARKERS)
+            ), None)
+            if not wine_root:
                 continue
             if prefix in shared_defaults and not allow_shared_default:
                 continue
             for relative_root in EA_GAME_ROOTS:
-                games_root = os.path.join(prefix, relative_root)
+                games_root = os.path.join(wine_root, relative_root)
                 if not os.path.isdir(games_root) or os.path.islink(games_root):
                     continue
                 installations.append(EaInstallation(
                     app_id=app_id,
                     prefix=prefix,
                     games_root=os.path.realpath(games_root),
-                    install_data=os.path.join(prefix, EA_INSTALL_DATA),
+                    install_data=os.path.join(wine_root, EA_INSTALL_DATA),
+                    wine_root=wine_root,
+                    config_root=config_root,
+                    wine_version=(entry.get("wineVersion")
+                                  if isinstance(entry.get("wineVersion"), dict)
+                                  else None),
                 ))
             seen.add(prefix)
     return installations
