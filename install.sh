@@ -148,11 +148,11 @@ podman_uid="$(id -u "${PODMAN_USER}")"
 runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
   systemctl --user enable --now podman.socket podman-restart.service
 ensure_local_admin_token
-mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
-chgrp "${GROUP_NAME}" /var/Games /var/Games_links /var/Games/steam-cache
-chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache
+mkdir -p /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+chgrp "${GROUP_NAME}" /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+chmod 0775 /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
 setfacl -m "g:${GROUP_NAME}:rwx,m::rwx,d:g:${GROUP_NAME}:rwx,d:m::rwx" \
-  /var/Games /var/Games_links /var/Games/steam-cache
+  /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
 
 echo "[4/8] Instaluji systemd službu pro Flask API (${SERVICE_PATH})"
 copy_if_changed "${SCRIPT_DIR}/game_mover.service" "${SERVICE_PATH}" 644

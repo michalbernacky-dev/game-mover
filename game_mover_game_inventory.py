@@ -10,6 +10,7 @@ from pathlib import Path
 
 import yaml
 
+from game_mover_ea import ea_game_install_in_progress, heroic_ea_installations
 from game_mover_game_filters import is_excluded_game
 
 
@@ -88,7 +89,7 @@ class Inventory:
 
     def add(
         self, name, platform, path, user=None, app_id=None, verified=False,
-        aliases=None,
+        aliases=None, possible_residue=False,
     ):
         name = str(name).strip()
         path = os.path.realpath(str(path)) if path else ""
@@ -105,6 +106,7 @@ class Inventory:
             "paths": set(), "app_ids": set(),
             "knowledge_aliases": set(knowledge_aliases(slug)),
             "verified": False,
+            "possible_residue": False,
         })
         item["platforms"].add(str(platform).lower())
         item["paths"].add(path)
@@ -115,6 +117,9 @@ class Inventory:
         for alias in aliases or ():
             item["knowledge_aliases"].add(game_slug(alias))
         item["verified"] = item["verified"] or bool(verified)
+        item["possible_residue"] = (
+            item["possible_residue"] or bool(possible_residue)
+        )
 
     def result(self):
         rows = []
@@ -133,7 +138,9 @@ class Inventory:
                 "app_ids": sorted(item["app_ids"]),
                 "knowledge_aliases": sorted(item["knowledge_aliases"]),
                 "size_bytes": size,
-                "possible_residue": not item["verified"] and size <= self.small_install_bytes,
+                "possible_residue": item["possible_residue"] or (
+                    not item["verified"] and size <= self.small_install_bytes
+                ),
             })
             rows[-1].pop("verified", None)
         return sorted(rows, key=lambda row: row["name"].casefold())
@@ -144,6 +151,7 @@ def _scan_shared(inventory, shared_root):
         "steam": ("steam",), "heroic": ("Heroic",), "epic": ("EpicGames", "Epic"),
         "gog": ("gog",), "ubisoft": ("ubisoft", "Ubisoft"),
         "rockstar": ("rockstar", "Rockstar"),
+        "ea": ("EA", "ea"),
     }
     for platform, names in roots.items():
         for root_name in names:
@@ -327,13 +335,27 @@ def _scan_common_user_directories(inventory, home, user):
             os.path.join(home, "Games/ea-app/drive_c/Program Files (x86)/EA Games"),
         ],
     }
+    ea_installations = heroic_ea_installations(home, allow_shared_default=True)
+    roots["ea"].extend(str(installation.games_root) for installation in ea_installations)
     # Heroic/Lutris commonly give each GOG title its own Wine prefix.
     for prefix in _children(os.path.join(home, "Games/gog")):
         roots["gog"].append(os.path.join(prefix.path, "drive_c/GOG Games"))
     for platform, candidates in roots.items():
         for root in candidates:
             for entry in _children(root, include_symlinks=True):
-                inventory.add(entry.name, platform, entry.path, user)
+                incomplete = False
+                if platform == "ea":
+                    incomplete = any(
+                        os.path.realpath(installation.games_root)
+                        == os.path.realpath(root)
+                        and ea_game_install_in_progress(installation, entry.name)
+                        for installation in ea_installations
+                    )
+                inventory.add(
+                    entry.name, platform, entry.path, user,
+                    verified=platform == "ea" and not incomplete,
+                    possible_residue=incomplete,
+                )
 
 
 def scan_installed_games(home_root="/home", shared_root="/var/Games", small_install_bytes=DEFAULT_SMALL_INSTALL_BYTES):

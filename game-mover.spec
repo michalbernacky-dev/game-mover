@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.31.4
+Version:        0.32.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -116,11 +116,11 @@ for config in servers.json gate.json security.json dns.json dns-runtime.json dns
     fi
 done
 
-mkdir -p /var/Games /var/Games_links /var/Games/steam-cache
-chgrp gemers /var/Games /var/Games_links /var/Games/steam-cache || :
-chmod 0775 /var/Games /var/Games_links /var/Games/steam-cache || :
+mkdir -p /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+chgrp gemers /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
+chmod 0775 /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
 setfacl -m 'g:gemers:rwx,m::rwx,d:g:gemers:rwx,d:m::rwx' \
-    /var/Games /var/Games_links /var/Games/steam-cache || :
+    /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
 
 if [ -L /var/lib/game-platform/servers ]; then
     echo "Managed server directory must not be a symbolic link" >&2
@@ -172,6 +172,11 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.32.0-1
+- Move complete EA App game payloads from a dedicated Heroic-managed Wine prefix
+- Keep launcher, registry and account state in the player profile
+- Reject staged downloads and active Heroic or EA App processes
+
 * Wed Sep 09 2026 Game Mover Packager <packager@example.invalid> - 0.31.4-1
 - Preserve effective ACL rights and reject hardlinked legacy server data
 - Keep Steam cache inspection separate from authorized mutations

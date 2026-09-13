@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 
+from game_mover_ea import ea_game_path_install_in_progress
+
 
 EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton", "GE-Proton")
 EXCLUDE_LIST = {
@@ -15,6 +17,7 @@ EXCLUDE_LIST = {
     ),
     "gog": (),
     "epic": (),
+    "ea": (),
     "ubisoft": (),
     "rockstar": (),
 }
@@ -117,6 +120,8 @@ def is_possible_game_residue(platform, path):
         return False
     if platform == "gog":
         return not _looks_like_complete_gog_install(path)
+    if platform == "ea":
+        return ea_game_path_install_in_progress(path)
     # Heroic, Ubisoft and Rockstar do not yet have a sufficiently reliable
     # local registry reader.  Do not hide their directories based on size.
     return False

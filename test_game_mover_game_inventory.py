@@ -118,6 +118,40 @@ class InstalledGameInventoryTest(unittest.TestCase):
         self.assertFalse(agent["possible_residue"])
         self.assertIn("agent-mlinak", agent["knowledge_aliases"])
 
+    def test_scans_heroic_ea_payload_and_flags_staged_download(self):
+        config = self.user / ".config/heroic"
+        (config / "sideload_apps").mkdir(parents=True)
+        (config / "GamesConfig").mkdir()
+        prefix = self.user / "Games/Heroic/Prefixes/default"
+        games = prefix / "drive_c/Program Files/EA Games"
+        launcher = prefix / "drive_c/Program Files/Electronic Arts/EA Desktop"
+        launcher.mkdir(parents=True)
+        complete = games / "Complete Game"
+        incomplete = games / "Example Game II"
+        complete.mkdir(parents=True)
+        incomplete.mkdir()
+        (complete / "large.bin").write_bytes(b"x" * 32)
+        (incomplete / "large.bin").write_bytes(b"x" * 32)
+        install_data = (
+            prefix / "drive_c/ProgramData/EA Desktop/InstallData/Example Game II"
+        )
+        install_data.mkdir(parents=True)
+        (install_data / "download.eazstate").write_text("pending")
+        (config / "sideload_apps/library.json").write_text(json.dumps({
+            "games": [{"title": "EA App", "app_name": "ea-app-local"}],
+        }))
+        (config / "GamesConfig/ea-app-local.json").write_text(json.dumps({
+            "ea-app-local": {"winePrefix": str(prefix)},
+        }))
+
+        items = scan_installed_games(
+            str(self.homes), str(self.shared), small_install_bytes=1,
+        )
+        by_id = {item["id"]: item for item in items}
+        self.assertEqual(by_id["complete-game"]["platforms"], ["ea"])
+        self.assertFalse(by_id["complete-game"]["possible_residue"])
+        self.assertTrue(by_id["example-game-ii"]["possible_residue"])
+
     def test_slug_is_stable_and_ascii(self):
         self.assertEqual(game_slug("Zaklínač® 3"), "zaklinac-3")
 

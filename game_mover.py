@@ -22,6 +22,11 @@ from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, p
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_game_filters import is_excluded_game, is_possible_game_residue
+from game_mover_ea import (
+    ea_game_install_in_progress,
+    heroic_ea_installations,
+    heroic_ea_shared_default_detected,
+)
 from game_mover_users import interactive_usernames
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
@@ -76,6 +81,7 @@ MOVER_PLATFORM_OPTIONS = (
     ("Steam", "steam"),
     ("GOG (Heroic)", "gog"),
     ("Epic (Heroic)", "epic"),
+    ("EA App (Heroic)", "ea"),
     ("Ubisoft Connect", "ubisoft"),
     ("Rockstar Games", "rockstar"),
 )
@@ -114,12 +120,17 @@ def list_wheel_users():
         return []
 
 def user_common_candidates(platform, user):
-    if platform != "steam":
-        return []
-    return [
-        f"/home/{user}/.steam/steam/steamapps/common",
-        f"/home/{user}/.local/share/Steam/steamapps/common",
-    ]
+    if platform == "steam":
+        return [
+            f"/home/{user}/.steam/steam/steamapps/common",
+            f"/home/{user}/.local/share/Steam/steamapps/common",
+        ]
+    if platform == "ea":
+        return [
+            item.games_root
+            for item in heroic_ea_installations(f"/home/{user}")
+        ]
+    return []
 
 def resolve_user_common(platform, user):
     for path in user_common_candidates(platform, user):
@@ -1079,8 +1090,9 @@ class GameMover(QWidget):
         layout.addLayout(platform_row)
 
         self.mover_scope_label = QLabel(
-            "Sdílení herních dat zajišťuje Game Mover pouze pro Steam. "
-            "GOG a Epic spravuje Heroic; ostatní launchery jsou zatím pouze rozpoznávané.",
+            "Game Mover sdílí data her ze Steamu a z EA App v ověřeném "
+            "Heroic prefixu. GOG a Epic spravuje přímo Heroic; ostatní "
+            "launchery jsou zatím pouze rozpoznávané.",
             self,
         )
         self.mover_scope_label.setWordWrap(True)
@@ -1107,7 +1119,9 @@ class GameMover(QWidget):
         )
         self.show_move_residue_checkbox.setToolTip(
             "Zobrazí adresáře, které launcher neeviduje jako nainstalovanou hru. "
-            "Mohou obsahovat savy, zálohy nebo ručně spravovanou instalaci."
+            "Mohou obsahovat savy, zálohy nebo ručně spravovanou instalaci. "
+            "U EA App zobrazí nedokončené stahování pouze informativně; přesun "
+            "zůstane zakázaný."
         )
         self.show_move_residue_checkbox.toggled.connect(
             lambda _checked: self.refresh_game_lists()
@@ -3716,14 +3730,20 @@ class GameMover(QWidget):
         if not hasattr(self, "move_button"):
             return
         selected_game = self.game_combo_move.currentText()
+        selected_game_data = self.game_combo_move.currentData()
+        move_blocked = bool(
+            isinstance(selected_game_data, dict)
+            and selected_game_data.get("move_blocked")
+        )
         selected_link = self.symlink_list.currentItem()
         self.move_button.setEnabled(
-            self.platform == "steam"
+            self.platform in ("steam", "ea")
             and bool(selected_game and not selected_game.startswith("Žádné"))
+            and not move_blocked
             and bool(self.local_mover_operation_headers("game.move"))
         )
         self.link_button.setEnabled(
-            self.platform == "steam"
+            self.platform in ("steam", "ea")
             and bool(selected_link and not selected_link.text().startswith("Žádné"))
             and bool(self.local_mover_operation_headers("game.link"))
         )
@@ -7094,9 +7114,10 @@ class GameMover(QWidget):
     def on_platform_changed(self, _index):
         self.platform = self.platform_combo.currentData() or "steam"
         steam_supported = self.platform == "steam"
+        ea_supported = self.platform == "ea"
         self.cache_button.setVisible(steam_supported)
         self.fix_perms_button.setVisible(steam_supported)
-        self.show_move_residue_checkbox.setEnabled(steam_supported)
+        self.show_move_residue_checkbox.setEnabled(steam_supported or ea_supported)
         if steam_supported:
             self.mover_scope_label.setText(
                 "Steam podporuje přesun herních dat do sdílené knihovny, "
@@ -7105,6 +7126,24 @@ class GameMover(QWidget):
             self.label_move.setText("Steam hry k přesunu do sdílené knihovny:")
             self.label_symlink.setText(
                 "Steam hry ve sdílené knihovně dostupné pro symlink:"
+            )
+        elif ea_supported:
+            if heroic_ea_shared_default_detected(f"/home/{self.user}"):
+                self.mover_scope_label.setText(
+                    "EA App používá globální sdílený výchozí prefix Heroicu. "
+                    "Přesun je zablokovaný; nejprve jí nastav samostatný Wine "
+                    "prefix, například pod Prefixes/default/EA App."
+                )
+            else:
+                self.mover_scope_label.setText(
+                    "EA App je rozpoznaná podle sideload konfigurace Heroicu. "
+                    "Přesouvá se pouze adresář konkrétní dokončené hry do "
+                    "/var/Games/EA; Wine prefix, launcher, registry a přihlášení "
+                    "zůstávají v profilu. Před změnou ukonči Heroic i EA App."
+                )
+            self.label_move.setText("Dokončené EA App hry k přesunu:")
+            self.label_symlink.setText(
+                "EA App hry ve sdílené knihovně dostupné pro symlink:"
             )
         elif self.platform in ("gog", "epic"):
             store = "GOG" if self.platform == "gog" else "Epic"
@@ -7126,11 +7165,19 @@ class GameMover(QWidget):
         self.refresh_game_lists()
 
     def get_game_candidates(self):
-        if self.platform != "steam":
+        if self.platform not in ("steam", "ea"):
             return []
         common = resolve_user_common(self.platform, self.user)
         if common and os.path.exists(common):
             candidates = []
+            ea_installation = None
+            if self.platform == "ea":
+                common_real = os.path.realpath(common)
+                ea_installation = next(
+                    (item for item in heroic_ea_installations(f"/home/{self.user}")
+                     if os.path.realpath(item.games_root) == common_real),
+                    None,
+                )
             for name in os.listdir(common):
                 path = os.path.join(common, name)
                 if (
@@ -7138,10 +7185,19 @@ class GameMover(QWidget):
                     and not os.path.islink(path)
                     and not is_excluded_game(self.platform, name)
                 ):
+                    incomplete = bool(
+                        ea_installation
+                        and ea_game_install_in_progress(ea_installation, name)
+                    )
                     candidates.append({
                         "name": name,
                         "possible_residue": is_possible_game_residue(
                             self.platform, path
+                        ),
+                        "move_blocked": incomplete,
+                        "blocked_reason": (
+                            "Instalace nebo aktualizace v EA App ještě není dokončená."
+                            if incomplete else ""
                         ),
                     })
             return sorted(candidates, key=lambda item: item["name"].casefold())
@@ -7155,7 +7211,7 @@ class GameMover(QWidget):
         ]
 
     def get_symlink_candidates(self):
-        if self.platform != "steam":
+        if self.platform not in ("steam", "ea"):
             return []
         try:
             resp = requests.get(f"{FLASK_URL}/list_shared",
@@ -7170,7 +7226,7 @@ class GameMover(QWidget):
         return []
 
     def refresh_game_lists(self):
-        if self.platform != "steam":
+        if self.platform not in ("steam", "ea"):
             managed = self.platform in ("gog", "epic")
             message = (
                 "Správu instalací zajišťuje Heroic"
@@ -7196,19 +7252,28 @@ class GameMover(QWidget):
         residue_count = sum(
             1 for item in candidates if item["possible_residue"]
         )
-        self.show_move_residue_checkbox.setText(
-            f"Zobrazit možné pozůstatky instalací ({residue_count})"
-        )
+        if self.platform == "ea":
+            self.show_move_residue_checkbox.setText(
+                f"Zobrazit nedokončené instalace pouze informativně ({residue_count})"
+            )
+        else:
+            self.show_move_residue_checkbox.setText(
+                f"Zobrazit možné pozůstatky instalací ({residue_count})"
+            )
         show_residue = self.show_move_residue_checkbox.isChecked()
         move_games = [
-            item["name"] for item in candidates
+            item for item in candidates
             if show_residue or not item["possible_residue"]
         ]
         if not move_games:
             self.game_combo_move.addItem('Žádné hry k přesunu')
             self.move_button.setEnabled(False)
         else:
-            self.game_combo_move.addItems(move_games)
+            for item in move_games:
+                label = item["name"]
+                if item.get("move_blocked"):
+                    label += " — stahování nedokončeno"
+                self.game_combo_move.addItem(label, item)
             self.move_button.setEnabled(True)
 
         # kandidáti pro symlink
@@ -7704,8 +7769,19 @@ class GameMover(QWidget):
             self.update_disk_bars()
 
     def move_game(self):
-        game = self.game_combo_move.currentText()
+        candidate = self.game_combo_move.currentData()
+        game = (
+            candidate.get("name")
+            if isinstance(candidate, dict) else self.game_combo_move.currentText()
+        )
         if not game or game.startswith("Žádné"):
+            return
+        if isinstance(candidate, dict) and candidate.get("move_blocked"):
+            QMessageBox.warning(
+                self, "Přesun není bezpečný",
+                candidate.get("blocked_reason")
+                or "Instalace hry ještě není dokončená.",
+            )
             return
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)

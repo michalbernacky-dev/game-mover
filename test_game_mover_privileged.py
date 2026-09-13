@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import game_mover_privileged as privileged
+from game_mover_ea import EaInstallation
 
 
 class PrivilegedBrokerTest(unittest.TestCase):
@@ -162,6 +163,127 @@ class PrivilegedBrokerTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["user"], 1001)
         self.assertEqual(run.call_args.kwargs["group"], 1001)
         self.assertEqual(run.call_args.kwargs["extra_groups"], [1234])
+        self.assertEqual(run.call_args.kwargs["timeout"], 300)
+
+    def test_ea_user_worker_has_extended_move_timeout(self):
+        account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/player")
+        completed = Mock(returncode=0, stdout='{"message":"ok"}', stderr="")
+        with (
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(
+                privileged.subprocess, "run", return_value=completed,
+            ) as run,
+        ):
+            privileged._broker_dispatch(
+                "move-game",
+                {"platform": "ea", "user": "player", "game_name": "Game"},
+            )
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 900)
+
+    def test_ea_move_keeps_prefix_and_links_only_game_payload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            prefix = home / "Games/Heroic/Prefixes/default"
+            games_root = prefix / "drive_c/Program Files/EA Games"
+            game = games_root / "Example Game II"
+            launcher = prefix / "drive_c/Program Files/Electronic Arts/EA Desktop"
+            game.mkdir(parents=True)
+            launcher.mkdir(parents=True)
+            (game / "game.bin").write_bytes(b"payload")
+            shared = root / "Games"
+            links = root / "Games_links"
+            shared.mkdir()
+            links.mkdir()
+            installation = EaInstallation(
+                app_id="ea-app-local",
+                prefix=str(prefix),
+                games_root=str(games_root),
+                install_data=str(
+                    prefix / "drive_c/ProgramData/EA Desktop/InstallData"
+                ),
+            )
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+
+            with (
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged, "GAMES_ROOT", str(shared)),
+                patch.object(privileged, "GAMES_LINKS_ROOT", str(links)),
+                patch.object(
+                    privileged, "heroic_ea_installations",
+                    return_value=[installation],
+                ),
+                patch.object(
+                    privileged, "heroic_ea_shared_default_detected",
+                    return_value=False,
+                ),
+                patch.object(
+                    privileged, "ea_game_install_in_progress", return_value=False,
+                ),
+                patch.object(privileged, "ea_runtime_active", return_value=False),
+                patch.object(privileged, "_set_shared_permissions"),
+            ):
+                result = privileged._move_game({
+                    "platform": "ea", "user": "player",
+                    "game_name": "Example Game II",
+                })
+
+            target = shared / "EA/Example Game II"
+            proxy = links / "player/ea/Example Game II"
+            self.assertTrue(prefix.is_dir())
+            self.assertTrue(launcher.is_dir())
+            self.assertEqual((target / "game.bin").read_bytes(), b"payload")
+            self.assertEqual(os.readlink(proxy), str(target))
+            self.assertEqual(os.readlink(game), str(proxy))
+            self.assertIn("přesunuta", result["message"])
+
+    def test_ea_move_rejects_incomplete_download_before_mutation(self):
+        installation = Mock(
+            games_root="/home/player/prefix/drive_c/Program Files/EA Games",
+        )
+        account = Mock(pw_uid=1001, pw_dir="/home/player")
+        with (
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(
+                privileged, "heroic_ea_installations", return_value=[installation],
+            ),
+            patch.object(
+                privileged, "heroic_ea_shared_default_detected", return_value=False,
+            ),
+            patch.object(privileged.os.path, "isdir", return_value=True),
+            patch.object(privileged.os.path, "islink", return_value=False),
+            patch.object(
+                privileged, "ea_game_install_in_progress", return_value=True,
+            ),
+            patch.object(privileged.shutil, "move") as move,
+        ):
+            with self.assertRaisesRegex(privileged.PrivilegedError, "dokončená"):
+                privileged._move_game({
+                    "platform": "ea", "user": "player", "game_name": "Game",
+                })
+        move.assert_not_called()
+
+    def test_ea_move_rejects_heroic_shared_default_before_discovery(self):
+        account = Mock(pw_uid=1001, pw_dir="/home/player")
+        with (
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(privileged, "_safe_username", return_value="player"),
+            patch.object(
+                privileged, "heroic_ea_shared_default_detected",
+                return_value=True,
+            ),
+            patch.object(privileged, "heroic_ea_installations") as discover,
+            patch.object(privileged.shutil, "move") as move,
+        ):
+            with self.assertRaisesRegex(privileged.PrivilegedError, "samostatný"):
+                privileged._move_game({
+                    "platform": "ea", "user": "player", "game_name": "Game",
+                })
+        discover.assert_not_called()
+        move.assert_not_called()
 
 
 if __name__ == "__main__":

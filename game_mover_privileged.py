@@ -27,6 +27,12 @@ import sys
 from typing import Any
 
 from game_mover_steam_cache import inspect_steam_cache
+from game_mover_ea import (
+    ea_game_install_in_progress,
+    ea_runtime_active,
+    heroic_ea_installations,
+    heroic_ea_shared_default_detected,
+)
 
 
 SOCKET_PATH = os.getenv(
@@ -213,16 +219,42 @@ def _set_shared_permissions(path: str) -> None:
 
 
 def _move_game(parameters: dict) -> dict:
-    if parameters.get("platform") != "steam":
-        raise PrivilegedError("Sdílení dat je podporováno pouze pro Steam")
+    platform = parameters.get("platform")
+    if platform not in ("steam", "ea"):
+        raise PrivilegedError("Sdílení dat je podporováno pouze pro Steam a EA App")
     username = _safe_username(parameters.get("user"))
     game = _safe_game_name(parameters.get("game_name"))
-    common = _beneath(_steamapps(username), "common")
+    shared_directory = "steam"
+    if platform == "steam":
+        common = _beneath(_steamapps(username), "common")
+    else:
+        home = pwd.getpwnam(username).pw_dir
+        if heroic_ea_shared_default_detected(home):
+            raise PrivilegedError(
+                "EA App používá sdílený výchozí Heroic prefix; nejprve jí "
+                "nastav samostatný prefix"
+            )
+        matches = []
+        for installation in heroic_ea_installations(home):
+            candidate = _beneath(installation.games_root, game, allow_missing=True)
+            if os.path.isdir(candidate) and not os.path.islink(candidate):
+                matches.append((installation, candidate))
+        if len(matches) != 1:
+            raise PrivilegedError(
+                "EA hra nebyla nalezena v právě jednom Heroic EA App prefixu"
+            )
+        installation, _candidate = matches[0]
+        if ea_game_install_in_progress(installation, game):
+            raise PrivilegedError("Instalace hry v EA App ještě není dokončená")
+        if ea_runtime_active():
+            raise PrivilegedError("Před přesunem ukonči Heroic a EA App")
+        common = installation.games_root
+        shared_directory = "EA"
     source = _beneath(common, game)
     if not os.path.isdir(source) or os.path.islink(source):
         raise PrivilegedError("Zdrojová hra nebyla nalezena")
-    target_base = _beneath(GAMES_ROOT, "steam", allow_missing=True)
-    proxy_base = _beneath(GAMES_LINKS_ROOT, username, "steam", allow_missing=True)
+    target_base = _beneath(GAMES_ROOT, shared_directory, allow_missing=True)
+    proxy_base = _beneath(GAMES_LINKS_ROOT, username, platform, allow_missing=True)
     os.makedirs(target_base, mode=0o775, exist_ok=True)
     os.makedirs(proxy_base, mode=0o775, exist_ok=True)
     target = _beneath(target_base, game, allow_missing=True)
@@ -246,18 +278,35 @@ def _move_game(parameters: dict) -> dict:
 
 
 def _create_symlink(parameters: dict) -> dict:
-    if parameters.get("platform") != "steam":
-        raise PrivilegedError("Sdílení dat je podporováno pouze pro Steam")
+    platform = parameters.get("platform")
+    if platform not in ("steam", "ea"):
+        raise PrivilegedError("Sdílení dat je podporováno pouze pro Steam a EA App")
     username = _safe_username(parameters.get("user"))
     game = _safe_game_name(parameters.get("game_name"))
-    target = _beneath(_beneath(GAMES_ROOT, "steam"), game)
+    shared_directory = "steam" if platform == "steam" else "EA"
+    target = _beneath(_beneath(GAMES_ROOT, shared_directory), game)
     if not os.path.isdir(target) or os.path.islink(target):
         raise PrivilegedError("Sdílená hra nebyla nalezena")
-    common = _beneath(_steamapps(username), "common")
+    if platform == "steam":
+        common = _beneath(_steamapps(username), "common")
+    else:
+        home = pwd.getpwnam(username).pw_dir
+        if heroic_ea_shared_default_detected(home):
+            raise PrivilegedError(
+                "EA App používá sdílený výchozí Heroic prefix; nejprve jí "
+                "nastav samostatný prefix"
+            )
+        installations = heroic_ea_installations(home)
+        prefixes = {item.prefix for item in installations}
+        if len(prefixes) != 1 or not installations:
+            raise PrivilegedError("Heroic EA App prefix nebyl nalezen jednoznačně")
+        if ea_runtime_active():
+            raise PrivilegedError("Před vytvořením odkazu ukonči Heroic a EA App")
+        common = installations[0].games_root
     source = _beneath(common, game, allow_missing=True)
     if os.path.lexists(source):
         raise PrivilegedError("Cesta už existuje")
-    proxy_base = _beneath(GAMES_LINKS_ROOT, username, "steam", allow_missing=True)
+    proxy_base = _beneath(GAMES_LINKS_ROOT, username, platform, allow_missing=True)
     os.makedirs(proxy_base, mode=0o775, exist_ok=True)
     proxy = _beneath(proxy_base, game, allow_missing=True)
     if os.path.lexists(proxy):
@@ -266,7 +315,7 @@ def _create_symlink(parameters: dict) -> dict:
     else:
         os.symlink(target, proxy)
     os.symlink(proxy, source)
-    return {"message": "Steam odkaz byl vytvořen přes spravovanou proxy"}
+    return {"message": "Odkaz hry byl vytvořen přes spravovanou proxy"}
 
 
 def _steam_cache_status(parameters: dict) -> dict:
@@ -567,7 +616,11 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
         text=True,
         capture_output=True,
         check=False,
-        timeout=300,
+        timeout=(
+            900
+            if action == "move-game" and parameters.get("platform") == "ea"
+            else 300
+        ),
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"},
         user=account.pw_uid,
         group=account.pw_gid,

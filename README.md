@@ -3,14 +3,20 @@
 # game-mover
 Local-first game data manager for trusted local users on a single Linux machine.
 
-The mutable **Mover** tab supports Steam only: moving payloads into
-`/var/Games/steam`, creating per-user symlinks, sharing the download cache, and
-repairing Steam-library permissions. It hides Steam runtimes and possible stale
-installations by default, with an explicit checkbox for recovery. Heroic owns
-GOG and Epic payload/prefix management. Other launchers remain read-only
-inventory providers, remain visible in Mover's platform selector, and expose no
-mutation until their storage workflows are explicitly implemented and tested.
-Existing legacy data is never removed by this scope restriction.
+The mutable **Mover** tab supports Steam and complete EA App games installed in
+a Heroic-managed Wine prefix. Steam payloads move into `/var/Games/steam`; EA
+game payloads move into `/var/Games/EA`, with per-user symlinks back to their
+original locations. For EA, only the individual game directory moves: the Wine
+prefix, EA launcher, registry, credentials and account state stay in the player
+profile. The EA prefix must be dedicated (for example
+`Prefixes/default/EA App`), not Heroic's global shared `default` prefix. Heroic
+and EA App must be closed, and staged downloads are shown only informationally
+and cannot be moved. Steam runtimes and possible stale
+installations remain hidden by default behind an explicit recovery checkbox.
+Heroic still owns GOG and Epic payload/prefix management. Other launchers remain
+read-only inventory providers, remain visible in Mover's platform selector, and
+expose no mutation until their storage workflows are explicitly implemented and
+tested. Existing legacy data is never removed by this scope restriction.
 
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
@@ -495,6 +501,12 @@ What installer does:
 
 `deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
 
+Version 0.32.0 adds the bounded Heroic EA App workflow. Prefix discovery comes
+from Heroic's sideload configuration and rejects its global shared default.
+Finish the EA download and close both Heroic and EA App before moving a game;
+Game Mover rejects staged install data and moves only the selected game
+directory into `/var/Games/EA`.
+
 Version 0.31.4 repairs legacy server ACLs through a shared deployment helper.
 Run data migrations with server-data writers stopped. The helper preserves
 other accounts' effective ACL permissions and container-visible ownership;
@@ -570,11 +582,17 @@ Behavior:
 # game-mover
 Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jednom Linux stroji.
 
-Mutující záložka **Mover** podporuje pouze Steam: přesun dat do
-`/var/Games/steam`, uživatelské symlinky, sdílenou download cache a opravu
-oprávnění Steam knihovny. Runtime a možné staré instalace ve výchozím stavu
-skrývá, ale samostatný přepínač je zpřístupní pro obnovu. GOG a Epic včetně
-prefixů vlastní Heroic. Ostatní launchery zůstávají jen zdrojem read-only
+Mutující záložka **Mover** podporuje Steam a dokončené hry EA App nainstalované
+v Heroic Wine prefixu. Steam data přesouvá do `/var/Games/steam`, EA hry do
+`/var/Games/EA`, a na původní místo vrací uživatelský symlink. U EA se přesouvá
+jen adresář konkrétní hry; Wine prefix, EA launcher, registry, přihlašovací údaje
+a stav účtu zůstávají v profilu hráče. EA musí mít samostatný prefix, například
+`Prefixes/default/EA App`, nikoli globální sdílený Heroic prefix `default`.
+Heroic i EA App musí být ukončené a rozestahované instalace se zobrazí jen
+informačně, bez možnosti přesunu. Steam runtime a možné staré instalace ve
+výchozím stavu skrývá, ale samostatný
+přepínač je zpřístupní pro obnovu. GOG a Epic včetně prefixů nadále vlastní
+Heroic. Ostatní launchery zůstávají jen zdrojem read-only
 inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
@@ -1037,6 +1055,11 @@ Co instalátor dělá:
 - chrání mutující lokální API volání náhodným tokenem v `/etc/game_mover/api.token`, který je čitelný jen pro členy skupiny `gemers`
 
 `deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.
+
+Verze 0.32.0 přidává úzce omezenou podporu EA App přes Heroic. Prefix se zjišťuje
+z Heroic sideload konfigurace a globální sdílený výchozí prefix se odmítá. Před
+přesunem musí být stahování dokončené a Heroic i EA App ukončené; Game Mover
+přesune pouze vybraný adresář hry do `/var/Games/EA`.
 
 Verze 0.31.4 opravuje starší serverová ACL společným instalačním helperem.
 Migraci dat prováděj se zastavenými procesy, které do serverových dat zapisují.

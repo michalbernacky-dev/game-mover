@@ -1,17 +1,50 @@
 # Game Mover security audit register
 
-Last review: 2026-09-13 (hosted merge-identity remediation)
+Last review: 2026-09-13 (Heroic EA App Mover extension)
 
-Reviewed version: 0.31.4 (source, RPM, and local deployment)
+Reviewed version: 0.32.0 (source and local RPM; deployment verification pending)
 
-Reviewed source: application tree at
-`12afe18dd4639d438ffce02a80ba7f3868e6942a`; this audit-only update changes
-documentation only. Historical commit identifiers in this register may predate
+Reviewed source: feature implementation commit
+`f37ad3b527af93847c65da3e886e32402b789196`; this follow-up changes only the
+audit record. Historical commit identifiers in this register may predate
 metadata rewriting.
 
-Publication verdict: **ready for the final pre-publication checks in the
-replacement `game-mover` repository**. The hosted merge-identity regression is
-isolated and verified; the remaining publication gate below still applies.
+Publication verdict: the replacement repository and hosted merge identity remain
+ready, but the new 0.32.0 release is **not ready to publish** until hosted CI and
+post-merge verification pass. PR #3 hosted CI passed for the implementation
+commit; merge and exact post-merge verification remain. The remaining general
+publication gate below still applies.
+
+## Heroic EA App Mover extension review: 2026-09-13
+
+Version 0.32.0 extends mutation to complete EA App game payloads stored inside a
+Heroic-managed Wine prefix. Read-only inspection of the model installation
+confirmed Heroic's sideload library and matching `GamesConfig` entry as the
+authoritative prefix mapping, the game payload below `Program Files/EA Games`,
+and EA staged journal/state files for a paused download. No live data, service,
+credential or installation state was changed.
+
+The implementation confines configured prefixes to the player's home, rejects
+Heroic's global shared default prefix, requires the EA launcher marker, rejects
+symlinked game roots and single-component path escapes, and moves only one child
+game directory into `/var/Games/EA`. Prefix, launcher, registry, credentials and
+account state remain in place. Discovery,
+staging checks and filesystem traversal execute in the broker worker after it
+drops to the selected player's UID and groups. Ambiguous prefixes, staged
+download journals, active Heroic/EA processes, pre-existing targets and unsafe
+paths fail before mutation; the existing move/link rollback remains in force.
+GOG and Epic mutation remains excluded.
+
+Focused temporary-fixture tests cover Heroic mapping, home confinement,
+shared-default rejection, symlinked roots, staged-download recognition, runtime
+recognition, inventory, broker routing, and the actual move/proxy/source symlink
+effects while proving that the prefix and launcher remain. Ruff, full-history
+Gitleaks, all 292 unit tests, Bash syntax checks and `git diff --check` pass. A
+local Fedora 44 RPM/SRPM build passed; payload and scriptlet inspection confirmed
+the EA module, version 0.32.0 and `/var/Games/EA` ACL setup. GitHub PR #3 run
+`34754643674` also passed its full RPM Build job. Installation, live functional
+verification, merge and post-merge artifact inspection remain pending; this
+review does not claim them.
 
 This document is the working register for security findings discovered during
 periodic source-code reviews. Finding identifiers use the project-local format
