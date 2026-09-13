@@ -1,6 +1,6 @@
 # Game Mover security audit register
 
-Last review: 2026-09-11 (publication readiness re-review)
+Last review: 2026-09-13 (hosted merge-identity remediation)
 
 Reviewed version: 0.31.4 (source, RPM, and local deployment)
 
@@ -8,10 +8,10 @@ Reviewed source: `d7bf92aa150cab77ba15784c1221aea696ab0679` plus the
 CI-fixture and audit updates described in the 2026-09-11 review below.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: **ready for the final pre-publication checks in the clean
-`game-mover` repository**. The hosted-history blocker was isolated by creating
-a new private repository containing only the reviewed reachable history; see
-GM-SA-2026-006 and the remaining publication gate below.
+Publication verdict: **blocked pending hosted verification of the replacement
+`game-mover` repository**. Local clean-history reconstruction is described in
+GM-SA-2026-006; the replacement repository must remain private until its exact
+tip, hosted build, artifacts, refs, and known excluded commits are verified.
 
 This document is the working register for security findings discovered during
 periodic source-code reviews. Finding identifiers use the project-local format
@@ -31,7 +31,7 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Fixed | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | In progress | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 | GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
@@ -689,6 +689,39 @@ is stored privately outside the project. This isolates the publication history
 and closes the hosted-history regression for the new repository; the old
 `game-mover-rpm` repository must not be made public without a separate purge and
 review.
+
+### Web-merge identity regression: 2026-09-13
+
+Three later pull requests were merged through GitHub after their branch commits
+had passed the local identity checks. GitHub generated merge commits
+`61a2960a40dc4d94d1608e3bc87ed39b0d15c17c`,
+`2b4afde4603a4003c61b9d7b902c71cdcd57070b`, and
+`112bb834e8f0153178d67d4a8d3f8e45acf70642` with the owner's personal author
+e-mail. Their committer is GitHub's no-reply identity, and the five actual
+content commits use the intended repository no-reply identity. This proves that
+repository-local Git configuration and branch-commit review do not control the
+author metadata of a merge commit created by GitHub's web interface.
+
+The repository owner enabled GitHub's account-level private e-mail and exposed
+command-line e-mail blocking settings. `AGENTS.md` now requires those controls
+before web merges and requires inspection of the exact resulting merge commit.
+A regression test preserves that process gate.
+
+With explicit authorization, a private recovery bundle of the affected
+repository was created outside the project and verified as complete. A clean
+linear history was reconstructed from the last unaffected publication commit
+by applying only the five reviewed content commits and omitting the three web
+merge commits. Before the documentation changes in this review, its final tree
+object exactly matched affected tip `112bb834`. The affected GitHub repository
+must be retained under a private archival name, and only the clean reachable
+`main` ref may be pushed to a newly created private `game-mover` repository.
+
+This finding remains in progress until the replacement repository has a new
+GitHub repository identity, only the intended `main` ref, no personal address in
+reachable author/committer metadata, a green hosted build for its exact final
+tip, inspected RPM/SRPM artifacts, and `No commit found` responses for the three
+excluded merge SHAs. The private archive and recovery bundle must never become
+publication sources.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 

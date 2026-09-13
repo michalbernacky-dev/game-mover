@@ -39,6 +39,16 @@ resulting `main` commit; inspect and publish artifacts from that run, not from
 the pre-merge branch run. Delete the merged short-lived branch only after the
 result and remote state have been verified.
 
+GitHub creates web merge commits with the authenticated account's selected
+commit e-mail, independently of the branch commits and repository-local Git
+configuration. Before any web merge, enable GitHub's **Keep my email addresses
+private** and **Block command line pushes that expose my email** account
+settings. After every merge, inspect the exact resulting commit's author and
+committer names and e-mail addresses. Branch commit metadata and a green check
+do not prove that the web-generated merge commit is private. If a personal
+address appears, stop, keep the repository private, record the regression, and
+repair the hosted history before any further merge or publication.
+
 When GitHub repository controls are available, protect `main` by requiring a
 pull request and the `build-rpm` status check, dismissing stale approvals when
 appropriate, and blocking force pushes and deletion. Until GitHub can enforce
