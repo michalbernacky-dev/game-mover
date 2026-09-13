@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.32.0
+Version:        0.33.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -48,7 +48,7 @@ mkdir -p %{buildroot}/opt/game_mover
 for module in game_mover*.py; do
     mode=0644
     case "$module" in
-        game_mover.py|game_mover_flask.py|game_mover_dns.py) mode=0755 ;;
+        game_mover.py|game_mover_flask.py|game_mover_dns.py|game_mover_ea_epic.py) mode=0755 ;;
     esac
     install -Dpm"$mode" "$module" %{buildroot}/opt/game_mover/"$module"
 done
@@ -57,6 +57,8 @@ install -Dpm0644 requirements.txt %{buildroot}/opt/game_mover/requirements.txt
 install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo.jpg
 
 install -Dpm0755 game-mover %{buildroot}%{_bindir}/game-mover
+ln -s ../../opt/game_mover/game_mover_ea_epic.py \
+    %{buildroot}%{_bindir}/game-mover-ea-epic
 install -Dpm0644 game_mover.service %{buildroot}%{_unitdir}/game_mover.service
 install -Dpm0644 game-mover-privileged.service \
     %{buildroot}%{_unitdir}/game-mover-privileged.service
@@ -164,6 +166,7 @@ fi
 /opt/game_mover/requirements.txt
 /opt/game_mover/game_mover_logo.jpg
 %{_bindir}/game-mover
+%{_bindir}/game-mover-ea-epic
 %{_unitdir}/game_mover.service
 %{_unitdir}/game-mover-privileged.service
 %{_unitdir}/game-mover-dns.service
@@ -172,6 +175,11 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.33.0-1
+- Launch Epic-owned EA titles through Legendary, UMU and per-user Heroic prefixes
+- Add prerequisite reporting and the verified Battlefront II catalog entry
+- Install a generic token-safe EA/Epic helper for every local player
+
 * Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.32.0-1
 - Move complete EA App game payloads from a dedicated Heroic-managed Wine prefix
 - Keep launcher, registry and account state in the player profile
