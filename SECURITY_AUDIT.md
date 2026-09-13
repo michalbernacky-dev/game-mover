@@ -723,6 +723,15 @@ tip, inspected RPM/SRPM artifacts, and `No commit found` responses for the three
 excluded merge SHAs. The private archive and recovery bundle must never become
 publication sources.
 
+The replacement private repository was subsequently created with a distinct
+GitHub repository identity and populated only with clean `main` tip `a0699fa`.
+It has no tags, the three excluded merge SHAs return `No commit found`, and a
+fresh clone contains no unreachable objects or unexpected identities. Dependency
+alerts and automated security fixes are enabled. Pull-request RPM Build run
+34748834280 passed the complete workflow on the same reviewed tree. Final merge
+metadata, the exact post-merge hosted run, and its artifacts remain to be
+verified before this finding can return to `Fixed`.
+
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
 - Severity: **Low**
