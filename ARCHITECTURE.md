@@ -191,14 +191,17 @@ manifest discovery across all configured Steam libraries; configuration checks
 cover bounded file markers and JSON values (including nested JSON strings used
 by CurseForge).
 The knowledge tab's target picker is populated from a local installed-game
-inventory rather than from launchers. Provider scanners combine `/var/Games`,
+inventory rather than from launchers. The desktop process scans the current
+player's private home with that player's identity and combines `/var/Games`,
 Steam manifests/symlinks, Heroic metadata, Lutris SQLite and CurseForge
-instances, deduplicate paths, and aggregate the users that reference each game.
-Logical directory size is measured once per real path. Entries up to and
-including 1 GiB are marked as possible remnants only when no launcher or
-installation metadata confirms them. Confirmed small games remain in the
-catalog, while the GUI hides possible remnants behind an explicit filter. The local-only inventory
-endpoint is cached briefly; remote knowledge notes remain a separate data source
+instances. This avoids granting the system service access to private homes.
+Providers deduplicate paths and aggregate the users that reference each game.
+Logical directory size is measured once per real path. Unverified shared
+payloads and unconfirmed Steam directories are possible remnants regardless of
+size; launcher or installation metadata clears that state. Confirmed small
+games remain in the catalog, while the GUI hides possible remnants behind an
+explicit filter. The local-only backend inventory endpoint remains available
+for service-visible data; remote knowledge notes remain a separate data source
 and are joined in the GUI through stable aliases.
 
 The fixed **Launchers** tab is a provider-backed inventory of native desktop game

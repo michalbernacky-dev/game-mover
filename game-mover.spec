@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.33.0
+Version:        0.33.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -175,6 +175,11 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.33.1-1
+- Repair legacy per-player proxy directory ownership before dropped-privilege moves
+- Scan the current desktop player's private launcher metadata in the local client
+- Hide unverified shared Steam payloads from the installed-game list by default
+
 * Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.33.0-1
 - Launch Epic-owned EA titles through Legendary, UMU and per-user Heroic prefixes
 - Add prerequisite reporting and the verified Battlefront II catalog entry

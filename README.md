@@ -77,14 +77,16 @@ client. The UI can show whether a game is installed and whether a documented
 setting is already satisfied, without executing database-provided commands or
 sending local results back to the host. Steam checks use AppIDs and scan every
 library listed in `libraryfolders.vdf`, including secondary disks.
-On first opening, the tab asks the local Game Mover backend for an installed-game
-inventory. It combines shared `/var/Games` data, Steam manifests and Game Mover
-symlinks, Heroic metadata, Lutris' local catalog, and CurseForge instances. The
-catalog shows platforms, users, and approximate logical size. Confirmed launcher
-entries remain visible regardless of size; small unverified directories are
-marked as possible remnants instead of being discarded. Launcher-only records are excluded. Existing
-SQLite notes are attached through stable aliases; games without notes are ready
-to receive a new entry without manually inventing an ID.
+On first opening, the desktop client scans the current player's private launcher
+metadata itself and combines it with shared `/var/Games` data. This works with
+homes that correctly deny access to the system service. The inventory includes
+Steam manifests and Game Mover symlinks, Heroic metadata, Lutris' local catalog,
+and CurseForge instances. The catalog shows platforms, users, and approximate
+logical size. Confirmed launcher entries remain visible regardless of size;
+unverified shared payloads and directories are marked as possible remnants and
+hidden by default. Launcher-only records are excluded. Existing SQLite notes are
+attached through stable aliases; games without notes are ready to receive a new
+entry without manually inventing an ID.
 
 This `game-mover` repository is the canonical source for code, RPM packaging,
 and deployment.
@@ -685,12 +687,14 @@ výhradně na počítači čtenáře. Rozhraní tak ukáže, zda je hra nainstal
 už doporučené nastavení platí; nespouští přitom příkazy z databáze ani neposílá
 výsledky hostiteli. Kontrola Steamu používá AppID a prochází všechny knihovny z
 `libraryfolders.vdf`, tedy i další disky.
-Při prvním otevření si záložka od místního backendu vyžádá inventuru her. Sloučí
-sdílené instalace v `/var/Games`, manifesty a symlinky Steamu, metadata Heroicu,
-místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele,
-přibližnou logickou velikost a potvrzené instalace ponechá bez ohledu na jejich
-velikost. Malé neověřené adresáře pouze označí jako možné pozůstatky. Samotné
-launchery do seznamu nezařazuje. Existující SQLite tip se
+Při prvním otevření desktopový klient sám prohledá soukromá launcherová metadata
+právě přihlášeného hráče a sloučí je se sdílenými daty v `/var/Games`. Funguje
+tak i pro správně uzamčené domovské adresáře, do kterých systémová služba nemá
+přístup. Inventura zahrnuje manifesty a symlinky Steamu, metadata Heroicu,
+místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele
+a přibližnou logickou velikost. Potvrzené instalace ponechá bez ohledu na
+velikost; neověřené sdílené payloady a adresáře označí jako možné pozůstatky a
+ve výchozím stavu skryje. Samotné launchery do seznamu nezařazuje. Existující SQLite tip se
 připojí přes stabilní alias; hra bez tipu je rovnou připravená k jeho založení.
 
 ## Bezpečnostní model

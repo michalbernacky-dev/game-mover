@@ -322,6 +322,18 @@ class ServerManagementGuiTest(unittest.TestCase):
         marker = self.window.knowledge_games_table.item(0, 0)
         self.assertEqual(marker.data(game_mover.Qt.UserRole + 2), "MtMassive")
 
+    def test_installed_games_thread_scans_the_current_player_home(self):
+        payloads = []
+        thread = game_mover.InstalledGamesThread("Luky", force=True)
+        thread.loaded.connect(payloads.append)
+        with patch.object(
+            game_mover, "scan_user_installed_games", return_value=[{"id": "game"}],
+        ) as scan:
+            thread.run()
+
+        scan.assert_called_once_with(os.path.expanduser("~"), "Luky")
+        self.assertEqual(payloads[0]["games"], [{"id": "game"}])
+
     def tearDown(self):
         self.window.close()
         self.window.deleteLater()

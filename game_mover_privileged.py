@@ -218,6 +218,50 @@ def _set_shared_permissions(path: str) -> None:
         os.close(directory_fd)
 
 
+def _prepare_user_proxy_base(username: str, platform: str) -> str:
+    """Create the exact per-player proxy directory before dropping privileges."""
+    if platform not in ("steam", "ea"):
+        raise PrivilegedError("Nepodporovaná platforma proxy adresáře")
+    account = pwd.getpwnam(username)
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        root_fd = os.open(GAMES_LINKS_ROOT, flags)
+    except OSError as error:
+        raise PrivilegedError(
+            "Kořen spravovaných odkazů není bezpečně dostupný"
+        ) from error
+
+    def open_player_directory(parent_fd: int, name: str) -> int:
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        try:
+            descriptor = os.open(name, flags, dir_fd=parent_fd)
+        except OSError as error:
+            raise PrivilegedError(
+                "Proxy adresář hráče není bezpečný adresář"
+            ) from error
+        metadata = os.fstat(descriptor)
+        if metadata.st_uid not in (0, account.pw_uid):
+            os.close(descriptor)
+            raise PrivilegedError("Proxy adresář patří jinému uživateli")
+        os.fchown(descriptor, account.pw_uid, account.pw_gid)
+        os.fchmod(descriptor, 0o700)
+        return descriptor
+
+    try:
+        user_fd = open_player_directory(root_fd, username)
+        try:
+            platform_fd = open_player_directory(user_fd, platform)
+            os.close(platform_fd)
+        finally:
+            os.close(user_fd)
+    finally:
+        os.close(root_fd)
+    return _beneath(GAMES_LINKS_ROOT, username, platform)
+
+
 def _move_game(parameters: dict) -> dict:
     platform = parameters.get("platform")
     if platform not in ("steam", "ea"):
@@ -609,6 +653,8 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
     username = _safe_username(parameters.get("user"))
     account = pwd.getpwnam(username)
     group_id = grp.getgrnam(GROUP_NAME).gr_gid
+    if action in ("move-game", "create-symlink"):
+        _prepare_user_proxy_base(username, parameters.get("platform"))
     payload = json.dumps(parameters, ensure_ascii=False, separators=(",", ":"))
     completed = subprocess.run(
         [sys.executable, "-B", os.path.realpath(__file__), "--filesystem-worker", action],
