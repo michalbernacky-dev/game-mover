@@ -78,6 +78,15 @@ class ServiceHardeningTest(unittest.TestCase):
         self.assertIn("u gameplatform -", sysusers)
         self.assertIn("g gemers -", sysusers)
 
+    def test_both_install_paths_prepare_the_ea_shared_root(self):
+        specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
+        installer = pathlib.Path("install.sh").read_text(encoding="utf-8")
+
+        for source in (specification, installer):
+            with self.subTest(source=source[:20]):
+                self.assertIn("/var/Games/EA", source)
+                self.assertIn("setfacl -m", source)
+
 
 if __name__ == "__main__":
     unittest.main()

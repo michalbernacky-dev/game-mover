@@ -150,13 +150,13 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("install-local", command)
         self.assertNotIn("sudo", command)
 
-    def test_mover_shows_other_launchers_but_mutates_only_steam(self):
+    def test_mover_mutates_only_steam_and_heroic_ea_payloads(self):
         self.assertEqual(self.window.platform, "steam")
         self.assertFalse(hasattr(self.window, "source_user_combo"))
         self.assertEqual(
             [self.window.platform_combo.itemData(index)
              for index in range(self.window.platform_combo.count())],
-            ["steam", "gog", "epic", "ubisoft", "rockstar"],
+            ["steam", "gog", "epic", "ea", "ubisoft", "rockstar"],
         )
         self.assertIn("Steam hry", self.window.label_move.text())
         self.assertIn("Steam hry", self.window.label_symlink.text())
@@ -168,6 +168,14 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("spravuje Heroic", self.window.mover_scope_label.text())
         self.assertFalse(self.window.move_button.isEnabled())
         self.assertFalse(self.window.link_button.isEnabled())
+        self.assertFalse(self.window.cache_button.isVisible())
+
+        self.window.platform_combo.setCurrentIndex(
+            self.window.platform_combo.findData("ea")
+        )
+        self.assertEqual(self.window.platform, "ea")
+        self.assertIn("/var/Games/EA", self.window.mover_scope_label.text())
+        self.assertNotIn("prefix", self.window.label_move.text().lower())
         self.assertFalse(self.window.cache_button.isVisible())
 
         self.window.platform_combo.setCurrentIndex(

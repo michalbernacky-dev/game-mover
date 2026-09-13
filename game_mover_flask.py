@@ -84,6 +84,12 @@ from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
 from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
 from game_mover_game_inventory import scan_installed_games
 from game_mover_game_filters import is_excluded_game
+from game_mover_ea import (
+    ea_game_install_in_progress,
+    ea_runtime_active,
+    heroic_ea_installations,
+    heroic_ea_shared_default_detected,
+)
 from game_mover_notes import (
     NotesError, delete_target_notes, initialize_notes_database, list_all_notes,
     list_notes, replace_notes,
@@ -710,9 +716,16 @@ def steam_common_candidates(home):
         os.path.join(home, ".steam/steam/steamapps/common"),
     ]
 
+
+def ea_common_candidates(home):
+    return [item.games_root for item in heroic_ea_installations(home)]
+
 PLATFORMS = {
     "steam": {"user_common": steam_common_candidates},
+    "ea": {"user_common": ea_common_candidates},
 }
+
+SHARED_PLATFORM_DIRECTORIES = {"steam": "steam", "ea": "EA"}
 
 # ------------------------------------------------------------
 # Helpers
@@ -788,8 +801,24 @@ def user_common_dir(platform, user):
         return None
     return resolve_beneath(home, existent)
 
+
+def ea_installation_for_common(home, common):
+    common = os.path.realpath(common)
+    return next(
+        (item for item in heroic_ea_installations(home)
+         if os.path.realpath(item.games_root) == common),
+        None,
+    )
+
+
+def shared_platform_directory(platform):
+    try:
+        return SHARED_PLATFORM_DIRECTORIES[platform]
+    except KeyError as error:
+        raise ValueError(f"Unsupported platform '{platform}'") from error
+
 def shared_game_path(platform, game):
-    return os.path.join(GAMES_ROOT, platform, game)
+    return os.path.join(GAMES_ROOT, shared_platform_directory(platform), game)
 
 def steamapps_candidates(home):
     return [
@@ -1720,13 +1749,30 @@ def api_list_user_games():
         if not common:
             return jsonify({"platform": platform, "games": []})
 
-        games = [
-            d for d in os.listdir(common)
-            if os.path.isdir(os.path.join(common, d))
-            and not os.path.islink(os.path.join(common, d))
-            and not is_excluded_game(platform, d)
-        ]
-        return jsonify({"platform": platform, "user": user, "games": sorted(games)})
+        games = []
+        incomplete_games = []
+        installation = (
+            ea_installation_for_common(interactive_user_home(user), common)
+            if platform == "ea" else None
+        )
+        for name in os.listdir(common):
+            path = os.path.join(common, name)
+            if (
+                not os.path.isdir(path)
+                or os.path.islink(path)
+                or is_excluded_game(platform, name)
+            ):
+                continue
+            if installation and ea_game_install_in_progress(installation, name):
+                incomplete_games.append(name)
+            else:
+                games.append(name)
+        return jsonify({
+            "platform": platform,
+            "user": user,
+            "games": sorted(games),
+            "incomplete_games": sorted(incomplete_games),
+        })
     except ValueError as e:
         return jsonify({"message": str(e)}), 400
     except Exception as e:
@@ -1741,7 +1787,10 @@ def api_list_shared():
         return jsonify({"message": f"Unsupported platform '{platform}'"}), 400
 
     try:
-        base = resolve_beneath(GAMES_ROOT, os.path.join(GAMES_ROOT, platform))
+        shared_directory = shared_platform_directory(platform)
+        base = resolve_beneath(
+            GAMES_ROOT, os.path.join(GAMES_ROOT, shared_directory),
+        )
         if not os.path.isdir(base):
             return jsonify({"platform": platform, "games": []})
         games = [
@@ -1767,13 +1816,13 @@ def move_game():
 
     if not platform or not game_name or not user:
         return jsonify({"message": "Missing parameters"}), 400
-    if platform != "steam":
-        return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+    if platform not in ("steam", "ea"):
+        return jsonify({"message": "Game Mover supports shared game data only for Steam and EA App"}), 400
     if PRIVILEGED_HELPER_ENABLED:
         try:
             return jsonify(privileged_call("move-game", {
                 "platform": platform, "game_name": game_name, "user": user,
-            }, timeout=180))
+            }, timeout=900 if platform == "ea" else 180))
         except PrivilegedError as error:
             return jsonify({"message": str(error)}), 400
 
@@ -1781,13 +1830,32 @@ def move_game():
         safe_path_component(game_name, "game name")
         source_common = user_common_dir(platform, user)
         if not source_common:
-            return jsonify({"message": "Steam library not found for user"}), 404
+            if platform == "ea" and heroic_ea_shared_default_detected(
+                interactive_user_home(user)
+            ):
+                return jsonify({
+                    "message": "EA App uses Heroic's shared default Wine prefix; "
+                    "assign a dedicated EA App prefix first",
+                }), 409
+            return jsonify({"message": "Game library not found for user"}), 404
+        if platform == "ea":
+            installation = ea_installation_for_common(
+                interactive_user_home(user), source_common,
+            )
+            if not installation:
+                return jsonify({"message": "Heroic EA App prefix not found"}), 404
+            if ea_game_install_in_progress(installation, game_name):
+                return jsonify({"message": "EA App installation is not complete"}), 409
+            if ea_runtime_active():
+                return jsonify({"message": "Close Heroic and EA App before moving game data"}), 409
         source_path = resolve_beneath(
             source_common, os.path.join(source_common, game_name),
         )
         if not os.path.isdir(source_path):
             return jsonify({"message": "Game not found in source"}), 404
-        target_base = ensure_managed_directory(GAMES_ROOT, platform)
+        target_base = ensure_managed_directory(
+            GAMES_ROOT, shared_platform_directory(platform),
+        )
         target_path = resolve_beneath(
             target_base, os.path.join(target_base, game_name),
         )
@@ -1817,8 +1885,8 @@ def create_symlink():
 
     if not platform or not game_name or not user:
         return jsonify({"message": "Missing parameters"}), 400
-    if platform != "steam":
-        return jsonify({"message": "Game Mover supports shared game data only for Steam"}), 400
+    if platform not in ("steam", "ea"):
+        return jsonify({"message": "Game Mover supports shared game data only for Steam and EA App"}), 400
     if PRIVILEGED_HELPER_ENABLED:
         try:
             return jsonify(privileged_call("create-symlink", {
@@ -1830,7 +1898,8 @@ def create_symlink():
     try:
         safe_path_component(game_name, "game name")
         target_base = resolve_beneath(
-            GAMES_ROOT, os.path.join(GAMES_ROOT, platform),
+            GAMES_ROOT,
+            os.path.join(GAMES_ROOT, shared_platform_directory(platform)),
         )
         target_path = resolve_beneath(
             target_base, os.path.join(target_base, game_name),
@@ -1839,7 +1908,16 @@ def create_symlink():
             return jsonify({"message": "Target path does not exist"}), 404
         source_common = user_common_dir(platform, user)
         if not source_common:
-            return jsonify({"message": "Steam library not found for user"}), 404
+            if platform == "ea" and heroic_ea_shared_default_detected(
+                interactive_user_home(user)
+            ):
+                return jsonify({
+                    "message": "EA App uses Heroic's shared default Wine prefix; "
+                    "assign a dedicated EA App prefix first",
+                }), 409
+            return jsonify({"message": "Game library not found for user"}), 404
+        if platform == "ea" and ea_runtime_active():
+            return jsonify({"message": "Close Heroic and EA App before linking game data"}), 409
         source_path = resolve_beneath(
             source_common, os.path.join(source_common, game_name),
         )
@@ -1856,7 +1934,7 @@ def create_symlink():
             os.symlink(target_path, proxy_path)
 
         os.symlink(proxy_path, source_path)
-        return jsonify({"message": "Steam symlink created via proxy"})
+        return jsonify({"message": "Game symlink created via managed proxy"})
     except ValueError as e:
         return jsonify({"message": str(e)}), 400
     except Exception as e:

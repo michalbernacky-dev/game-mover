@@ -125,9 +125,16 @@ their checkout after preserving local work; never merge the old history back.
   create symlinks, or call a mutating broker operation. Every mutation must enforce
   its applicable `silent`/PAM/disabled policy; loopback alone is not authorization.
   Preserve authenticated remote read-only restrictions and PAM throttling.
-- Preserve the Steam-only mutable Mover scope; do not migrate or delete legacy
-  Heroic/GOG/Epic data. Heroic package installation belongs to local
-  PackageKit/polkit after asset verification, not the API or root broker.
+- Preserve the narrow Steam and Heroic-managed EA App Mover scope. For EA App,
+  move only a complete child game directory below `Program Files/EA Games` into
+  `/var/Games/EA`; keep the Wine prefix, launcher, registry, credentials and
+  account state in the player's profile. Discover the prefix from Heroic's
+  sideload configuration, require it to differ from Heroic's global shared
+  default prefix, reject staged downloads and active Heroic/EA processes, and
+  never guess a prefix from an arbitrary client path. Do not
+  migrate or delete legacy Heroic/GOG/Epic data. Heroic package installation
+  belongs to local PackageKit/polkit after asset verification, not the API or
+  root broker.
 - Keep CurseForge credentials host-side. Validate destinations before sending
   credentials, including redirects; preserve download integrity, archive path,
   extraction-size, backup/restore, and managed deletion checks.

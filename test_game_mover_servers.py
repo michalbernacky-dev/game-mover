@@ -243,8 +243,8 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(payload["memory"]["percent"], 75.0)
         self.assertEqual(payload["swap"]["used_bytes"], 2 * 1024**3)
 
-    def test_mover_api_exposes_only_steam_without_touching_legacy_data(self):
-        self.assertEqual(set(backend.PLATFORMS), {"steam"})
+    def test_mover_api_exposes_steam_and_ea_without_legacy_mutation(self):
+        self.assertEqual(set(backend.PLATFORMS), {"steam", "ea"})
         for endpoint in ("/list_user_games", "/list_shared"):
             with self.subTest(endpoint=endpoint):
                 response = self.client.get(
@@ -253,6 +253,26 @@ class ServerRegistryTest(unittest.TestCase):
                     **self.local_options(),
                 )
                 self.assertEqual(response.status_code, 400)
+
+    def test_production_ea_move_is_routed_to_broker_with_extended_timeout(self):
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(
+                backend, "privileged_call", return_value={"message": "ok"},
+            ) as broker,
+        ):
+            response = self.client.post(
+                "/move_game",
+                json={"platform": "ea", "game_name": "Example Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        broker.assert_called_once_with(
+            "move-game",
+            {"platform": "ea", "game_name": "Example Game", "user": "alice"},
+            timeout=900,
+        )
 
     def test_list_user_games_has_no_directory_creation_side_effect(self):
         home = Path(self.temp_dir.name) / "home"

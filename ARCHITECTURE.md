@@ -62,17 +62,31 @@ network model.
 
 ## Desktop game-data ownership
 
-The mutable **Mover** workflow deliberately supports only Steam. It moves Steam
-payloads into `/var/Games/steam`, creates per-user proxy symlinks and manages the
-shared Steam download cache and library permissions. The UI and local API do not
-offer move or link operations for any other launcher.
+The mutable **Mover** workflow supports Steam and one narrowly bounded EA App
+layout. Steam payloads move into `/var/Games/steam`; complete EA App game
+payloads move into `/var/Games/EA`. Both use per-user proxy symlinks. Steam also
+manages its shared download cache and library permissions.
+
+The EA adapter accepts only an EA App sideload entry found in Heroic's own
+configuration and a Wine prefix confined below that player's home. It moves one
+child directory below `drive_c/Program Files/EA Games`, never the prefix itself.
+The EA prefix must be distinct from Heroic's global shared default prefix; a
+dedicated child such as `Prefixes/default/EA App` may still be shared by the EA
+launcher and its EA game shortcuts. A global default is read-only inventory and
+must be migrated or reinstalled before Mover enables mutation.
+The launcher, Wine registry, credentials and account state remain private in the
+player profile. Staged EA download journals and running Heroic/EA processes make
+move or link operations fail closed. The filesystem worker performs discovery
+and traversal after dropping to the selected player's UID; the broker receives
+only a platform, player and single-component game name.
 
 GOG and Epic installation data belong to Heroic, which already separates a
 game's payload from its per-user Wine prefix and presents that relationship to
 the user. Game Mover does not copy Heroic prefixes, rewrite Wine registries or
 maintain competing installation metadata. Other launchers remain read-only
 inventory/knowledge providers until their storage and lifecycle have been
-implemented and tested explicitly. Existing legacy directories below
+implemented and tested explicitly. EA support does not grant a general Heroic
+prefix mover or modify Heroic's GOG/Epic data. Existing legacy directories below
 `/var/Games` are preserved; narrowing the supported workflow never deletes or
 migrates them automatically. These providers remain visible in Mover's selector
 with an explicit read-only or externally managed state rather than disappearing
