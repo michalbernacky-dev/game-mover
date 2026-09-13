@@ -4,14 +4,14 @@ Last review: 2026-09-13 (hosted merge-identity remediation)
 
 Reviewed version: 0.31.4 (source, RPM, and local deployment)
 
-Reviewed source: `d7bf92aa150cab77ba15784c1221aea696ab0679` plus the
-CI-fixture and audit updates described in the 2026-09-11 review below.
-Historical commit identifiers in this register may predate metadata rewriting.
+Reviewed source: application tree at
+`12afe18dd4639d438ffce02a80ba7f3868e6942a`; this audit-only update changes
+documentation only. Historical commit identifiers in this register may predate
+metadata rewriting.
 
-Publication verdict: **blocked pending hosted verification of the replacement
-`game-mover` repository**. Local clean-history reconstruction is described in
-GM-SA-2026-006; the replacement repository must remain private until its exact
-tip, hosted build, artifacts, refs, and known excluded commits are verified.
+Publication verdict: **ready for the final pre-publication checks in the
+replacement `game-mover` repository**. The hosted merge-identity regression is
+isolated and verified; the remaining publication gate below still applies.
 
 This document is the working register for security findings discovered during
 periodic source-code reviews. Finding identifiers use the project-local format
@@ -31,7 +31,7 @@ regression tests have been reviewed.
 | GM-SA-2026-003 | High | Fixed | Excessive privileges and insufficient isolation of the API service |
 | GM-SA-2026-004 | Medium | Fixed | PAM authentication has no application-level rate limiting |
 | GM-SA-2026-005 | Medium | Fixed | Mutable CI dependencies and incomplete security verification |
-| GM-SA-2026-006 | Low | In progress | Personal and infrastructure metadata in Git history |
+| GM-SA-2026-006 | Low | Fixed | Personal and infrastructure metadata in Git history |
 | GM-SA-2026-007 | Low | Fixed | Installer source list can drift from the RPM payload |
 | GM-SA-2026-008 | Informational | Mitigated | Public security and licensing policy is incomplete |
 | GM-SA-2026-009 | High | Fixed | Steam cache status GET invokes an unauthorized mutation |
@@ -593,16 +593,20 @@ files tracked by the exact checked-out commit can enter the SRPM. The local
 development build also explicitly excludes common analysis/test caches,
 coverage output, environment files, keys, and logs. Regression coverage rejects
 a return to CI working-tree `rsync` packaging and requires the local exclusions.
-The remediation is source-tested; a green post-merge hosted run and inspection
-of its exact SRPM remain mandatory before publication.
+Post-merge hosted run 34749051335 passed on replacement-repository commit
+`12afe18`. Its exact SRPM contained the same 85 entries and file contents as
+`git archive` for that commit, with no cache, environment, key, log, editor, or
+workflow paths. Its exact RPM payload, metadata, license, scriptlets, and
+digests were inspected. Publication still requires the same checks for the
+final audit-only publication commit.
 
 The first hosted pull-request run of this remediation failed before creating an
 archive because the Fedora container user did not own the Actions checkout and
 Git rejected it as a dubious repository. The archive command now supplies the
 exact current checkout as `safe.directory` in Git's command scope. It does not
 persist global configuration and does not use the unsafe wildcard value. Tests
-require the scoped exception and reject global or wildcard alternatives; hosted
-verification remains pending.
+require the scoped exception and reject global or wildcard alternatives; the
+hosted runs above verify the scoped command in the Fedora builder.
 
 Tracked CI configuration and the local VS Code launch profile had previously
 been excluded by the removed `rsync` rules. Repository export attributes retain
@@ -716,21 +720,17 @@ object exactly matched affected tip `112bb834`. The affected GitHub repository
 must be retained under a private archival name, and only the clean reachable
 `main` ref may be pushed to a newly created private `game-mover` repository.
 
-This finding remains in progress until the replacement repository has a new
-GitHub repository identity, only the intended `main` ref, no personal address in
-reachable author/committer metadata, a green hosted build for its exact final
-tip, inspected RPM/SRPM artifacts, and `No commit found` responses for the three
-excluded merge SHAs. The private archive and recovery bundle must never become
-publication sources.
-
-The replacement private repository was subsequently created with a distinct
-GitHub repository identity and populated only with clean `main` tip `a0699fa`.
-It has no tags, the three excluded merge SHAs return `No commit found`, and a
-fresh clone contains no unreachable objects or unexpected identities. Dependency
-alerts and automated security fixes are enabled. Pull-request RPM Build run
-34748834280 passed the complete workflow on the same reviewed tree. Final merge
-metadata, the exact post-merge hosted run, and its artifacts remain to be
-verified before this finding can return to `Fixed`.
+The replacement private repository was created with a distinct GitHub repository
+identity and populated only with clean `main`. It has no tags; the three excluded
+merge SHAs return `No commit found`; and a fresh clone contains no unreachable
+objects or unexpected identities. Dependency alerts and automated security fixes
+are enabled. Pull-request run 34749000207 and exact post-merge run 34749051335
+passed. Merge commit `12afe18` uses the account-specific GitHub no-reply author
+and GitHub's no-reply committer. Its inspected RPM and SRPM SHA-256 digests are
+`e8457e1bc4d2e18340dc61d187fb6910cb9f01ef7d70c0974b3f3bbd08a6be0b`
+and `d8e7131c11830406da12e6f841130b17ac98db97198e164875f2745dbd90c1cd`
+respectively. This closes the web-merge regression. The private archive and
+recovery bundle must never become publication sources.
 
 ## GM-SA-2026-007: Installer payload can drift from the RPM payload
 
