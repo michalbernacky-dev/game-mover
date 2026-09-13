@@ -22,6 +22,7 @@ from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, p
 
 from game_mover_mods import compare_inventories, scan_mod_directory
 from game_mover_game_filters import is_excluded_game, is_possible_game_residue
+from game_mover_game_inventory import scan_user_installed_games
 from game_mover_ea import (
     ea_game_install_in_progress,
     heroic_ea_installations,
@@ -727,20 +728,18 @@ class LauncherUpdateThread(QThread):
 class InstalledGamesThread(QThread):
     loaded = pyqtSignal(dict)
 
-    def __init__(self, force=False):
+    def __init__(self, user, force=False):
         super().__init__()
+        self.user = user
         self.force = force
 
     def run(self):
         try:
-            response = requests.get(
-                f"{LOCAL_API_URL}/games/installed",
-                params={"force": "1"} if self.force else {}, timeout=120,
-            )
-            data = response.json()
-            if response.status_code != 200:
-                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
-            self.loaded.emit(data)
+            games = scan_user_installed_games(os.path.expanduser("~"), self.user)
+            self.loaded.emit({
+                "games": games,
+                "minimum_game_size_bytes": 1024 * 1024 * 1024,
+            })
         except Exception as error:
             self.loaded.emit({"error": str(error)})
 
@@ -1385,7 +1384,7 @@ class GameMover(QWidget):
         if self.installed_games_thread and self.installed_games_thread.isRunning():
             return
         self.knowledge_refresh.setEnabled(False)
-        self.installed_games_thread = InstalledGamesThread(force=force)
+        self.installed_games_thread = InstalledGamesThread(self.user, force=force)
         self.installed_games_thread.loaded.connect(self.on_installed_knowledge_games)
         self.installed_games_thread.start()
 

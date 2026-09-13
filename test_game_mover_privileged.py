@@ -153,6 +153,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
         with (
             patch.object(privileged.pwd, "getpwnam", return_value=account),
             patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(privileged, "_prepare_user_proxy_base") as prepare,
             patch.object(privileged.subprocess, "run", return_value=completed) as run,
         ):
             result = privileged._broker_dispatch(
@@ -160,6 +161,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
             )
 
         self.assertEqual(result, {"message": "ok"})
+        prepare.assert_called_once_with("alice", "steam")
         self.assertEqual(run.call_args.kwargs["user"], 1001)
         self.assertEqual(run.call_args.kwargs["group"], 1001)
         self.assertEqual(run.call_args.kwargs["extra_groups"], [1234])
@@ -171,6 +173,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
         with (
             patch.object(privileged.pwd, "getpwnam", return_value=account),
             patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(privileged, "_prepare_user_proxy_base"),
             patch.object(
                 privileged.subprocess, "run", return_value=completed,
             ) as run,
@@ -181,6 +184,45 @@ class PrivilegedBrokerTest(unittest.TestCase):
             )
 
         self.assertEqual(run.call_args.kwargs["timeout"], 900)
+
+    def test_proxy_preparation_repairs_legacy_player_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            links = Path(temporary) / "Games_links"
+            player = links / "Luky"
+            player.mkdir(parents=True)
+            player.chmod(0o555)
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/home/Luky",
+            )
+            with (
+                patch.object(privileged, "GAMES_LINKS_ROOT", str(links)),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+            ):
+                result = privileged._prepare_user_proxy_base("Luky", "ea")
+
+            self.assertEqual(result, str(player / "ea"))
+            self.assertEqual(player.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((player / "ea").stat().st_mode & 0o777, 0o700)
+
+    def test_proxy_preparation_rejects_symlinked_player_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            links = root / "Games_links"
+            outside = root / "outside"
+            links.mkdir()
+            outside.mkdir()
+            (links / "Luky").symlink_to(outside, target_is_directory=True)
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir="/home/Luky",
+            )
+            with (
+                patch.object(privileged, "GAMES_LINKS_ROOT", str(links)),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+            ):
+                with self.assertRaisesRegex(
+                    privileged.PrivilegedError, "bezpečný adresář",
+                ):
+                    privileged._prepare_user_proxy_base("Luky", "ea")
 
     def test_ea_move_keeps_prefix_and_links_only_game_payload(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -148,8 +148,8 @@ class Inventory:
                 "app_ids": sorted(item["app_ids"]),
                 "knowledge_aliases": sorted(item["knowledge_aliases"]),
                 "size_bytes": size,
-                "possible_residue": item["possible_residue"] or (
-                    not item["verified"] and size <= self.small_install_bytes
+                "possible_residue": not item["verified"] and (
+                    item["possible_residue"] or size <= self.small_install_bytes
                 ),
             })
             rows[-1].pop("verified", None)
@@ -170,7 +170,10 @@ def _scan_shared(inventory, shared_root):
                 real = os.path.realpath(entry.path)
                 if any(real in item["paths"] for item in inventory.items.values()):
                     continue
-                inventory.add(entry.name, platform, entry.path, verified=True)
+                inventory.add(
+                    entry.name, platform, entry.path, verified=False,
+                    possible_residue=True,
+                )
 
 
 def _scan_steam_user(inventory, home, user):
@@ -184,7 +187,9 @@ def _scan_steam_user(inventory, home, user):
         for entry in _children(common, include_symlinks=True):
             real = os.path.realpath(entry.path)
             if real not in seen:
-                inventory.add(entry.name, "steam", real, user)
+                inventory.add(
+                    entry.name, "steam", real, user, possible_residue=True,
+                )
                 seen.add(real)
         try:
             manifests = Path(steam_root, "steamapps").glob("appmanifest_*.acf")
@@ -369,14 +374,29 @@ def _scan_common_user_directories(inventory, home, user):
                 )
 
 
+def _scan_user(inventory, home, user):
+    _scan_steam_user(inventory, home, user)
+    _scan_heroic_user(inventory, home, user)
+    _scan_curseforge_user(inventory, home, user)
+    _scan_lutris_user(inventory, home, user)
+    _scan_common_user_directories(inventory, home, user)
+
+
+def scan_user_installed_games(
+    home, user, shared_root="/var/Games",
+    small_install_bytes=DEFAULT_SMALL_INSTALL_BYTES,
+):
+    """Scan only the current player's private home plus shared game data."""
+    inventory = Inventory(small_install_bytes)
+    _scan_user(inventory, os.path.realpath(home), user)
+    _scan_shared(inventory, shared_root)
+    return inventory.result()
+
+
 def scan_installed_games(home_root="/home", shared_root="/var/Games", small_install_bytes=DEFAULT_SMALL_INSTALL_BYTES):
     inventory = Inventory(small_install_bytes)
     for entry in _children(home_root):
         user, home = entry.name, entry.path
-        _scan_steam_user(inventory, home, user)
-        _scan_heroic_user(inventory, home, user)
-        _scan_curseforge_user(inventory, home, user)
-        _scan_lutris_user(inventory, home, user)
-        _scan_common_user_directories(inventory, home, user)
+        _scan_user(inventory, home, user)
     _scan_shared(inventory, shared_root)
     return inventory.result()

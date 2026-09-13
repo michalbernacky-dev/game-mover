@@ -1,19 +1,40 @@
 # Game Mover security audit register
 
-Last review: 2026-09-13 (Heroic EA App Mover extension)
+Last review: 2026-09-13 (EA per-player deployment regression)
 
-Reviewed version: 0.32.0 (source and local RPM; deployment verification pending)
+Reviewed version: 0.33.1 (source; deployment verification pending)
 
-Reviewed source: feature implementation commit
-`f37ad3b527af93847c65da3e886e32402b789196`; this follow-up changes only the
-audit record. Historical commit identifiers in this register may predate
-metadata rewriting.
+Reviewed source: `fix/ea-profile-inventory-permissions` working tree based on
+the verified 0.33.0 merge commit `5dbe491187e026d7567d45ecd2801f2e31d00201`.
+Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: the replacement repository and hosted merge identity remain
-ready, but the new 0.32.0 release is **not ready to publish** until hosted CI and
-post-merge verification pass. PR #3 hosted CI passed for the implementation
-commit; merge and exact post-merge verification remain. The remaining general
-publication gate below still applies.
+Publication verdict: version 0.33.1 is **not ready to publish** until review,
+hosted CI, deployment, and live per-player move/launch verification pass. The
+remaining general publication gate below still applies.
+
+## EA per-player deployment regression: 2026-09-13
+
+Live 0.33.0 testing reproduced a denied EA move while creating
+`/var/Games_links/Luky/ea`. The root broker correctly dropped to the selected
+player before traversing player-controlled data, but a legacy root-created
+per-player proxy directory lacked owner/group write permission. Source
+remediation prepares only the validated username/platform proxy components
+before dropping privileges, opens every component with `O_NOFOLLOW`, rejects
+a directory owned by an unrelated account, and assigns the exact player private
+`0700` directories. It does not broaden access to another player's prefix.
+
+The same live review found that the service inventory could not inspect a
+properly private `/home/Luky`, while shared Steam payload directories were
+treated as confirmed solely because they existed. The desktop client now scans
+only the current player's private metadata under that player's identity.
+Unverified shared payloads and Steam directories without launcher confirmation
+are classified as possible remnants and hidden by default; a real Steam
+manifest or EA installation metadata clears that state.
+
+Focused tests cover legacy proxy repair, symlink rejection, dropped-privilege
+dispatch, current-player EA/Epic discovery, and a large shared Steam payload
+with and without a confirming manifest. Source tests pass; a new RPM,
+installation, and live retry on the affected profile remain required.
 
 ## Heroic EA App Mover extension review: 2026-09-13
 
