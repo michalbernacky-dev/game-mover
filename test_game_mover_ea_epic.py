@@ -206,6 +206,26 @@ class EaEpicLaunchTest(unittest.TestCase):
         self.assertFalse(changed)
         run.assert_not_called()
 
+    def test_windows_game_path_accepts_symlinked_drive_c(self):
+        real_drive = self.root / "real-drive-c"
+        real_games = real_drive / "Program Files/EA Games"
+        real_games.mkdir(parents=True)
+        linked_root = self.root / "linked-wine-root"
+        linked_root.mkdir()
+        (linked_root / "drive_c").symlink_to(real_drive, target_is_directory=True)
+        installation = ea_epic.EaInstallation(
+            app_id="ea-app-local", prefix=str(self.prefix),
+            games_root=str(real_games), install_data="",
+            wine_root=str(linked_root),
+        )
+
+        self.assertEqual(
+            ea_epic._windows_game_path(
+                installation, ea_epic.game_by_app_name("MtMassive"),
+            ),
+            r"C:\Program Files\EA Games\STAR WARS Battlefront II",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
