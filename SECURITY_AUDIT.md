@@ -38,6 +38,19 @@ installation, and live retry on the affected profile remain required.
 
 ## EA bind-mount compatibility remediation: 2026-09-14
 
+Version 0.34.2 addresses the second live regression found after deploying
+0.34.1. Although the hexadecimal path values were parsed, Fedora's PID 1
+rejected the native `.mount` unit because its decoded `Where=` did not match
+the path-derived unit name. EA mounts now use one packaged service template
+whose instance is only a SHA-256 state identifier. A short-lived root helper
+loads a root-owned mode-0600 marker, revalidates the player, game, fixed
+`/var/Games/EA` source and home-confined real mountpoint, and invokes `mount`
+with an argument array. The long-running broker still has no `CAP_SYS_ADMIN`;
+the template bounds the short-lived process to `CAP_SYS_ADMIN` for mounting and
+`CAP_DAC_OVERRIDE` for traversing private player homes. Repair
+accepts only the exact legacy marker and a root-owned Game Mover unit, disables
+and removes that old unit, and replaces an already mounted wrong source.
+
 Version 0.34.1 corrects a live regression in the initial 0.34.0 mount-unit
 renderer. Quoted `What=` and `Where=` values were passed to the mount helper
 with literal quote characters on the deployed Fedora system, so the mounted

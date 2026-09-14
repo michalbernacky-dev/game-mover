@@ -12,6 +12,7 @@ PRIVILEGED_SERVICE_NAME="game-mover-privileged.service"
 LEGACY_SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 PRIVILEGED_SERVICE_PATH="/etc/systemd/system/${PRIVILEGED_SERVICE_NAME}"
+EA_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-ea-bind@.service"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
 LOCAL_ADMIN_DIR="/etc/game_mover"
@@ -162,6 +163,8 @@ copy_if_changed "${SCRIPT_DIR}/game-mover-privileged.service" \
   "${PRIVILEGED_SERVICE_PATH}" 644
 copy_if_changed "${SCRIPT_DIR}/game-mover-dns.service" \
   "/etc/systemd/system/game-mover-dns.service" 644
+copy_if_changed "${SCRIPT_DIR}/game-mover-ea-bind@.service" \
+  "${EA_BIND_SERVICE_PATH}" 644
 
 echo "[5/8] Desktop launcher (${APP_DESKTOP})"
 desktop_tmp="$(mktemp)"

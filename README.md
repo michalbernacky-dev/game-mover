@@ -14,6 +14,9 @@ profile. The EA prefix must be dedicated (for example
 and EA App must be closed, and staged downloads are shown only informationally
 and cannot be moved. Steam runtimes and possible stale
 installations remain hidden by default behind an explicit recovery checkbox.
+The persistent EA mount uses a fixed systemd service template keyed by a
+root-owned identifier, so spaces in Wine-prefix paths are not encoded into a
+native `.mount` unit name.
 Heroic still owns GOG and Epic payload/prefix management. Other launchers remain
 read-only inventory providers, remain visible in Mover's platform selector, and
 expose no mutation until their storage workflows are explicitly implemented and
@@ -633,6 +636,10 @@ Heroic. Ostatní launchery zůstávají jen zdrojem read-only
 inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
+
+Trvalý EA mount používá pevnou šablonu systemd identifikovanou hashem root-only
+evidence, takže mezery v cestě Wine prefixu nejsou součástí názvu nativní
+`.mount` jednotky.
 
 ### Hry vlastněné na Epicu a spouštěné přes EA App
 

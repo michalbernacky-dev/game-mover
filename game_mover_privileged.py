@@ -57,6 +57,7 @@ EA_MOUNT_STATE_ROOT = os.getenv(
 SYSTEMD_UNIT_ROOT = os.getenv(
     "GAME_MOVER_SYSTEMD_UNIT_ROOT", "/etc/systemd/system",
 )
+EA_BIND_SERVICE_PREFIX = "game-mover-ea-bind@"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,160}$")
@@ -406,14 +407,6 @@ def _create_symlink(parameters: dict) -> dict:
     return {"message": "Odkaz hry byl vytvořen přes spravovanou proxy"}
 
 
-def _systemd_path_value(value: str) -> str:
-    if any(character in value for character in ("\x00", "\n", "\r")):
-        raise PrivilegedError("Cesta mountu obsahuje nepovolený znak")
-    return value.replace("\\", "\\x5c").replace(" ", "\\x20").replace(
-        "\t", "\\x09",
-    )
-
-
 def _ea_mount_unit_name(mountpoint: str) -> str:
     result = _run(
         ["/usr/bin/systemd-escape", "--path", "--suffix=mount", mountpoint],
@@ -429,6 +422,16 @@ def _ea_mount_unit_name(mountpoint: str) -> str:
     ):
         raise PrivilegedError("Název systemd mount jednotky nelze bezpečně vytvořit")
     return unit
+
+
+def _ea_mount_id(mountpoint: str) -> str:
+    return hashlib.sha256(mountpoint.encode("utf-8")).hexdigest()
+
+
+def _ea_bind_service(mount_id: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", mount_id):
+        raise PrivilegedError("Neplatný identifikátor EA bind mountu")
+    return f"{EA_BIND_SERVICE_PREFIX}{mount_id}.service"
 
 
 def _write_managed_file(path: str, contents: str, mode: int) -> None:
@@ -453,6 +456,88 @@ def _write_managed_file(path: str, contents: str, mode: int) -> None:
         raise
 
 
+def _read_managed_marker(mount_id: str) -> dict:
+    """Load root-owned EA mount state without following a marker symlink."""
+    _ea_bind_service(mount_id)
+    marker_path = os.path.join(EA_MOUNT_STATE_ROOT, f"{mount_id}.json")
+    try:
+        metadata = os.stat(marker_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+            or metadata.st_size > 4096
+        ):
+            raise PrivilegedError("Evidence EA mountu nemá bezpečné vlastnosti")
+        descriptor = os.open(
+            marker_path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        )
+        with os.fdopen(descriptor, encoding="utf-8") as stream:
+            payload = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PrivilegedError("Evidenci EA mountu nelze bezpečně načíst") from error
+    if not isinstance(payload, dict):
+        raise PrivilegedError("Evidence EA mountu je neplatná")
+    return payload
+
+
+def _validated_ea_marker(mount_id: str) -> tuple[str, str]:
+    """Resolve the fixed source and per-player target from trusted mount state."""
+    payload = _read_managed_marker(mount_id)
+    if set(payload) != {
+        "version", "unit", "user", "game_name", "source", "mountpoint",
+    } or payload.get("version") != 2:
+        raise PrivilegedError("Evidence EA mountu má nepodporovaný formát")
+    username = _safe_username(payload.get("user"))
+    game = _safe_game_name(payload.get("game_name"))
+    service = _ea_bind_service(mount_id)
+    home = os.path.realpath(pwd.getpwnam(username).pw_dir)
+    source = _beneath(_beneath(GAMES_ROOT, "EA"), game)
+    mountpoint = os.path.abspath(str(payload.get("mountpoint") or ""))
+    parent = os.path.realpath(os.path.dirname(mountpoint))
+    if (
+        payload.get("unit") != service
+        or payload.get("source") != source
+        or _ea_mount_id(mountpoint) != mount_id
+        or os.path.basename(mountpoint) != game
+        or os.path.commonpath((home, parent)) != home
+        or not os.path.isdir(source)
+        or os.path.islink(source)
+        or not os.path.isdir(mountpoint)
+        or os.path.islink(mountpoint)
+    ):
+        raise PrivilegedError("Evidence EA mountu neodpovídá bezpečnému umístění")
+    return source, mountpoint
+
+
+def _run_ea_bind_service(mount_id: str, *, unmount: bool = False) -> None:
+    """Mount or unmount one marker-selected EA payload as a systemd service."""
+    if os.geteuid() != 0:
+        raise PrivilegedError("EA bind helper musí běžet jako root")
+    source, mountpoint = _validated_ea_marker(mount_id)
+    if unmount:
+        if not os.path.ismount(mountpoint):
+            return
+        result = _run(["/usr/bin/umount", mountpoint], 60)
+        if result["returncode"]:
+            raise PrivilegedError(result["stderr"] or "EA bind mount nelze odpojit")
+        return
+    if os.path.ismount(mountpoint):
+        result = _run(["/usr/bin/umount", mountpoint], 60)
+        if result["returncode"]:
+            raise PrivilegedError(result["stderr"] or "Starý EA mount nelze odpojit")
+    result = _run(["/usr/bin/mount", "--bind", source, mountpoint], 60)
+    if result["returncode"]:
+        raise PrivilegedError(result["stderr"] or "EA bind mount selhal")
+    result = _run([
+        "/usr/bin/mount", "-o", "remount,bind,nosuid,nodev", source,
+        mountpoint,
+    ], 60)
+    if result["returncode"]:
+        _run(["/usr/bin/umount", mountpoint], 60)
+        raise PrivilegedError(result["stderr"] or "Zabezpečení EA bind mountu selhalo")
+
+
 def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
     """Install one persistent bind mount derived from a dropped-UID worker."""
     username = _safe_username(parameters.get("user"))
@@ -471,34 +556,26 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
     if not os.path.isdir(target) or os.path.islink(target):
         raise PrivilegedError("Sdílená EA hra nebyla nalezena")
 
-    unit = _ea_mount_unit_name(mountpoint)
-    unit_path = os.path.join(SYSTEMD_UNIT_ROOT, unit)
-    marker_name = hashlib.sha256(mountpoint.encode("utf-8")).hexdigest() + ".json"
-    marker_path = os.path.join(EA_MOUNT_STATE_ROOT, marker_name)
+    legacy_unit = _ea_mount_unit_name(mountpoint)
+    legacy_unit_path = os.path.join(SYSTEMD_UNIT_ROOT, legacy_unit)
+    mount_id = _ea_mount_id(mountpoint)
+    unit = _ea_bind_service(mount_id)
+    marker_path = os.path.join(EA_MOUNT_STATE_ROOT, f"{mount_id}.json")
     expected_marker = json.dumps({
-        "unit": unit, "source": target, "mountpoint": mountpoint,
+        "version": 2, "unit": unit, "user": username, "game_name": game,
+        "source": target, "mountpoint": mountpoint,
     }, ensure_ascii=False, sort_keys=True) + "\n"
-    expected_unit = (
-        "# Managed by Game Mover; do not edit manually.\n"
-        "[Unit]\n"
-        "Description=Game Mover EA payload bind mount\n"
-        "After=local-fs.target\n"
-        f"RequiresMountsFor={_systemd_path_value(target)}\n\n"
-        "[Mount]\n"
-        f"What={_systemd_path_value(target)}\n"
-        f"Where={_systemd_path_value(mountpoint)}\n"
-        "Type=none\n"
-        "Options=bind,nosuid,nodev\n\n"
-        "[Install]\n"
-        "WantedBy=multi-user.target\n"
-    )
-    if os.path.lexists(unit_path) and not os.path.lexists(marker_path):
+    legacy_marker = json.dumps({
+        "unit": legacy_unit, "source": target, "mountpoint": mountpoint,
+    }, ensure_ascii=False, sort_keys=True) + "\n"
+    if os.path.lexists(legacy_unit_path) and not os.path.lexists(marker_path):
         raise PrivilegedError("Systemd mount jednotka koliduje s cizí konfigurací")
     managed_existing = os.path.lexists(marker_path)
     if managed_existing:
         try:
             with open(marker_path, encoding="utf-8") as stream:
-                if stream.read() != expected_marker:
+                current_marker = stream.read()
+                if current_marker not in (expected_marker, legacy_marker):
                     raise PrivilegedError("Evidence EA mountu neodpovídá požadavku")
         except OSError as error:
             raise PrivilegedError("Evidenci EA mountu nelze ověřit") from error
@@ -513,8 +590,26 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
         and metadata.st_uid != pwd.getpwnam(username).pw_uid
     ):
         raise PrivilegedError("EA mountpoint nepatří vybranému hráči")
+    if managed_existing and os.path.lexists(legacy_unit_path):
+        metadata = os.stat(legacy_unit_path, follow_symlinks=False)
+        try:
+            with open(legacy_unit_path, encoding="utf-8") as stream:
+                managed_unit = stream.read().startswith(
+                    "# Managed by Game Mover; do not edit manually.\n",
+                )
+        except OSError as error:
+            raise PrivilegedError("Starou EA mount jednotku nelze ověřit") from error
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+            or not managed_unit
+        ):
+            raise PrivilegedError("Stará EA mount jednotka není bezpečně spravovaná")
+        _run(["/usr/bin/systemctl", "disable", legacy_unit], 60)
+        _run(["/usr/bin/systemctl", "stop", legacy_unit], 60)
+        os.unlink(legacy_unit_path)
     _write_managed_file(marker_path, expected_marker, 0o600)
-    _write_managed_file(unit_path, expected_unit, 0o644)
     reload_result = _run(["/usr/bin/systemctl", "daemon-reload"], 30)
     if reload_result["returncode"]:
         raise PrivilegedError(reload_result["stderr"] or "Systemd reload selhal")
@@ -956,5 +1051,13 @@ def serve(socket_path: str = SOCKET_PATH) -> None:
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--filesystem-worker":
         _serve_filesystem_worker(sys.argv[2])
+    elif len(sys.argv) == 3 and sys.argv[1] in ("--ea-mount", "--ea-unmount"):
+        try:
+            _run_ea_bind_service(
+                sys.argv[2], unmount=sys.argv[1] == "--ea-unmount",
+            )
+        except (PrivilegedError, OSError, subprocess.SubprocessError) as error:
+            print(_bounded_text(error, 2048), file=sys.stderr)
+            raise SystemExit(1) from error
     else:
         serve()
