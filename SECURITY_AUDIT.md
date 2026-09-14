@@ -38,6 +38,16 @@ installation, and live retry on the affected profile remain required.
 
 ## EA bind-mount compatibility remediation: 2026-09-14
 
+Version 0.34.1 corrects a live regression in the initial 0.34.0 mount-unit
+renderer. Quoted `What=` and `Where=` values were passed to the mount helper
+with literal quote characters on the deployed Fedora system, so the mounted
+directory was not the shared EA payload. Paths now use systemd hexadecimal
+escapes without quotes, and reapplying the operation restarts an existing
+managed unit so both affected profiles are repaired in place. A mountpoint with
+unexpected ownership is accepted only when its root-only marker exactly matches
+the requested player, source, destination and unit; foreign units remain
+rejected.
+
 Live testing on two player profiles showed that EA App requested a complete
 download after restart when the game directory was a Unix symlink, even with
 the expected Wine registry data present. The same shared payload was recognized

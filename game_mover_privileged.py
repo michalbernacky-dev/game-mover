@@ -378,7 +378,11 @@ def _create_symlink(parameters: dict) -> dict:
                 already_mounted = os.path.samefile(source, target)
             except OSError:
                 already_mounted = False
-            if not already_mounted and os.listdir(source):
+            if (
+                not already_mounted
+                and not os.path.ismount(source)
+                and os.listdir(source)
+            ):
                 raise PrivilegedError("Cílový EA adresář není prázdný")
         elif os.path.lexists(source):
             raise PrivilegedError("Cílová EA cesta není adresář")
@@ -402,10 +406,12 @@ def _create_symlink(parameters: dict) -> dict:
     return {"message": "Odkaz hry byl vytvořen přes spravovanou proxy"}
 
 
-def _systemd_quote(value: str) -> str:
+def _systemd_path_value(value: str) -> str:
     if any(character in value for character in ("\x00", "\n", "\r")):
         raise PrivilegedError("Cesta mountu obsahuje nepovolený znak")
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value.replace("\\", "\\x5c").replace(" ", "\\x20").replace(
+        "\t", "\\x09",
+    )
 
 
 def _ea_mount_unit_name(mountpoint: str) -> str:
@@ -462,13 +468,6 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
         or os.path.islink(mountpoint)
     ):
         raise PrivilegedError("EA mountpoint není bezpečný adresář v profilu hráče")
-    metadata = os.stat(mountpoint, follow_symlinks=False)
-    try:
-        already_mounted = os.path.samefile(mountpoint, target)
-    except OSError:
-        already_mounted = False
-    if not already_mounted and metadata.st_uid != pwd.getpwnam(username).pw_uid:
-        raise PrivilegedError("EA mountpoint nepatří vybranému hráči")
     if not os.path.isdir(target) or os.path.islink(target):
         raise PrivilegedError("Sdílená EA hra nebyla nalezena")
 
@@ -484,10 +483,10 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
         "[Unit]\n"
         "Description=Game Mover EA payload bind mount\n"
         "After=local-fs.target\n"
-        f"RequiresMountsFor={_systemd_quote(target)}\n\n"
+        f"RequiresMountsFor={_systemd_path_value(target)}\n\n"
         "[Mount]\n"
-        f"What={_systemd_quote(target)}\n"
-        f"Where={_systemd_quote(mountpoint)}\n"
+        f"What={_systemd_path_value(target)}\n"
+        f"Where={_systemd_path_value(mountpoint)}\n"
         "Type=none\n"
         "Options=bind,nosuid,nodev\n\n"
         "[Install]\n"
@@ -495,22 +494,39 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
     )
     if os.path.lexists(unit_path) and not os.path.lexists(marker_path):
         raise PrivilegedError("Systemd mount jednotka koliduje s cizí konfigurací")
-    if os.path.lexists(marker_path):
+    managed_existing = os.path.lexists(marker_path)
+    if managed_existing:
         try:
             with open(marker_path, encoding="utf-8") as stream:
                 if stream.read() != expected_marker:
                     raise PrivilegedError("Evidence EA mountu neodpovídá požadavku")
         except OSError as error:
             raise PrivilegedError("Evidenci EA mountu nelze ověřit") from error
+    metadata = os.stat(mountpoint, follow_symlinks=False)
+    try:
+        already_mounted = os.path.samefile(mountpoint, target)
+    except OSError:
+        already_mounted = False
+    if (
+        not already_mounted
+        and not managed_existing
+        and metadata.st_uid != pwd.getpwnam(username).pw_uid
+    ):
+        raise PrivilegedError("EA mountpoint nepatří vybranému hráči")
     _write_managed_file(marker_path, expected_marker, 0o600)
     _write_managed_file(unit_path, expected_unit, 0o644)
     reload_result = _run(["/usr/bin/systemctl", "daemon-reload"], 30)
     if reload_result["returncode"]:
         raise PrivilegedError(reload_result["stderr"] or "Systemd reload selhal")
-    enable_result = _run(["/usr/bin/systemctl", "enable", "--now", unit], 60)
+    enable_result = _run(["/usr/bin/systemctl", "enable", unit], 60)
     if enable_result["returncode"]:
         raise PrivilegedError(
             enable_result["stderr"] or "Aktivace EA bind mountu selhala",
+        )
+    restart_result = _run(["/usr/bin/systemctl", "restart", unit], 60)
+    if restart_result["returncode"]:
+        raise PrivilegedError(
+            restart_result["stderr"] or "Aktivace EA bind mountu selhala",
         )
     return {
         "message": f"EA hra '{game}' je připojena trvalým bind mountem",
