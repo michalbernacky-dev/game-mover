@@ -1757,9 +1757,17 @@ def api_list_user_games():
         )
         for name in os.listdir(common):
             path = os.path.join(common, name)
+            shared_ea = os.path.join(GAMES_ROOT, "EA", name)
+            ea_bind_mounted = False
+            if platform == "ea" and os.path.isdir(shared_ea):
+                try:
+                    ea_bind_mounted = os.path.samefile(path, shared_ea)
+                except OSError:
+                    pass
             if (
                 not os.path.isdir(path)
                 or os.path.islink(path)
+                or ea_bind_mounted
                 or is_excluded_game(platform, name)
             ):
                 continue
