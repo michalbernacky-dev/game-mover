@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.33.1
+Version:        0.33.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -175,6 +175,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.33.2-1
+- Restore the EA game's machine-wide install registration before Epic launches
+- Run the payload's own Touchup.exe only when the expected Install Dir is absent
+
 * Sun Sep 13 2026 Game Mover Packager <packager@example.invalid> - 0.33.1-1
 - Repair legacy per-player proxy directory ownership before dropped-privilege moves
 - Scan the current desktop player's private launcher metadata in the local client

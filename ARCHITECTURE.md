@@ -113,6 +113,12 @@ the generated URL. Launch fails closed when Heroic/Legendary authentication,
 EA App, `start.exe`, UMU, the configured Proton runner, shared payload, or the
 player's symlink is missing.
 
+Before starting Legendary, the adapter checks the expected machine-wide EA
+`Install Dir` in the player's Wine registry. A missing entry is restored by
+running the shared game's own `Touchup.exe` through that same UMU, Proton and
+prefix context. Correct existing registration is never rewritten, and launcher
+credentials or another player's registry are never copied.
+
 Adapters may discover endpoints from an authoritative game/runtime source and
 merge them with optional registry entries. Minecraft reads `server.properties`
 or Podman publication metadata. The Satisfactory systemd adapter reads the

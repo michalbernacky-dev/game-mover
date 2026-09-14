@@ -38,8 +38,17 @@ class EaEpicLaunchTest(unittest.TestCase):
         self.umu.write_text("#!/bin/sh\n")
         self.umu.chmod(0o755)
         self.shared.mkdir(parents=True)
+        installer = self.shared / "__Installer/Touchup.exe"
+        installer.parent.mkdir()
+        installer.write_bytes(b"MZ")
+        (self.shared / "starwarsbattlefrontii.exe").write_bytes(b"MZ")
         (self.games / "STAR WARS Battlefront II").symlink_to(
             self.shared, target_is_directory=True,
+        )
+        (self.wine_root / "system.reg").write_text(
+            "[Software\\\\EA Games\\\\STAR WARS Battlefront II]\n"
+            '"Install Dir"="C:\\\\Program Files\\\\EA Games\\\\'
+            'STAR WARS Battlefront II\\\\"\n',
         )
         (self.config / "sideload_apps/library.json").write_text(json.dumps({
             "games": [{"title": "EA App", "app_name": "ea-app-local"}],
@@ -154,6 +163,48 @@ class EaEpicLaunchTest(unittest.TestCase):
         )
         self.assertEqual(captured["options"]["stdout"], ea_epic.subprocess.DEVNULL)
         self.assertEqual(captured["options"]["stderr"], ea_epic.subprocess.DEVNULL)
+
+    def test_missing_install_key_runs_game_touchup_before_launch(self):
+        (self.wine_root / "system.reg").write_text("WINE REGISTRY Version 2\n")
+        touchup_call = {}
+
+        def fake_run(arguments, **options):
+            touchup_call.update(arguments=arguments, options=options)
+
+        class Process:
+            pid = 4321
+
+        with (
+            patch.object(ea_epic, "_heroic_available", return_value=True),
+            patch.object(ea_epic, "_legendary_executable", return_value="/usr/bin/legendary"),
+            patch.object(ea_epic.subprocess, "run", side_effect=fake_run),
+        ):
+            ea_epic.launch(
+                "MtMassive", home=str(self.home),
+                shared_root=str(self.root / "Games"),
+                popen=lambda *args, **kwargs: Process(),
+            )
+
+        self.assertEqual(touchup_call["arguments"], [
+            str(self.umu),
+            str(self.shared / "__Installer/Touchup.exe"),
+            "install", "-locale", "en_US", "-installPath",
+            r"C:\Program Files\EA Games\STAR WARS Battlefront II",
+            "-autologging",
+        ])
+        self.assertEqual(touchup_call["options"]["env"]["WINEPREFIX"], str(self.prefix))
+        self.assertEqual(touchup_call["options"]["env"]["PROTONPATH"], str(self.proton))
+        self.assertTrue(touchup_call["options"]["check"])
+
+    def test_existing_install_key_skips_touchup(self):
+        installation = heroic_ea_installations(str(self.home))[0]
+        game = ea_epic.game_by_app_name("MtMassive")
+        with patch.object(ea_epic.subprocess, "run") as run:
+            changed = ea_epic._ensure_ea_registration(
+                installation, game, str(self.proton), str(self.umu),
+            )
+        self.assertFalse(changed)
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

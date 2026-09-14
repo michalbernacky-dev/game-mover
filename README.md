@@ -37,7 +37,10 @@ game-mover-ea-epic launch MtMassive
 The helper requires Heroic, the player's authenticated Legendary config, a
 dedicated Heroic EA App prefix with EA App and `start.exe`, the Proton runner
 recorded for that prefix, UMU, shared data and the correct per-user symlink. It
-prefers Heroic's UMU and falls back to Lutris' UMU. It invokes `legendary launch
+also verifies the game's machine-wide `Install Dir` in that Wine prefix before
+launch. If the entry is missing, it runs the shared payload's own `Touchup.exe`
+with the catalogued locale and install path; an existing correct registration
+is left untouched. It prefers Heroic's UMU and falls back to Lutris' UMU. It invokes `legendary launch
 MtMassive --origin`, using itself as Legendary's Wine wrapper; the wrapper
 removes Legendary's `start` pseudo-command and launches the prefix's Windows
 `start.exe` through UMU. Legendary generates the Epic exchange code only for
@@ -648,7 +651,10 @@ game-mover-ea-epic launch MtMassive
 Helper ověří Heroic, přihlášenou Legendary konfiguraci daného hráče,
 samostatný Heroic EA App prefix s EA App a `start.exe`, Proton uvedený v
 metadatech prefixu, UMU, sdílená data a správný uživatelský symlink. Preferuje
-Heroic UMU a případně použije UMU z Lutrisu. Spustí `legendary launch MtMassive
+Také před spuštěním ověří herní `Install Dir` v systémovém registru Wine. Pokud
+záznam chybí, spustí vlastní `Touchup.exe` ze sdílených dat s cestou a locale z
+katalogu; existující správný záznam nemění. Preferuje Heroic UMU a případně
+použije UMU z Lutrisu. Spustí `legendary launch MtMassive
 --origin` a sám funguje jako Wine wrapper: zahodí pseudo-příkaz `start` a přes
 UMU spustí Windows `start.exe` z prefixu. Krátkodobý Epic exchange code vznikne
 jen při tomto spuštění; Game Mover jej neukládá ani nevypisuje do UI či

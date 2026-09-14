@@ -35,6 +35,9 @@ class EaEpicGame:
     shared_storage_family: str
     shared_directory: str
     ea_prefix: str
+    registry_key: str
+    executable: str
+    locale: str = "en_US"
 
     def shared_path(self, shared_root: str = SHARED_ROOT) -> str:
         return os.path.join(
@@ -58,6 +61,8 @@ EA_EPIC_GAMES = (
         shared_storage_family="EA",
         shared_directory="STAR WARS Battlefront II",
         ea_prefix="EA_app",
+        registry_key=r"Software\EA Games\STAR WARS Battlefront II",
+        executable="starwarsbattlefrontii.exe",
     ),
 )
 
@@ -251,6 +256,72 @@ def prerequisite_report(
     }
 
 
+def _windows_game_path(installation: EaInstallation, game: EaEpicGame) -> str:
+    drive_c = os.path.join(installation.wine_root, "drive_c")
+    source = os.path.join(installation.games_root, game.shared_directory)
+    try:
+        if os.path.commonpath((drive_c, source)) != drive_c:
+            raise RuntimeError("The EA game directory is outside drive_c")
+        relative = os.path.relpath(source, drive_c)
+    except ValueError as error:
+        raise RuntimeError("The EA game directory is outside drive_c") from error
+    return "C:\\" + relative.replace(os.sep, "\\")
+
+
+def _ea_registration_present(
+    installation: EaInstallation, game: EaEpicGame, windows_path: str,
+) -> bool:
+    """Read Wine's machine registry without starting another Wine process."""
+    executable = os.path.join(
+        installation.games_root, game.shared_directory, game.executable,
+    )
+    if not os.path.isfile(executable):
+        return False
+    registry = os.path.join(installation.wine_root, "system.reg")
+    try:
+        metadata = os.stat(registry, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 64 * 1024 * 1024:
+            return False
+        with open(registry, encoding="utf-8", errors="replace") as stream:
+            contents = stream.read()
+    except OSError:
+        return False
+    section = "[" + game.registry_key.replace("\\", "\\\\") + "]"
+    install_dir = windows_path.rstrip("\\") + "\\"
+    value = '"Install Dir"="' + install_dir.replace("\\", "\\\\") + '"'
+    return section in contents and value in contents
+
+
+def _ensure_ea_registration(
+    installation: EaInstallation, game: EaEpicGame, proton: str, umu: str,
+    *, run=None,
+) -> bool:
+    """Run the game's own EA installer helper when its install key is absent."""
+    windows_path = _windows_game_path(installation, game)
+    if _ea_registration_present(installation, game, windows_path):
+        return False
+    touchup = os.path.realpath(os.path.join(
+        installation.games_root, game.shared_directory, "__Installer/Touchup.exe",
+    ))
+    if not os.path.isfile(touchup):
+        raise RuntimeError(f"{game.name} Touchup.exe is missing from the game data")
+    run = run or subprocess.run
+    environment = os.environ.copy()
+    environment.update({
+        "WINEPREFIX": installation.prefix,
+        "PROTONPATH": proton,
+        "GAMEID": f"umu-{game.epic_app_name}",
+        "STORE": "egs",
+    })
+    run(
+        [umu, touchup, "install", "-locale", game.locale,
+         "-installPath", windows_path, "-autologging"],
+        env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, check=True,
+    )
+    return True
+
+
 def _helper_path() -> str:
     override = os.getenv("GAME_MOVER_EA_EPIC_HELPER")
     if override:
@@ -269,6 +340,13 @@ def launch(
     legendary = report["runtime"]["legendary"]
     if failed:
         raise RuntimeError("\n".join(dict.fromkeys(failed)))
+    game = game_by_app_name(app_name)
+    installation = _select_installation(home, game) if game else None
+    if not game or not installation:
+        raise RuntimeError("The EA App installation could not be resolved")
+    _ensure_ea_registration(
+        installation, game, report["runtime"]["proton"], report["runtime"]["umu"],
+    )
     environment = os.environ.copy()
     environment.update({
         "LEGENDARY_CONFIG_PATH": _legendary_config(home),
