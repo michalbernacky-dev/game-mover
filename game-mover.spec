@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.33.3
+Version:        0.34.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -22,6 +22,7 @@ Requires:       rsync
 Requires:       podman
 Requires:       acl
 Requires:       PackageKit
+Requires:       systemd
 Requires(pre):  shadow-utils
 Requires(post): shadow-utils
 Requires(post): util-linux
@@ -81,6 +82,7 @@ getent passwd gameplatform >/dev/null || \
 find /opt/game_mover -type d -name __pycache__ -prune -exec rm -rf -- {} + 2>/dev/null || :
 
 mkdir -p /etc/game_mover
+install -d -m 0700 -o root -g root /etc/game_mover/ea-mounts
 if [ ! -f /etc/game_mover/api.token ]; then
     token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
     printf '%s\n' "$token" > /etc/game_mover/api.token
@@ -175,6 +177,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.0-1
+- Replace per-player EA symlinks with persistent, narrowly managed bind mounts
+- Preserve Steam's existing per-player symlink workflow
+
 * Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.33.3-1
 - Resolve Proton drive_c symlinks before deriving the EA Windows install path
 

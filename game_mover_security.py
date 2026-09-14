@@ -14,13 +14,13 @@ GLOBAL_OPERATION_DEFINITIONS = (
     {
         "id": "game.move",
         "label": "Přesun herních dat",
-        "description": "Přesun hry do sdílené knihovny a vytvoření navazujících symlinků.",
+        "description": "Přesun hry do sdílené knihovny a vytvoření symlinku Steamu nebo EA bind mountu.",
         "default": "silent",
     },
     {
         "id": "game.link",
         "label": "Připojení sdílené hry",
-        "description": "Vytvoření symlinku nebo kopie Wine prefixu pro vybraného uživatele.",
+        "description": "Vytvoření symlinku Steamu nebo trvalého EA bind mountu pro vybraného uživatele.",
         "default": "silent",
     },
     {

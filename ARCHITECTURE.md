@@ -63,9 +63,12 @@ network model.
 ## Desktop game-data ownership
 
 The mutable **Mover** workflow supports Steam and one narrowly bounded EA App
-layout. Steam payloads move into `/var/Games/steam`; complete EA App game
-payloads move into `/var/Games/EA`. Both use per-user proxy symlinks. Steam also
-manages its shared download cache and library permissions.
+layout. Steam payloads move into `/var/Games/steam` and keep the per-user proxy
+symlink model; complete EA App game payloads move into `/var/Games/EA` and use
+a persistent systemd bind mount from the shared payload to the original
+directory in each player's prefix,
+because EA App does not reliably recognize a Unix directory symlink as an
+installed game.
 
 The EA adapter accepts only an EA App sideload entry found in Heroic's own
 configuration and a Wine prefix confined below that player's home. It moves one
@@ -76,9 +79,14 @@ launcher and its EA game shortcuts. A global default is read-only inventory and
 must be migrated or reinstalled before Mover enables mutation.
 The launcher, Wine registry, credentials and account state remain private in the
 player profile. Staged EA download journals and running Heroic/EA processes make
-move or link operations fail closed. The filesystem worker performs discovery
-and traversal after dropping to the selected player's UID; the broker receives
-only a platform, player and single-component game name.
+move or bind-mount operations fail closed. The filesystem worker performs
+discovery and traversal after dropping to the selected player's UID; the broker receives
+only a platform, player and single-component game name. For EA, that worker
+creates or migrates the exact game mountpoint. The root broker independently
+confines it to the selected player's home and the fixed `/var/Games/EA` source,
+then writes and enables the corresponding systemd `.mount` unit. It never
+accepts a source or destination path from the API and does not gain
+`CAP_SYS_ADMIN`; PID 1 performs the validated mount.
 
 GOG and Epic installation data belong to Heroic, which already separates a
 game's payload from its per-user Wine prefix and presents that relationship to
@@ -111,7 +119,7 @@ the GUI and application logs; defensive error rendering redacts
 `AUTH_PASSWORD`. Only the transient process arguments needed by EA App carry
 the generated URL. Launch fails closed when Heroic/Legendary authentication,
 EA App, `start.exe`, UMU, the configured Proton runner, shared payload, or the
-player's symlink is missing.
+player's bind mount is missing.
 
 Before starting Legendary, the adapter checks the expected machine-wide EA
 `Install Dir` in the player's Wine registry. A missing entry is restored by

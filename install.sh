@@ -150,6 +150,7 @@ runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
   systemctl --user enable --now podman.socket podman-restart.service
 ensure_local_admin_token
 mkdir -p /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/ea-mounts"
 chgrp "${GROUP_NAME}" /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
 chmod 0775 /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
 setfacl -m "g:${GROUP_NAME}:rwx,m::rwx,d:g:${GROUP_NAME}:rwx,d:m::rwx" \

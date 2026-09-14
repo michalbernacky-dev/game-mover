@@ -61,6 +61,7 @@ from game_mover_endpoints import (
 # ------------------------------------------------------------
 FLASK_URL = LOCAL_API_URL
 CLIENT_CONFIG_PATH = os.path.expanduser("~/.config/game-mover/config.json")
+GAMES_ROOT = os.getenv("GAME_MOVER_GAMES_ROOT", "/var/Games")
 
 
 def load_client_config():
@@ -7168,6 +7169,7 @@ class GameMover(QWidget):
                 "Steam hry ve sdílené knihovně dostupné pro symlink:"
             )
         elif ea_supported:
+            self.link_button.setText("Vytvořit / obnovit bind mount")
             if heroic_ea_shared_default_detected(f"/home/{self.user}"):
                 self.mover_scope_label.setText(
                     "EA App používá globální sdílený výchozí prefix Heroicu. "
@@ -7183,7 +7185,7 @@ class GameMover(QWidget):
                 )
             self.label_move.setText("Dokončené EA App hry k přesunu:")
             self.label_symlink.setText(
-                "EA App hry ve sdílené knihovně dostupné pro symlink:"
+                "EA App hry ve sdílené knihovně dostupné pro bind mount:"
             )
         elif self.platform in ("gog", "epic"):
             store = "GOG" if self.platform == "gog" else "Epic"
@@ -7201,6 +7203,8 @@ class GameMover(QWidget):
             )
             self.label_move.setText(f"{launcher} – sdílení herních dat:")
             self.label_symlink.setText(f"{launcher} – uživatelská integrace:")
+        if not ea_supported:
+            self.link_button.setText("Vytvořit symlink")
         self.refresh_cache_status()
         self.refresh_game_lists()
 
@@ -7220,9 +7224,17 @@ class GameMover(QWidget):
                 )
             for name in os.listdir(common):
                 path = os.path.join(common, name)
+                shared_ea = os.path.join(GAMES_ROOT, "EA", name)
+                ea_bind_mounted = False
+                if self.platform == "ea" and os.path.isdir(shared_ea):
+                    try:
+                        ea_bind_mounted = os.path.samefile(path, shared_ea)
+                    except OSError:
+                        pass
                 if (
                     os.path.isdir(path)
                     and not os.path.islink(path)
+                    and not ea_bind_mounted
                     and not is_excluded_game(self.platform, name)
                 ):
                     incomplete = bool(
@@ -7260,7 +7272,27 @@ class GameMover(QWidget):
                 data = resp.json()
                 shared_games = data.get("games", [])
                 user_common = resolve_user_common(self.platform, self.user)
-                return [g for g in shared_games if not os.path.exists(os.path.join(user_common, g))]
+                candidates = []
+                for game in shared_games:
+                    local = os.path.join(user_common, game)
+                    shared = os.path.join(GAMES_ROOT, "EA", game)
+                    if self.platform != "ea":
+                        if not os.path.exists(local):
+                            candidates.append(game)
+                        continue
+                    if not os.path.lexists(local):
+                        candidates.append(game)
+                    elif os.path.islink(local):
+                        if os.path.realpath(local) == os.path.realpath(shared):
+                            candidates.append(game)
+                    elif os.path.isdir(local):
+                        try:
+                            mounted = os.path.samefile(local, shared)
+                        except OSError:
+                            mounted = False
+                        if mounted or not os.listdir(local):
+                            candidates.append(game)
+                return candidates
         except Exception as e:
             print(f"Error getting shared list: {e}")
         return []
@@ -7316,11 +7348,14 @@ class GameMover(QWidget):
                 self.game_combo_move.addItem(label, item)
             self.move_button.setEnabled(True)
 
-        # kandidáti pro symlink
+        # Kandidáti pro Steam symlink nebo EA bind mount.
         self.symlink_list.clear()
         symlink_games = self.get_symlink_candidates()
         if not symlink_games:
-            self.symlink_list.addItem('Žádné hry pro symlink')
+            self.symlink_list.addItem(
+                'Žádné hry pro bind mount'
+                if self.platform == "ea" else 'Žádné hry pro symlink'
+            )
             self.link_button.setEnabled(False)
         else:
             for g in symlink_games:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import configparser
 import grp
+import hashlib
 import ipaddress
 import json
 import os
@@ -50,12 +51,18 @@ GROUP_NAME = "gemers"
 ALLOWED_UNITS_PATH = os.getenv(
     "GAME_MOVER_ALLOWED_UNITS_PATH", "/etc/game_mover/allowed-services.json",
 )
+EA_MOUNT_STATE_ROOT = os.getenv(
+    "GAME_MOVER_EA_MOUNT_STATE_ROOT", "/etc/game_mover/ea-mounts",
+)
+SYSTEMD_UNIT_ROOT = os.getenv(
+    "GAME_MOVER_SYSTEMD_UNIT_ROOT", "/etc/systemd/system",
+)
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,160}$")
 # Existing Linux account names are case-sensitive; preserve their exact spelling.
 USERNAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,31}$")
-GAME_NAME_RE = re.compile(r"^[^/\\\x00]{1,255}$")
+GAME_NAME_RE = re.compile(r"^[^/\\\x00-\x1f\x7f]{1,255}$")
 DNS_NAME_RE = re.compile(
     r"^(?=.{1,253}\.?$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.?$",
@@ -298,27 +305,39 @@ def _move_game(parameters: dict) -> dict:
     if not os.path.isdir(source) or os.path.islink(source):
         raise PrivilegedError("Zdrojová hra nebyla nalezena")
     target_base = _beneath(GAMES_ROOT, shared_directory, allow_missing=True)
-    proxy_base = _beneath(GAMES_LINKS_ROOT, username, platform, allow_missing=True)
     os.makedirs(target_base, mode=0o775, exist_ok=True)
-    os.makedirs(proxy_base, mode=0o775, exist_ok=True)
     target = _beneath(target_base, game, allow_missing=True)
-    proxy = _beneath(proxy_base, game, allow_missing=True)
-    if os.path.lexists(target) or os.path.lexists(proxy):
-        raise PrivilegedError("Cílová nebo proxy cesta už existuje")
+    proxy = None
+    if platform == "steam":
+        proxy_base = _beneath(
+            GAMES_LINKS_ROOT, username, platform, allow_missing=True,
+        )
+        os.makedirs(proxy_base, mode=0o775, exist_ok=True)
+        proxy = _beneath(proxy_base, game, allow_missing=True)
+    if os.path.lexists(target) or (proxy and os.path.lexists(proxy)):
+        raise PrivilegedError("Cílová nebo integrační cesta už existuje")
     shutil.move(source, target)
     try:
         _set_shared_permissions(target)
-        os.symlink(target, proxy)
-        os.symlink(proxy, source)
+        if platform == "steam":
+            os.symlink(target, proxy)
+            os.symlink(proxy, source)
+        else:
+            os.mkdir(source, mode=0o755)
     except Exception:
         if os.path.islink(source):
             os.unlink(source)
-        if os.path.islink(proxy):
+        elif os.path.isdir(source) and not os.listdir(source):
+            os.rmdir(source)
+        if proxy and os.path.islink(proxy):
             os.unlink(proxy)
         if not os.path.lexists(source) and os.path.isdir(target):
             shutil.move(target, source)
         raise
-    return {"message": f"Hra '{game}' byla přesunuta do sdílené knihovny"}
+    result = {"message": f"Hra '{game}' byla přesunuta do sdílené knihovny"}
+    if platform == "ea":
+        result["ea_mountpoint"] = source
+    return result
 
 
 def _create_symlink(parameters: dict) -> dict:
@@ -348,6 +367,27 @@ def _create_symlink(parameters: dict) -> dict:
             raise PrivilegedError("Před vytvořením odkazu ukonči Heroic a EA App")
         common = installations[0].games_root
     source = _beneath(common, game, allow_missing=True)
+    if platform == "ea":
+        if os.path.islink(source):
+            if os.path.realpath(source) != os.path.realpath(target):
+                raise PrivilegedError("Existující EA odkaz míří na jiná data")
+            os.unlink(source)
+            os.mkdir(source, mode=0o755)
+        elif os.path.isdir(source):
+            try:
+                already_mounted = os.path.samefile(source, target)
+            except OSError:
+                already_mounted = False
+            if not already_mounted and os.listdir(source):
+                raise PrivilegedError("Cílový EA adresář není prázdný")
+        elif os.path.lexists(source):
+            raise PrivilegedError("Cílová EA cesta není adresář")
+        else:
+            os.mkdir(source, mode=0o755)
+        return {
+            "message": "Mountpoint EA hry je připravený",
+            "ea_mountpoint": source,
+        }
     if os.path.lexists(source):
         raise PrivilegedError("Cesta už existuje")
     proxy_base = _beneath(GAMES_LINKS_ROOT, username, platform, allow_missing=True)
@@ -360,6 +400,122 @@ def _create_symlink(parameters: dict) -> dict:
         os.symlink(target, proxy)
     os.symlink(proxy, source)
     return {"message": "Odkaz hry byl vytvořen přes spravovanou proxy"}
+
+
+def _systemd_quote(value: str) -> str:
+    if any(character in value for character in ("\x00", "\n", "\r")):
+        raise PrivilegedError("Cesta mountu obsahuje nepovolený znak")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _ea_mount_unit_name(mountpoint: str) -> str:
+    result = _run(
+        ["/usr/bin/systemd-escape", "--path", "--suffix=mount", mountpoint],
+        10,
+    )
+    unit = result["stdout"].strip()
+    if (
+        result["returncode"]
+        or not unit.endswith(".mount")
+        or unit != os.path.basename(unit)
+        or len(unit.encode("utf-8")) > 255
+        or not re.fullmatch(r"[A-Za-z0-9_.@:\\x-]+", unit)
+    ):
+        raise PrivilegedError("Název systemd mount jednotky nelze bezpečně vytvořit")
+    return unit
+
+
+def _write_managed_file(path: str, contents: str, mode: int) -> None:
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    temporary = f"{path}.tmp-{os.getpid()}"
+    descriptor = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, mode,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
+    """Install one persistent bind mount derived from a dropped-UID worker."""
+    username = _safe_username(parameters.get("user"))
+    game = _safe_game_name(parameters.get("game_name"))
+    home = os.path.realpath(pwd.getpwnam(username).pw_dir)
+    target = _beneath(_beneath(GAMES_ROOT, "EA"), game)
+    mountpoint = os.path.abspath(str(mountpoint or ""))
+    parent = os.path.realpath(os.path.dirname(mountpoint))
+    if (
+        os.path.basename(mountpoint) != game
+        or os.path.commonpath((home, parent)) != home
+        or not os.path.isdir(mountpoint)
+        or os.path.islink(mountpoint)
+    ):
+        raise PrivilegedError("EA mountpoint není bezpečný adresář v profilu hráče")
+    metadata = os.stat(mountpoint, follow_symlinks=False)
+    try:
+        already_mounted = os.path.samefile(mountpoint, target)
+    except OSError:
+        already_mounted = False
+    if not already_mounted and metadata.st_uid != pwd.getpwnam(username).pw_uid:
+        raise PrivilegedError("EA mountpoint nepatří vybranému hráči")
+    if not os.path.isdir(target) or os.path.islink(target):
+        raise PrivilegedError("Sdílená EA hra nebyla nalezena")
+
+    unit = _ea_mount_unit_name(mountpoint)
+    unit_path = os.path.join(SYSTEMD_UNIT_ROOT, unit)
+    marker_name = hashlib.sha256(mountpoint.encode("utf-8")).hexdigest() + ".json"
+    marker_path = os.path.join(EA_MOUNT_STATE_ROOT, marker_name)
+    expected_marker = json.dumps({
+        "unit": unit, "source": target, "mountpoint": mountpoint,
+    }, ensure_ascii=False, sort_keys=True) + "\n"
+    expected_unit = (
+        "# Managed by Game Mover; do not edit manually.\n"
+        "[Unit]\n"
+        "Description=Game Mover EA payload bind mount\n"
+        "After=local-fs.target\n"
+        f"RequiresMountsFor={_systemd_quote(target)}\n\n"
+        "[Mount]\n"
+        f"What={_systemd_quote(target)}\n"
+        f"Where={_systemd_quote(mountpoint)}\n"
+        "Type=none\n"
+        "Options=bind,nosuid,nodev\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    if os.path.lexists(unit_path) and not os.path.lexists(marker_path):
+        raise PrivilegedError("Systemd mount jednotka koliduje s cizí konfigurací")
+    if os.path.lexists(marker_path):
+        try:
+            with open(marker_path, encoding="utf-8") as stream:
+                if stream.read() != expected_marker:
+                    raise PrivilegedError("Evidence EA mountu neodpovídá požadavku")
+        except OSError as error:
+            raise PrivilegedError("Evidenci EA mountu nelze ověřit") from error
+    _write_managed_file(marker_path, expected_marker, 0o600)
+    _write_managed_file(unit_path, expected_unit, 0o644)
+    reload_result = _run(["/usr/bin/systemctl", "daemon-reload"], 30)
+    if reload_result["returncode"]:
+        raise PrivilegedError(reload_result["stderr"] or "Systemd reload selhal")
+    enable_result = _run(["/usr/bin/systemctl", "enable", "--now", unit], 60)
+    if enable_result["returncode"]:
+        raise PrivilegedError(
+            enable_result["stderr"] or "Aktivace EA bind mountu selhala",
+        )
+    return {
+        "message": f"EA hra '{game}' je připojena trvalým bind mountem",
+        "mount_unit": unit,
+    }
 
 
 def _steam_cache_status(parameters: dict) -> dict:
@@ -653,7 +809,10 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
     username = _safe_username(parameters.get("user"))
     account = pwd.getpwnam(username)
     group_id = grp.getgrnam(GROUP_NAME).gr_gid
-    if action in ("move-game", "create-symlink"):
+    if (
+        action in ("move-game", "create-symlink")
+        and parameters.get("platform") == "steam"
+    ):
         _prepare_user_proxy_base(username, parameters.get("platform"))
     payload = json.dumps(parameters, ensure_ascii=False, separators=(",", ":"))
     completed = subprocess.run(
@@ -687,7 +846,15 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
 
 def _broker_dispatch(action: str, parameters: dict) -> dict:
     if action in USER_FILESYSTEM_ACTIONS:
-        return _filesystem_as_user(action, parameters)
+        result = _filesystem_as_user(action, parameters)
+        if (
+            action in ("move-game", "create-symlink")
+            and parameters.get("platform") == "ea"
+        ):
+            return _ensure_ea_bind_mount(
+                parameters, result.get("ea_mountpoint"),
+            )
+        return result
     return dispatch(action, parameters)
 
 

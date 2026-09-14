@@ -36,6 +36,27 @@ dispatch, current-player EA/Epic discovery, and a large shared Steam payload
 with and without a confirming manifest. Source tests pass; a new RPM,
 installation, and live retry on the affected profile remain required.
 
+## EA bind-mount compatibility remediation: 2026-09-14
+
+Live testing on two player profiles showed that EA App requested a complete
+download after restart when the game directory was a Unix symlink, even with
+the expected Wine registry data present. The same shared payload was recognized
+when mounted at the identical path with a bind mount. This isolates the remaining
+compatibility failure from the Epic entitlement handoff and registry repair.
+
+Version 0.34.0 replaces EA source symlinks with persistent systemd bind mounts;
+Steam remains unchanged. The API still supplies only platform, player and a
+single-component game name. Heroic discovery, legacy-link validation and
+mountpoint preparation run in the dropped-UID worker. The broker accepts the
+mountpoint only from that worker, requires an owned real directory below the
+selected player's home, derives the source exclusively from `/var/Games/EA`,
+rejects foreign unit collisions, and records root-only ownership metadata.
+Systemd performs and restores the mount, so the broker's capability bounding set
+does not acquire `CAP_SYS_ADMIN`. Focused fixture tests cover legacy migration,
+foreign-link rejection, home confinement, unit contents and broker routing.
+Source verification is recorded with the implementing commit; RPM installation
+and live validation on both affected profiles remain required.
+
 ## Heroic EA App Mover extension review: 2026-09-13
 
 Version 0.32.0 extends mutation to complete EA App game payloads stored inside a

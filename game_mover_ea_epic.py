@@ -204,10 +204,15 @@ def prerequisite_report(
     source = os.path.join(installation.games_root, game.shared_directory) if installation else ""
     shared_exists = os.path.isdir(shared)
     source_exists = os.path.isdir(source)
-    correct_link = bool(
-        shared_exists and os.path.islink(source)
-        and os.path.realpath(source) == os.path.realpath(shared)
-    )
+    correct_link = False
+    if shared_exists and source_exists:
+        try:
+            correct_link = (
+                os.path.islink(source)
+                and os.path.realpath(source) == os.path.realpath(shared)
+            ) or os.path.samefile(source, shared)
+        except OSError:
+            pass
     checks = (
         Prerequisite("heroic", _heroic_available(home),
                      "Heroic Games Launcher is available." if _heroic_available(home)
@@ -240,8 +245,8 @@ def prerequisite_report(
                      else ("Game data can be moved to shared storage with Game Mover."
                            if source_exists else "Battlefront II game data is missing.")),
         Prerequisite("shared_link", correct_link,
-                     "The EA prefix links to the shared game data." if correct_link
-                     else "Link this player's EA game directory to shared storage with Game Mover."),
+                     "The EA prefix is connected to the shared game data." if correct_link
+                     else "Connect this player's EA game directory to shared storage with Game Mover."),
     )
     return {
         "game": {**asdict(game), "shared_data": shared},

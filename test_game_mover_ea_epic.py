@@ -86,6 +86,18 @@ class EaEpicLaunchTest(unittest.TestCase):
         serialized = json.dumps(report)
         self.assertNotIn("fixture-token", serialized)
 
+    def test_reports_a_bind_mount_as_connected_shared_data(self):
+        with (
+            patch.object(ea_epic, "_heroic_available", return_value=True),
+            patch.object(ea_epic, "_legendary_executable", return_value="/usr/bin/legendary"),
+            patch.object(ea_epic.os.path, "samefile", return_value=True),
+        ):
+            report = ea_epic.prerequisite_report(
+                "MtMassive", home=str(self.home), shared_root=str(self.root / "Games"),
+            )
+        check = {item["id"]: item for item in report["checks"]}["shared_link"]
+        self.assertTrue(check["ok"])
+
     def test_missing_login_has_specific_non_secret_message(self):
         (self.legendary / "user.json").write_text("{}")
         with patch.object(ea_epic, "_heroic_available", return_value=True):

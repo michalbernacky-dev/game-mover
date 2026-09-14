@@ -102,7 +102,9 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 )
 
     def test_game_names_cannot_escape_managed_roots(self):
-        for value in ("../escape", "nested/game", "..", "bad\x00name"):
+        for value in (
+            "../escape", "nested/game", "..", "bad\x00name", "bad\nname",
+        ):
             with self.subTest(value=value):
                 with self.assertRaises(privileged.PrivilegedError):
                     privileged._safe_game_name(value)
@@ -169,7 +171,11 @@ class PrivilegedBrokerTest(unittest.TestCase):
 
     def test_ea_user_worker_has_extended_move_timeout(self):
         account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/player")
-        completed = Mock(returncode=0, stdout='{"message":"ok"}', stderr="")
+        completed = Mock(
+            returncode=0,
+            stdout='{"message":"ok","ea_mountpoint":"/home/player/Game"}',
+            stderr="",
+        )
         with (
             patch.object(privileged.pwd, "getpwnam", return_value=account),
             patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
@@ -177,6 +183,10 @@ class PrivilegedBrokerTest(unittest.TestCase):
             patch.object(
                 privileged.subprocess, "run", return_value=completed,
             ) as run,
+            patch.object(
+                privileged, "_ensure_ea_bind_mount",
+                return_value={"message": "mounted"},
+            ) as ensure_mount,
         ):
             privileged._broker_dispatch(
                 "move-game",
@@ -184,6 +194,32 @@ class PrivilegedBrokerTest(unittest.TestCase):
             )
 
         self.assertEqual(run.call_args.kwargs["timeout"], 900)
+        ensure_mount.assert_called_once_with(
+            {"platform": "ea", "user": "player", "game_name": "Game"},
+            "/home/player/Game",
+        )
+
+    def test_ea_broker_does_not_prepare_a_user_proxy(self):
+        account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/player")
+        completed = Mock(
+            returncode=0,
+            stdout='{"ea_mountpoint":"/home/player/Game"}', stderr="",
+        )
+        with (
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(privileged, "_prepare_user_proxy_base") as prepare,
+            patch.object(privileged.subprocess, "run", return_value=completed),
+            patch.object(
+                privileged, "_ensure_ea_bind_mount",
+                return_value={"message": "mounted"},
+            ),
+        ):
+            privileged._broker_dispatch(
+                "create-symlink",
+                {"platform": "ea", "user": "player", "game_name": "Game"},
+            )
+        prepare.assert_not_called()
 
     def test_proxy_preparation_repairs_legacy_player_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -224,7 +260,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 ):
                     privileged._prepare_user_proxy_base("Luky", "ea")
 
-    def test_ea_move_keeps_prefix_and_links_only_game_payload(self):
+    def test_ea_move_keeps_prefix_and_prepares_only_game_mountpoint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             home = root / "home/player"
@@ -274,13 +310,176 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 })
 
             target = shared / "EA/Example Game II"
-            proxy = links / "player/ea/Example Game II"
             self.assertTrue(prefix.is_dir())
             self.assertTrue(launcher.is_dir())
             self.assertEqual((target / "game.bin").read_bytes(), b"payload")
-            self.assertEqual(os.readlink(proxy), str(target))
-            self.assertEqual(os.readlink(game), str(proxy))
+            self.assertTrue(game.is_dir())
+            self.assertEqual(list(game.iterdir()), [])
+            self.assertEqual(result["ea_mountpoint"], str(game))
             self.assertIn("přesunuta", result["message"])
+
+    def test_ea_link_migrates_only_the_expected_legacy_symlink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            games_root = home / "prefix/drive_c/Program Files/EA Games"
+            shared = root / "Games/EA/Game"
+            games_root.mkdir(parents=True)
+            shared.mkdir(parents=True)
+            source = games_root / "Game"
+            source.symlink_to(shared, target_is_directory=True)
+            installation = EaInstallation(
+                app_id="ea", prefix=str(home / "prefix"),
+                games_root=str(games_root), install_data="",
+            )
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            with (
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "heroic_ea_installations", return_value=[installation]),
+                patch.object(privileged, "heroic_ea_shared_default_detected", return_value=False),
+                patch.object(privileged, "ea_runtime_active", return_value=False),
+            ):
+                result = privileged._create_symlink({
+                    "platform": "ea", "user": "player", "game_name": "Game",
+                })
+            self.assertTrue(source.is_dir())
+            self.assertFalse(source.is_symlink())
+            self.assertEqual(result["ea_mountpoint"], str(source))
+
+    def test_ea_link_rejects_a_legacy_symlink_to_other_data(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            games_root = home / "prefix/drive_c/Program Files/EA Games"
+            shared = root / "Games/EA/Game"
+            other = root / "other"
+            games_root.mkdir(parents=True)
+            shared.mkdir(parents=True)
+            other.mkdir()
+            (games_root / "Game").symlink_to(other, target_is_directory=True)
+            installation = EaInstallation(
+                app_id="ea", prefix=str(home / "prefix"),
+                games_root=str(games_root), install_data="",
+            )
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            with (
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "heroic_ea_installations", return_value=[installation]),
+                patch.object(privileged, "heroic_ea_shared_default_detected", return_value=False),
+                patch.object(privileged, "ea_runtime_active", return_value=False),
+            ):
+                with self.assertRaisesRegex(privileged.PrivilegedError, "jiná data"):
+                    privileged._create_symlink({
+                        "platform": "ea", "user": "player", "game_name": "Game",
+                    })
+
+    def test_ea_mount_writes_a_bounded_persistent_unit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            mountpoint = home / "prefix/drive_c/Program Files/EA Games/Game"
+            target = root / "Games/EA/Game"
+            units = root / "units"
+            state = root / "state"
+            mountpoint.mkdir(parents=True)
+            target.mkdir(parents=True)
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            calls = []
+
+            def fake_run(command, _timeout):
+                calls.append(command)
+                if command[0].endswith("systemd-escape"):
+                    return {"returncode": 0, "stdout": "home-player-game.mount\n", "stderr": ""}
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "SYSTEMD_UNIT_ROOT", str(units)),
+                patch.object(privileged, "EA_MOUNT_STATE_ROOT", str(state)),
+                patch.object(privileged, "_run", side_effect=fake_run),
+            ):
+                result = privileged._ensure_ea_bind_mount(
+                    {"user": "player", "game_name": "Game"}, str(mountpoint),
+                )
+
+            unit = (units / "home-player-game.mount").read_text()
+            self.assertIn(f'What="{target}"', unit)
+            self.assertIn(f'Where="{mountpoint}"', unit)
+            self.assertIn("Options=bind,nosuid,nodev", unit)
+            self.assertEqual(calls[-1], [
+                "/usr/bin/systemctl", "enable", "--now", "home-player-game.mount",
+            ])
+            self.assertEqual(result["mount_unit"], "home-player-game.mount")
+
+    def test_ea_mount_rejects_worker_path_outside_player_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            outside = root / "outside/Game"
+            target = root / "Games/EA/Game"
+            home.mkdir(parents=True)
+            outside.mkdir(parents=True)
+            target.mkdir(parents=True)
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "_run") as run,
+            ):
+                with self.assertRaisesRegex(privileged.PrivilegedError, "profilu"):
+                    privileged._ensure_ea_bind_mount(
+                        {"user": "player", "game_name": "Game"}, str(outside),
+                    )
+            run.assert_not_called()
+
+    def test_ea_mount_refuses_to_replace_a_foreign_systemd_unit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            mountpoint = home / "prefix/EA Games/Game"
+            target = root / "Games/EA/Game"
+            units = root / "units"
+            mountpoint.mkdir(parents=True)
+            target.mkdir(parents=True)
+            units.mkdir()
+            (units / "home-player-game.mount").write_text("foreign")
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+
+            def fake_run(command, _timeout):
+                if command[0].endswith("systemd-escape"):
+                    return {
+                        "returncode": 0,
+                        "stdout": "home-player-game.mount\n",
+                        "stderr": "",
+                    }
+                self.fail("systemctl must not run for a foreign unit")
+
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "SYSTEMD_UNIT_ROOT", str(units)),
+                patch.object(
+                    privileged, "EA_MOUNT_STATE_ROOT", str(root / "state"),
+                ),
+                patch.object(privileged, "_run", side_effect=fake_run),
+            ):
+                with self.assertRaisesRegex(privileged.PrivilegedError, "cizí"):
+                    privileged._ensure_ea_bind_mount(
+                        {"user": "player", "game_name": "Game"},
+                        str(mountpoint),
+                    )
+
+            self.assertEqual(
+                (units / "home-player-game.mount").read_text(), "foreign",
+            )
 
     def test_ea_move_rejects_incomplete_download_before_mutation(self):
         installation = Mock(

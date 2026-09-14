@@ -4,9 +4,10 @@
 Local-first game data manager for trusted local users on a single Linux machine.
 
 The mutable **Mover** tab supports Steam and complete EA App games installed in
-a Heroic-managed Wine prefix. Steam payloads move into `/var/Games/steam`; EA
-game payloads move into `/var/Games/EA`, with per-user symlinks back to their
-original locations. For EA, only the individual game directory moves: the Wine
+a Heroic-managed Wine prefix. Steam payloads move into `/var/Games/steam` and
+use per-user symlinks; EA game payloads move into `/var/Games/EA` and use
+persistent per-player bind mounts. For EA, only the individual game directory
+moves: the Wine
 prefix, EA launcher, registry, credentials and account state stay in the player
 profile. The EA prefix must be dedicated (for example
 `Prefixes/default/EA App`), not Heroic's global shared `default` prefix. Heroic
@@ -36,7 +37,7 @@ game-mover-ea-epic launch MtMassive
 
 The helper requires Heroic, the player's authenticated Legendary config, a
 dedicated Heroic EA App prefix with EA App and `start.exe`, the Proton runner
-recorded for that prefix, UMU, shared data and the correct per-user symlink. It
+recorded for that prefix, UMU, shared data and the correct per-user bind mount. It
 also verifies the game's machine-wide `Install Dir` in that Wine prefix before
 launch. If the entry is missing, it runs the shared payload's own `Touchup.exe`
 with the catalogued locale and install path; an existing correct registration
@@ -619,7 +620,8 @@ Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jed
 
 Mutující záložka **Mover** podporuje Steam a dokončené hry EA App nainstalované
 v Heroic Wine prefixu. Steam data přesouvá do `/var/Games/steam`, EA hry do
-`/var/Games/EA`, a na původní místo vrací uživatelský symlink. U EA se přesouvá
+`/var/Games/EA`; Steam na původní místo vrací uživatelský symlink a EA vytváří
+trvalý bind mount pro prefix každého hráče. U EA se přesouvá
 jen adresář konkrétní hry; Wine prefix, EA launcher, registry, přihlašovací údaje
 a stav účtu zůstávají v profilu hráče. EA musí mít samostatný prefix, například
 `Prefixes/default/EA App`, nikoli globální sdílený Heroic prefix `default`.
@@ -650,7 +652,7 @@ game-mover-ea-epic launch MtMassive
 
 Helper ověří Heroic, přihlášenou Legendary konfiguraci daného hráče,
 samostatný Heroic EA App prefix s EA App a `start.exe`, Proton uvedený v
-metadatech prefixu, UMU, sdílená data a správný uživatelský symlink. Preferuje
+metadatech prefixu, UMU, sdílená data a správný uživatelský bind mount.
 Také před spuštěním ověří herní `Install Dir` v systémovém registru Wine. Pokud
 záznam chybí, spustí vlastní `Touchup.exe` ze sdílených dat s cestou a locale z
 katalogu; existující správný záznam nemění. Preferuje Heroic UMU a případně
