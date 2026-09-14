@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.34.0
+Version:        0.34.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -177,6 +177,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.1-1
+- Escape spaces in generated systemd mount paths without literal quotes
+- Restart existing managed EA mount units so broken 0.34.0 mounts are repaired
+
 * Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.0-1
 - Replace per-player EA symlinks with persistent, narrowly managed bind mounts
 - Preserve Steam's existing per-player symlink workflow

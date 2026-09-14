@@ -409,11 +409,14 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 )
 
             unit = (units / "home-player-game.mount").read_text()
-            self.assertIn(f'What="{target}"', unit)
-            self.assertIn(f'Where="{mountpoint}"', unit)
+            escaped_target = str(target).replace(" ", r"\x20")
+            escaped_mountpoint = str(mountpoint).replace(" ", r"\x20")
+            self.assertIn(f"What={escaped_target}", unit)
+            self.assertIn(f"Where={escaped_mountpoint}", unit)
+            self.assertNotIn('What="', unit)
             self.assertIn("Options=bind,nosuid,nodev", unit)
             self.assertEqual(calls[-1], [
-                "/usr/bin/systemctl", "enable", "--now", "home-player-game.mount",
+                "/usr/bin/systemctl", "restart", "home-player-game.mount",
             ])
             self.assertEqual(result["mount_unit"], "home-player-game.mount")
 
@@ -480,6 +483,12 @@ class PrivilegedBrokerTest(unittest.TestCase):
             self.assertEqual(
                 (units / "home-player-game.mount").read_text(), "foreign",
             )
+
+    def test_systemd_path_value_uses_hex_escapes_without_quotes(self):
+        self.assertEqual(
+            privileged._systemd_path_value("/var/Games/EA/Example Game"),
+            r"/var/Games/EA/Example\x20Game",
+        )
 
     def test_ea_move_rejects_incomplete_download_before_mutation(self):
         installation = Mock(
