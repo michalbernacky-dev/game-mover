@@ -257,12 +257,14 @@ def prerequisite_report(
 
 
 def _windows_game_path(installation: EaInstallation, game: EaEpicGame) -> str:
-    drive_c = os.path.join(installation.wine_root, "drive_c")
-    source = os.path.join(installation.games_root, game.shared_directory)
+    drive_c = os.path.realpath(os.path.join(installation.wine_root, "drive_c"))
+    games_root = os.path.realpath(installation.games_root)
     try:
-        if os.path.commonpath((drive_c, source)) != drive_c:
+        if os.path.commonpath((drive_c, games_root)) != drive_c:
             raise RuntimeError("The EA game directory is outside drive_c")
-        relative = os.path.relpath(source, drive_c)
+        relative = os.path.join(
+            os.path.relpath(games_root, drive_c), game.shared_directory,
+        )
     except ValueError as error:
         raise RuntimeError("The EA game directory is outside drive_c") from error
     return "C:\\" + relative.replace(os.sep, "\\")

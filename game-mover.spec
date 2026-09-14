@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.33.2
+Version:        0.33.3
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -175,6 +175,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.33.3-1
+- Resolve Proton drive_c symlinks before deriving the EA Windows install path
+
 * Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.33.2-1
 - Restore the EA game's machine-wide install registration before Epic launches
 - Run the payload's own Touchup.exe only when the expected Install Dir is absent
