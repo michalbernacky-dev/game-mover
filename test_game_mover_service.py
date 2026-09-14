@@ -3,6 +3,29 @@ import unittest
 
 
 class ServiceHardeningTest(unittest.TestCase):
+    def test_ea_bind_template_limits_mount_capability_and_uses_only_marker_id(self):
+        unit = pathlib.Path("game-mover-ea-bind@.service").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE", unit,
+        )
+        self.assertIn("NoNewPrivileges=yes", unit)
+        self.assertIn(
+            "python3 -B /opt/game_mover/game_mover_privileged.py --ea-mount %i",
+            unit,
+        )
+        self.assertIn(
+            "python3 -B /opt/game_mover/game_mover_privileged.py --ea-unmount %i",
+            unit,
+        )
+        self.assertNotIn("%f", unit)
+        self.assertNotIn("PrivateMounts=", unit)
+        specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
+        installer = pathlib.Path("install.sh").read_text(encoding="utf-8")
+        self.assertIn("game-mover-ea-bind@.service", specification)
+        self.assertIn("game-mover-ea-bind@.service", installer)
+
     def test_network_api_is_unprivileged_and_strictly_sandboxed(self):
         unit = pathlib.Path("game_mover.service").read_text(encoding="utf-8")
         required = (

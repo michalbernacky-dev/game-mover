@@ -377,7 +377,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
                         "platform": "ea", "user": "player", "game_name": "Game",
                     })
 
-    def test_ea_mount_writes_a_bounded_persistent_unit(self):
+    def test_ea_mount_writes_bounded_state_for_fixed_service(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             home = root / "home/player"
@@ -408,17 +408,17 @@ class PrivilegedBrokerTest(unittest.TestCase):
                     {"user": "player", "game_name": "Game"}, str(mountpoint),
                 )
 
-            unit = (units / "home-player-game.mount").read_text()
-            escaped_target = str(target).replace(" ", r"\x20")
-            escaped_mountpoint = str(mountpoint).replace(" ", r"\x20")
-            self.assertIn(f"What={escaped_target}", unit)
-            self.assertIn(f"Where={escaped_mountpoint}", unit)
-            self.assertNotIn('What="', unit)
-            self.assertIn("Options=bind,nosuid,nodev", unit)
+            mount_id = privileged._ea_mount_id(str(mountpoint))
+            service = f"game-mover-ea-bind@{mount_id}.service"
+            marker = (state / f"{mount_id}.json").read_text()
+            self.assertIn('"version": 2', marker)
+            self.assertIn(f'"unit": "{service}"', marker)
+            self.assertIn(f'"source": "{target}"', marker)
+            self.assertFalse(units.exists())
             self.assertEqual(calls[-1], [
-                "/usr/bin/systemctl", "restart", "home-player-game.mount",
+                "/usr/bin/systemctl", "restart", service,
             ])
-            self.assertEqual(result["mount_unit"], "home-player-game.mount")
+            self.assertEqual(result["mount_unit"], service)
 
     def test_ea_mount_rejects_worker_path_outside_player_home(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -484,11 +484,128 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 (units / "home-player-game.mount").read_text(), "foreign",
             )
 
-    def test_systemd_path_value_uses_hex_escapes_without_quotes(self):
-        self.assertEqual(
-            privileged._systemd_path_value("/var/Games/EA/Example Game"),
-            r"/var/Games/EA/Example\x20Game",
-        )
+    def test_ea_bind_service_passes_paths_with_spaces_as_separate_arguments(self):
+        source = "/var/Games/EA/Example Game"
+        mountpoint = "/home/player/Prefix/Program Files/EA Games/Example Game"
+        calls = []
+
+        def fake_run(command, _timeout):
+            calls.append(command)
+            return {"returncode": 0, "stdout": "", "stderr": ""}
+
+        with (
+            patch.object(privileged.os, "geteuid", return_value=0),
+            patch.object(
+                privileged, "_validated_ea_marker",
+                return_value=(source, mountpoint),
+            ),
+            patch.object(privileged.os.path, "ismount", return_value=True),
+            patch.object(privileged, "_run", side_effect=fake_run),
+        ):
+            privileged._run_ea_bind_service("a" * 64)
+
+        self.assertEqual(calls, [
+            ["/usr/bin/umount", mountpoint],
+            ["/usr/bin/mount", "--bind", source, mountpoint],
+            [
+                "/usr/bin/mount", "-o", "remount,bind,nosuid,nodev",
+                source, mountpoint,
+            ],
+        ])
+
+    def test_ea_mount_migrates_only_exact_managed_legacy_unit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            mountpoint = home / "prefix/Program Files/EA Games/Game"
+            target = root / "Games/EA/Game"
+            units = root / "units"
+            state = root / "state"
+            mountpoint.mkdir(parents=True)
+            target.mkdir(parents=True)
+            units.mkdir()
+            state.mkdir()
+            legacy_unit = "home-player-game.mount"
+            legacy_path = units / legacy_unit
+            legacy_path.write_text(
+                "# Managed by Game Mover; do not edit manually.\n[Mount]\n",
+            )
+            mount_id = privileged._ea_mount_id(str(mountpoint))
+            (state / f"{mount_id}.json").write_text(
+                privileged.json.dumps({
+                    "unit": legacy_unit,
+                    "source": str(target),
+                    "mountpoint": str(mountpoint),
+                }, ensure_ascii=False, sort_keys=True) + "\n",
+            )
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            calls = []
+
+            def fake_run(command, _timeout):
+                calls.append(command)
+                if command[0].endswith("systemd-escape"):
+                    return {
+                        "returncode": 0, "stdout": f"{legacy_unit}\n", "stderr": "",
+                    }
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "SYSTEMD_UNIT_ROOT", str(units)),
+                patch.object(privileged, "EA_MOUNT_STATE_ROOT", str(state)),
+                patch.object(privileged, "_run", side_effect=fake_run),
+            ):
+                result = privileged._ensure_ea_bind_mount(
+                    {"user": "player", "game_name": "Game"}, str(mountpoint),
+                )
+
+            service = f"game-mover-ea-bind@{mount_id}.service"
+            self.assertFalse(legacy_path.exists())
+            self.assertIn(
+                ["/usr/bin/systemctl", "disable", legacy_unit], calls,
+            )
+            self.assertIn(["/usr/bin/systemctl", "stop", legacy_unit], calls)
+            self.assertEqual(result["mount_unit"], service)
+            self.assertIn(
+                f'"unit": "{service}"',
+                (state / f"{mount_id}.json").read_text(),
+            )
+
+    def test_ea_bind_service_rejects_a_tampered_marker_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            mountpoint = home / "prefix/EA Games/Game"
+            target = root / "Games/EA/Game"
+            state = root / "state"
+            mountpoint.mkdir(parents=True)
+            target.mkdir(parents=True)
+            state.mkdir()
+            mount_id = privileged._ea_mount_id(str(mountpoint))
+            service = f"game-mover-ea-bind@{mount_id}.service"
+            (state / f"{mount_id}.json").write_text(
+                privileged.json.dumps({
+                    "version": 2,
+                    "unit": service,
+                    "user": "player",
+                    "game_name": "Game",
+                    "source": str(root / "outside/Game"),
+                    "mountpoint": str(mountpoint),
+                }, ensure_ascii=False, sort_keys=True) + "\n",
+            )
+            account = Mock(pw_uid=os.getuid(), pw_dir=str(home))
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "EA_MOUNT_STATE_ROOT", str(state)),
+            ):
+                with self.assertRaisesRegex(
+                    privileged.PrivilegedError, "bezpečnému umístění",
+                ):
+                    privileged._validated_ea_marker(mount_id)
 
     def test_ea_move_rejects_incomplete_download_before_mutation(self):
         installation = Mock(

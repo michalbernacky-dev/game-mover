@@ -84,9 +84,12 @@ discovery and traversal after dropping to the selected player's UID; the broker 
 only a platform, player and single-component game name. For EA, that worker
 creates or migrates the exact game mountpoint. The root broker independently
 confines it to the selected player's home and the fixed `/var/Games/EA` source,
-then writes and enables the corresponding systemd `.mount` unit. It never
-accepts a source or destination path from the API and does not gain
-`CAP_SYS_ADMIN`; PID 1 performs the validated mount.
+then writes root-only state and enables an instance of the fixed systemd
+`game-mover-ea-bind@.service` template. The instance receives only a SHA-256
+identifier; its root helper reloads and revalidates the fixed source and
+per-player destination before mounting. The API and long-running broker never
+accept a source or destination path from the client and do not gain
+`CAP_SYS_ADMIN`; only the short-lived systemd mount helper receives it.
 
 GOG and Epic installation data belong to Heroic, which already separates a
 game's payload from its per-user Wine prefix and presents that relationship to

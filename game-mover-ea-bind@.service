@@ -1,0 +1,20 @@
+[Unit]
+Description=Game Mover EA payload bind mount %i
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -B /opt/game_mover/game_mover_privileged.py --ea-mount %i
+ExecStop=/usr/bin/python3 -B /opt/game_mover/game_mover_privileged.py --ea-unmount %i
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+RestrictRealtime=yes
+UMask=0077
+TimeoutStartSec=120
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

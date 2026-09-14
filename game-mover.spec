@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.34.1
+Version:        0.34.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -64,6 +64,8 @@ install -Dpm0644 game_mover.service %{buildroot}%{_unitdir}/game_mover.service
 install -Dpm0644 game-mover-privileged.service \
     %{buildroot}%{_unitdir}/game-mover-privileged.service
 install -Dpm0644 game-mover-dns.service %{buildroot}%{_unitdir}/game-mover-dns.service
+install -Dpm0644 game-mover-ea-bind@.service \
+    %{buildroot}%{_unitdir}/game-mover-ea-bind@.service
 install -Dpm0644 game-mover.sysusers \
     %{buildroot}%{_sysusersdir}/game-mover.conf
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
@@ -172,11 +174,16 @@ fi
 %{_unitdir}/game_mover.service
 %{_unitdir}/game-mover-privileged.service
 %{_unitdir}/game-mover-dns.service
+%{_unitdir}/game-mover-ea-bind@.service
 %{_sysusersdir}/game-mover.conf
 %{_datadir}/applications/game-mover.desktop
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.2-1
+- Replace path-named EA mount units with a fixed validated bind-service template
+- Migrate and repair managed 0.34.0 and 0.34.1 EA mount units in place
+
 * Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.1-1
 - Escape spaces in generated systemd mount paths without literal quotes
 - Restart existing managed EA mount units so broken 0.34.0 mounts are repaired
