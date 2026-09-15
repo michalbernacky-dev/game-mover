@@ -24,7 +24,7 @@ are bounded or read-only, symlinked metadata is rejected, no Wine executable is
 run, and no paths or registry contents are returned to the backend. Optional
 versions come only from launcher metadata or a matching Wine product section.
 
-The same release corrects a locally reproduced Heroic update failure. The Qt
+Version 0.35.1 corrects a locally reproduced Heroic update failure. The Qt
 client had invoked `pkcon --noninteractive`, so PackageKit could not request its
 separate polkit authorization and returned `Failed to obtain authentication`.
 The client now answers only PackageKit's package confirmation on standard input
