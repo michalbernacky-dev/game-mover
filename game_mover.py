@@ -30,6 +30,8 @@ from game_mover_ea import (
 )
 from game_mover_ea_epic import launch as launch_ea_epic, redact_sensitive
 from game_mover_ea_epic import prerequisite_report as ea_epic_prerequisites
+from game_mover_rockstar_epic import launch as launch_rockstar_epic
+from game_mover_rockstar_epic import prerequisite_report as rockstar_epic_prerequisites
 from game_mover_users import interactive_usernames
 from game_mover_tip_checks import evaluate_checks
 from game_mover_connections import (
@@ -1441,8 +1443,12 @@ class GameMover(QWidget):
             dot.setIcon(colored_dot_icon("#ff6b6b" if residue else "#69db7c"))
             dot.setData(Qt.UserRole, target)
             dot.setData(Qt.UserRole + 1, residue)
-            dot.setData(Qt.UserRole + 2, game.get("epic_app_name")
-                        if game.get("launcher_type") == "ea_epic" else None)
+            launcher_type = game.get("launcher_type")
+            dot.setData(
+                Qt.UserRole + 2, game.get("epic_app_name")
+                if launcher_type in ("ea_epic", "rockstar_epic") else None,
+            )
+            dot.setData(Qt.UserRole + 3, launcher_type)
             dot.setToolTip(
                 "Pravděpodobný pozůstatek: malý adresář bez potvrzení launcherem."
                 if residue else "Instalace byla potvrzena launcherem nebo instalačními metadaty."
@@ -1473,6 +1479,7 @@ class GameMover(QWidget):
             dot.setData(Qt.UserRole, (target_type, target_id))
             dot.setData(Qt.UserRole + 1, False)
             dot.setData(Qt.UserRole + 2, None)
+            dot.setData(Qt.UserRole + 3, None)
             dot.setToolTip("Tip existuje, ale místní instalace nebyla nalezena.")
             for column, item in enumerate((
                 dot, QTableWidgetItem(target_id), QTableWidgetItem("—"),
@@ -1530,8 +1537,14 @@ class GameMover(QWidget):
             self.knowledge_launch_button.setEnabled(False)
             return
         item = self.knowledge_games_table.item(rows[0].row(), 0)
+        launcher_type = item.data(Qt.UserRole + 3) if item else None
         self.knowledge_launch_button.setEnabled(
             bool(item and item.data(Qt.UserRole + 2))
+        )
+        self.knowledge_launch_button.setText(
+            "Spustit přes Epic → Rockstar"
+            if launcher_type == "rockstar_epic"
+            else "Spustit přes Epic → EA App"
         )
         target = item.data(Qt.UserRole) if item else None
         if isinstance(target, tuple) and len(target) == 2:
@@ -1542,21 +1555,32 @@ class GameMover(QWidget):
         rows = self.knowledge_games_table.selectionModel().selectedRows()
         item = self.knowledge_games_table.item(rows[0].row(), 0) if rows else None
         app_name = item.data(Qt.UserRole + 2) if item else None
+        launcher_type = item.data(Qt.UserRole + 3) if item else None
         if not app_name:
             return
         try:
-            report = ea_epic_prerequisites(app_name)
+            if launcher_type == "rockstar_epic":
+                report = rockstar_epic_prerequisites(app_name)
+                launcher_name = "Rockstar"
+            else:
+                report = ea_epic_prerequisites(app_name)
+                launcher_name = "EA App"
             missing = [check["message"] for check in report["checks"]
                        if not check["ok"]]
             if missing:
                 QMessageBox.warning(
-                    self, "EA/Epic – chybějící podmínky", "\n".join(missing),
+                    self, f"{launcher_name}/Epic – chybějící podmínky",
+                    "\n".join(missing),
                 )
                 return
-            launch_ea_epic(app_name)
+            if launcher_type == "rockstar_epic":
+                launch_rockstar_epic(app_name)
+            else:
+                launch_ea_epic(app_name)
             QMessageBox.information(
                 self, "Spuštění hry",
-                "Požadavek byl předán Legendary a EA App pro tohoto uživatele.",
+                f"Požadavek byl předán Legendary a {launcher_name} "
+                "pro tohoto uživatele.",
             )
         except (OSError, RuntimeError, ValueError) as error:
             QMessageBox.critical(

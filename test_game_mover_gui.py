@@ -336,6 +336,33 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertTrue(self.window.knowledge_launch_button.isEnabled())
         marker = self.window.knowledge_games_table.item(0, 0)
         self.assertEqual(marker.data(game_mover.Qt.UserRole + 2), "MtMassive")
+        self.assertEqual(marker.data(game_mover.Qt.UserRole + 3), "ea_epic")
+        self.assertEqual(
+            self.window.knowledge_launch_button.text(),
+            "Spustit přes Epic → EA App",
+        )
+
+    def test_rockstar_epic_catalog_entry_enables_managed_launch(self):
+        app_name = "8769e24080ea413b8ebca3f1b8c50951"
+        with patch.object(self.window, "load_knowledge_target"):
+            self.window.on_installed_knowledge_games({"games": [{
+                "id": "grand-theft-auto-v-enhanced",
+                "name": "Grand Theft Auto V Enhanced",
+                "platforms": ["epic"], "users": ["alice"],
+                "paths": ["/var/Games/Heroic/GTAVEnhanced"],
+                "knowledge_aliases": ["grand-theft-auto-v-enhanced"],
+                "launcher_type": "rockstar_epic", "epic_app_name": app_name,
+                "size_bytes": 1, "possible_residue": False,
+            }]})
+
+        self.assertTrue(self.window.knowledge_launch_button.isEnabled())
+        marker = self.window.knowledge_games_table.item(0, 0)
+        self.assertEqual(marker.data(game_mover.Qt.UserRole + 2), app_name)
+        self.assertEqual(marker.data(game_mover.Qt.UserRole + 3), "rockstar_epic")
+        self.assertEqual(
+            self.window.knowledge_launch_button.text(),
+            "Spustit přes Epic → Rockstar",
+        )
 
     def test_installed_games_thread_scans_the_current_player_home(self):
         payloads = []

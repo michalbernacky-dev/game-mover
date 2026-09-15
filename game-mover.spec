@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.35.2
+Version:        0.36.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -50,7 +50,7 @@ mkdir -p %{buildroot}/opt/game_mover
 for module in game_mover*.py; do
     mode=0644
     case "$module" in
-        game_mover.py|game_mover_flask.py|game_mover_dns.py|game_mover_ea_epic.py) mode=0755 ;;
+        game_mover.py|game_mover_flask.py|game_mover_dns.py|game_mover_ea_epic.py|game_mover_rockstar_epic.py) mode=0755 ;;
     esac
     install -Dpm"$mode" "$module" %{buildroot}/opt/game_mover/"$module"
 done
@@ -61,6 +61,8 @@ install -Dpm0644 game_mover_logo.jpg %{buildroot}/opt/game_mover/game_mover_logo
 install -Dpm0755 game-mover %{buildroot}%{_bindir}/game-mover
 ln -s ../../opt/game_mover/game_mover_ea_epic.py \
     %{buildroot}%{_bindir}/game-mover-ea-epic
+ln -s ../../opt/game_mover/game_mover_rockstar_epic.py \
+    %{buildroot}%{_bindir}/game-mover-rockstar-epic
 install -Dpm0644 game_mover.service %{buildroot}%{_unitdir}/game_mover.service
 install -Dpm0644 game-mover-privileged.service \
     %{buildroot}%{_unitdir}/game-mover-privileged.service
@@ -172,6 +174,7 @@ fi
 /opt/game_mover/game_mover_logo.jpg
 %{_bindir}/game-mover
 %{_bindir}/game-mover-ea-epic
+%{_bindir}/game-mover-rockstar-epic
 %{_unitdir}/game_mover.service
 %{_unitdir}/game-mover-privileged.service
 %{_unitdir}/game-mover-dns.service
@@ -181,6 +184,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.36.0-1
+- Launch Epic-owned GTA V Enhanced through a package-owned Rockstar adapter
+- Quarantine Rockstar's regenerated title scan before each managed launch
+
 * Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.35.2-1
 - Authorize Heroic installation through desktop polkit before noninteractive pkcon
 
