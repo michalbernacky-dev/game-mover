@@ -12,6 +12,18 @@ Publication verdict: version 0.33.1 is **not ready to publish** until review,
 hosted CI, deployment, and live per-player move/launch verification pass. The
 remaining general publication gate below still applies.
 
+## Current-player managed-launcher inventory: 2026-09-15
+
+Version 0.35.0 adds read-only launcher cards for explicit installed entries in
+the current player's Heroic sideload library and Lutris database. Detection is
+limited to a fixed launcher-name catalog and authoritative `installed` records;
+it does not infer a launcher from executables bundled in a game's Wine prefix.
+The local Qt process performs the scan because private player homes remain
+outside the service account's access. JSON, YAML, SQLite and Wine registry reads
+are bounded or read-only, symlinked metadata is rejected, no Wine executable is
+run, and no paths or registry contents are returned to the backend. Optional
+versions come only from launcher metadata or a matching Wine product section.
+
 ## EA per-player deployment regression: 2026-09-13
 
 Live 0.33.0 testing reproduced a denied EA move while creating

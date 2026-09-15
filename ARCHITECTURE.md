@@ -221,15 +221,21 @@ explicit filter. The local-only backend inventory endpoint remains available
 for service-visible data; remote knowledge notes remain a separate data source
 and are joined in the GUI through stable aliases.
 
-The fixed **Launchers** tab is a provider-backed inventory of native desktop game
-launchers. Missing launchers remain visible but muted, installed versions are
-compared with their authoritative source, and available updates are highlighted.
+The fixed **Launchers** tab combines a provider-backed inventory of native
+desktop launchers with a current-player scan of launchers explicitly registered
+as installed library entries in Heroic or Lutris. It matches only a bounded
+launcher catalog; files bundled inside an ordinary game's Wine prefix do not
+create a launcher entry. Missing native launchers remain visible but muted,
+installed versions are compared with their authoritative source, and available
+updates are highlighted.
 Providers keep discovery separate from mutation. Heroic version discovery uses
 the exact x86_64 RPM asset metadata from the official GitHub release. Because
 the upstream RPM is not signed for the host RPM trust store, installation is a
 manual administrator operation and is never delegated to the privileged broker.
 Repository-managed launchers such as Lutris and Steam remain read-only inventory
-entries.
+entries. Heroic/Lutris-managed Windows launchers are also read-only: Game Mover
+shows their source and, when present in trusted local metadata or the matching
+Wine product record, their installed version. It does not update them.
 
 The **Servers** tab is the daily overview. Every manageable workload has the
 appropriate lifecycle actions. Minecraft server cards additionally expose a

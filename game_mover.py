@@ -51,7 +51,10 @@ from game_mover_security import (
     SERVER_ACTION_IDS,
 )
 from game_mover_version import __version__
-from game_mover_launchers import update_launcher as perform_launcher_update
+from game_mover_launchers import (
+    managed_launcher_statuses,
+    update_launcher as perform_launcher_update,
+)
 from game_mover_endpoints import (
     normalize_endpoints,
 )
@@ -686,6 +689,11 @@ class LauncherStatusThread(QThread):
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            launchers = data.get("launchers")
+            if isinstance(launchers, list):
+                data["launchers"] = [
+                    *launchers, *managed_launcher_statuses(),
+                ]
             self.loaded.emit(data)
         except Exception as error:
             self.loaded.emit({"error": str(error)})
@@ -1179,9 +1187,10 @@ class GameMover(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         layout.addWidget(title)
         help_label = QLabel(
-            "Game Mover rozpozná nativně nainstalované launchery a porovná jejich verze. "
-            "Zašedlá položka na tomto počítači není nainstalovaná. Heroic lze bezpečně "
-            "aktualizovat z jeho oficiálního GitHub release.", tab,
+            "Game Mover rozpozná nativní launchery i launchery, které sis přímo "
+            "nainstaloval přes Heroic nebo Lutris. Zašedlá položka na tomto počítači "
+            "není nainstalovaná. Heroic lze bezpečně aktualizovat z jeho oficiálního "
+            "GitHub release; launchery ve Wine spravuje jejich původní instalátor.", tab,
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
@@ -1834,6 +1843,12 @@ class GameMover(QWidget):
             elif launcher.get("error"):
                 status_text = f"Nainstalováno {installed_version} · kontrola verze selhala"
                 color = "#ff8a80"
+            elif launcher.get("managed_externally"):
+                status_text = (
+                    f"Nainstalováno · verze {installed_version}"
+                    if launcher.get("installed_version") else "Nainstalováno"
+                )
+                color = "#66cc66"
             elif latest_version:
                 status_text = f"Aktuální · verze {installed_version}"
                 color = "#66cc66"

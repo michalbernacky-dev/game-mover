@@ -243,11 +243,24 @@ class ServerManagementGuiTest(unittest.TestCase):
                     "installed_version": "", "latest_version": "",
                     "update_available": False, "update_supported": False, "error": "",
                 },
+                {
+                    "id": "managed-ea-app", "name": "EA App",
+                    "icon": "lutris_ea-app",
+                    "source": "Heroic", "installed": True,
+                    "installed_version": "13.788.2.6298", "latest_version": "",
+                    "update_available": False, "update_supported": False,
+                    "managed_externally": True, "error": "",
+                },
             ],
         })
         self.assertEqual(self.window.tabs.tabText(self.window.launchers_tab_index), "Launchery (1)")
         self.assertIn("2.22.0 → 2.22.1", self.window.launcher_cards["heroic"]["status"].text())
         self.assertFalse(self.window.launcher_cards["lutris"]["card"].isEnabled())
+        self.assertIn(
+            "13.788.2.6298",
+            self.window.launcher_cards["managed-ea-app"]["status"].text(),
+        )
+        self.assertTrue(self.window.launcher_cards["managed-ea-app"]["update"].isHidden())
 
     def test_knowledge_base_supports_game_notes_with_platform_metadata(self):
         self.assertEqual(
