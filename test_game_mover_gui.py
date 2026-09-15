@@ -146,11 +146,11 @@ class ServerManagementGuiTest(unittest.TestCase):
             result = game_mover.LauncherUpdateThread._packagekit_install("heroic.rpm")
         self.assertIs(result, completed)
         command = run.call_args.args[0]
-        self.assertEqual(command[0], "/usr/bin/pkcon")
+        self.assertEqual(command[:2], ["/usr/bin/pkexec", "/usr/bin/pkcon"])
         self.assertIn("install-local", command)
-        self.assertNotIn("--noninteractive", command)
+        self.assertIn("--noninteractive", command)
         self.assertNotIn("sudo", command)
-        self.assertEqual(run.call_args.kwargs["input"], "y\n")
+        self.assertNotIn("input", run.call_args.kwargs)
 
     def test_mover_mutates_only_steam_and_heroic_ea_payloads(self):
         self.assertEqual(self.window.platform, "steam")

@@ -71,10 +71,11 @@ Heroic/Lutris as its source and its locally recorded product version when one is
 available; Game Mover does not update it. Native Heroic releases are checked
 against the official GitHub project. The upstream RPM is not signed for the
 host RPM trust store, so the split-service backend never installs it as root.
-The local Qt client downloads and verifies the release, then asks PackageKit to
-install that exact file through the desktop's standard polkit authorization;
-Heroic should be closed first. Unlocking Game Mover's local PAM controls does
-not replace PackageKit's separate administrator prompt.
+The local Qt client downloads and verifies the release, requests administrator
+authorization through the desktop's standard polkit flow, then asks PackageKit
+to install that exact file without a terminal prompt; Heroic should be closed
+first. Unlocking Game Mover's local PAM controls does not replace this separate
+administrator prompt.
 
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
@@ -821,10 +822,10 @@ SSH tunelu lze samostatně přepnout na globální operace hostitele a zásady
 spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent` používá
 místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
 operaci odmítne přímo backend. Aktualizaci Heroicu stáhne a ověří místní Qt
-klient; instalaci pak předá PackageKitu, který zobrazí standardní polkit
-autorizaci. Odemčení místního PAM v Game Moveru nenahrazuje tento samostatný
-administrátorský dotaz PackageKitu. Síťový backend ani jeho root helper balíček
-neinstalují.
+klient, přes standardní desktopový polkit si vyžádá oprávnění správce a přes
+PackageKit nainstaluje přesně ověřený soubor bez terminálové otázky. Odemčení
+místního PAM v Game Moveru nenahrazuje tento samostatný administrátorský dotaz.
+Síťový backend ani jeho root helper balíček neinstalují.
 Místní PAM tlačítka
 jsou modrozelená a hostitelská fialová; hranice je současně napsaná přímo v
 jejich popisku. V režimu SSH tunelu může PAM relace autorizovat i
