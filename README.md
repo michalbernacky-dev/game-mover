@@ -51,6 +51,28 @@ removes Legendary's `start` pseudo-command and launches the prefix's Windows
 that launch. Game Mover never stores it, and Legendary output is not captured
 in the GUI or persistent application logs.
 
+### Epic-owned GTA launched through Rockstar
+
+**Grand Theft Auto V Enhanced** has a separate managed launch action in **Tips
+and Notes**: **Launch through Epic → Rockstar**. Game Mover invokes Legendary
+for the current player's authenticated Heroic account and uses the
+package-owned `game-mover-rockstar-epic` adapter to run the game's
+`EpicGamesLauncher.exe` shim and `PlayGTAV.exe` through that player's configured
+Proton and UMU environment:
+
+```bash
+game-mover-rockstar-epic check 8769e24080ea413b8ebca3f1b8c50951
+game-mover-rockstar-epic launch 8769e24080ea413b8ebca3f1b8c50951
+```
+
+Before each managed launch, GTA and Rockstar Launcher must be closed. The
+adapter renames Rockstar's regenerated `titles.dat` scan cache to
+`titles.dat.game-mover-disabled`, replacing only an earlier Game Mover copy,
+then supplies the Epic launch context afresh. The adapter lives under
+`/opt/game_mover` and `/usr/bin`, outside both the game and Wine prefix, so
+Heroic, GTA and Rockstar updates do not overwrite it. Launching GTA directly
+from Heroic bypasses this repair and is not the supported path.
+
 The agreed long-term product and host architecture is recorded in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
@@ -537,7 +559,8 @@ What installer does:
 - migrates mutable backend configuration to `/var/lib/game-mover`; `/etc/game_mover` retains only root-provisioned credentials and the root-owned systemd allowlist
 - installs the desktop launcher `/usr/share/applications/game-mover.desktop` (visible in the app menu)
 - optionally installs `/etc/xdg/autostart/game-mover.desktop` when `--enable-autostart` is used
-- exposes `game-mover` and the generic `game-mover-ea-epic` player helper via `/usr/local/bin`
+- exposes `game-mover`, `game-mover-ea-epic`, and
+  `game-mover-rockstar-epic` player helpers via `/usr/local/bin`
 - protects mutating local API calls with a random token stored in `/etc/game_mover/api.token`, readable only by members of the `gemers` group
 
 `deploy.sh` builds a local RPM from the current repository and installs it. This is the recommended path for development on the same PC where the deployed instance is also running.
@@ -674,6 +697,27 @@ použije UMU z Lutrisu. Spustí `legendary launch MtMassive
 UMU spustí Windows `start.exe` z prefixu. Krátkodobý Epic exchange code vznikne
 jen při tomto spuštění; Game Mover jej neukládá ani nevypisuje do UI či
 trvalých logů.
+
+### GTA vlastněné na Epicu a spouštěné přes Rockstar
+
+**Grand Theft Auto V Enhanced** má v **Tipy a poznámky** vlastní spravovanou
+volbu **Spustit přes Epic → Rockstar**. Game Mover spustí Legendary s
+přihlášením aktuálního hráče z Heroicu a balíčkem vlastněný adaptér
+`game-mover-rockstar-epic` zavolá herní `EpicGamesLauncher.exe` a `PlayGTAV.exe`
+přes Proton a UMU nastavené pro prefix tohoto hráče:
+
+```bash
+game-mover-rockstar-epic check 8769e24080ea413b8ebca3f1b8c50951
+game-mover-rockstar-epic launch 8769e24080ea413b8ebca3f1b8c50951
+```
+
+Před tímto spuštěním musí být GTA i Rockstar Launcher vypnuté. Adaptér pokaždé
+přejmenuje znovu vytvořenou skenovací cache `titles.dat` na
+`titles.dat.game-mover-disabled` (přepisuje jen svou předchozí kopii) a znovu
+dodá Epic kontext. Adaptér je v `/opt/game_mover` a `/usr/bin`, tedy mimo hru i
+Wine prefix, takže jej aktualizace Heroicu, GTA ani Rockstar Launcheru
+nepřepíše. Přímé spuštění GTA z Heroicu tuto opravu obchází a není podporovanou
+cestou.
 
 Tento repozitář `game-mover` je kanonickým zdrojem kódu, RPM balíčkování i
 nasazení.
@@ -1140,7 +1184,8 @@ Co instalátor dělá:
 - přesune měnitelnou konfiguraci backendu do `/var/lib/game-mover`; v `/etc/game_mover` zůstanou jen přístupové údaje vytvořené rootem a root-owned allowlist systemd služeb
 - nainstaluje desktop launcher `/usr/share/applications/game-mover.desktop` (viditelný v menu aplikací)
 - volitelně nainstaluje `/etc/xdg/autostart/game-mover.desktop` při použití `--enable-autostart`
-- zpřístupní `game-mover` a generický hráčský helper `game-mover-ea-epic` přes `/usr/local/bin`
+- zpřístupní `game-mover`, `game-mover-ea-epic` a
+  `game-mover-rockstar-epic` přes `/usr/local/bin`
 - chrání mutující lokální API volání náhodným tokenem v `/etc/game_mover/api.token`, který je čitelný jen pro členy skupiny `gemers`
 
 `deploy.sh` sestaví lokální RPM z aktuálního repa a nainstaluje ho. To je doporučená cesta pro vývoj na stejném PC, kde zároveň běží nasazená instance.

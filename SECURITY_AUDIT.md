@@ -1,16 +1,49 @@
 # Game Mover security audit register
 
-Last review: 2026-09-13 (EA per-player deployment regression)
+Last review: 2026-09-15 (Rockstar/Epic launch-state regression)
 
-Reviewed version: 0.33.1 (source; deployment verification pending)
+Reviewed version: 0.36.0 (source; deployment verification pending)
 
-Reviewed source: `fix/ea-profile-inventory-permissions` working tree based on
-the verified 0.33.0 merge commit `5dbe491187e026d7567d45ecd2801f2e31d00201`.
+Reviewed source: `feature/rockstar-epic-launch` working tree based on the
+verified 0.35.2 main commit `974032f`.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: version 0.33.1 is **not ready to publish** until review,
+Publication verdict: version 0.36.0 is **not ready to publish** until review,
 hosted CI, deployment, and live per-player move/launch verification pass. The
 remaining general publication gate below still applies.
+
+## Rockstar/Epic launch-state regression: 2026-09-15
+
+Local runtime evidence after Heroic, GTA V Enhanced and Rockstar Launcher
+updates showed that the existing game-directory `fix.bat` wrapper remained
+present. Rockstar Launcher instead regenerated its private-prefix
+`ProgramData/Rockstar Games/Launcher/titles.dat`; launching through the old
+path then lost the Epic ownership context. Logs independently showed the
+expected Epic portal and relaunch parameters reaching Rockstar, so this is a
+launcher-state regression rather than evidence that an update deleted the
+wrapper.
+
+Version 0.36.0 adds a current-user-only `rockstar_epic` adapter for the single
+verified GTA V Enhanced Epic app ID. Each managed launch resolves bounded
+Heroic metadata, requires the recorded Proton runner, UMU, authenticated
+Legendary state, both game shims and the Rockstar executable, and refuses to
+continue while GTA or Rockstar processes are running. It atomically renames
+only a small regular `titles.dat` to the fixed
+`titles.dat.game-mover-disabled` path, then invokes Legendary with a
+package-owned Wine wrapper. That wrapper validates its complete context and
+executes `EpicGamesLauncher.exe PlayGTAV.exe` through UMU while preserving the
+transient Epic arguments. Standard streams are detached so authentication
+arguments are not captured by Game Mover logs.
+
+The adapter performs no privileged operation and never reads another player's
+home. Metadata symlinks, an escaping Proton `pfx`, unsupported app IDs, unsafe
+cache objects and incomplete installations fail closed. Focused tests cover
+inventory/UI classification, prerequisite redaction, process exclusion, the
+actual cache rename, wrapper argument order and prefix escape rejection.
+Source verification is complete only after the full suite and package checks
+below pass; RPM installation and live post-update launch testing remain
+pending. Direct launch from Heroic bypasses the adapter and remains an explicit
+functional limitation.
 
 ## Current-player managed-launcher inventory: 2026-09-15
 

@@ -11,8 +11,15 @@ from pathlib import Path
 import yaml
 
 from game_mover_ea import ea_game_install_in_progress, heroic_ea_installations
-from game_mover_ea_epic import game_by_app_name, game_metadata_for_name
+from game_mover_ea_epic import game_by_app_name as ea_epic_game_by_app_name
+from game_mover_ea_epic import game_metadata_for_name as ea_epic_metadata_for_name
 from game_mover_game_filters import is_excluded_game
+from game_mover_rockstar_epic import (
+    game_by_app_name as rockstar_epic_game_by_app_name,
+)
+from game_mover_rockstar_epic import (
+    game_metadata_for_name as rockstar_epic_metadata_for_name,
+)
 
 
 DEFAULT_SMALL_INSTALL_BYTES = 1024 * 1024 * 1024
@@ -94,10 +101,19 @@ class Inventory:
     ):
         name = str(name).strip()
         path = os.path.realpath(str(path)) if path else ""
-        metadata = game_metadata_for_name(name)
-        app_game = game_by_app_name(app_id) if app_id else None
+        metadata = (
+            ea_epic_metadata_for_name(name)
+            or rockstar_epic_metadata_for_name(name)
+        )
+        app_game = (
+            ea_epic_game_by_app_name(app_id)
+            or rockstar_epic_game_by_app_name(app_id)
+        ) if app_id else None
         if app_game:
-            metadata = game_metadata_for_name(app_game.name)
+            metadata = (
+                ea_epic_metadata_for_name(app_game.name)
+                or rockstar_epic_metadata_for_name(app_game.name)
+            )
         if metadata:
             name = metadata["name"]
         slug = metadata.get("id") or game_slug(name)

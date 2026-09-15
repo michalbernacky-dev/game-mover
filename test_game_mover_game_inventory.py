@@ -199,6 +199,27 @@ class InstalledGameInventoryTest(unittest.TestCase):
         self.assertEqual(item["epic_app_name"], "MtMassive")
         self.assertEqual(item["ea_prefix"], "EA_app")
 
+    def test_heroic_gta_uses_supported_rockstar_epic_metadata(self):
+        gta = self.shared / "Heroic/GTAVEnhanced"
+        gta.mkdir(parents=True)
+        heroic = self.user / ".config/heroic/legendaryConfig/legendary"
+        heroic.mkdir(parents=True)
+        app_name = "8769e24080ea413b8ebca3f1b8c50951"
+        (heroic / "installed.json").write_text(json.dumps({app_name: {
+            "title": "Grand Theft Auto V Enhanced",
+            "install_path": str(gta), "app_name": app_name,
+        }}))
+
+        items = scan_user_installed_games(
+            str(self.user), "alice", str(self.shared), small_install_bytes=1,
+        )
+        item = {item["id"]: item for item in items}[
+            "grand-theft-auto-v-enhanced"
+        ]
+        self.assertEqual(item["launcher_type"], "rockstar_epic")
+        self.assertEqual(item["epic_app_name"], app_name)
+        self.assertFalse(item["possible_residue"])
+
     def test_current_player_scan_finds_private_ea_epic_payload(self):
         config = self.user / ".config/heroic"
         (config / "sideload_apps").mkdir(parents=True)

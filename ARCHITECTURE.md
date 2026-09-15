@@ -130,6 +130,26 @@ running the shared game's own `Touchup.exe` through that same UMU, Proton and
 prefix context. Correct existing registration is never rewritten, and launcher
 credentials or another player's registry are never copied.
 
+Epic-owned GTA V Enhanced uses a distinct `rockstar_epic` launch adapter; it
+does not reuse or modify the EA flow. The adapter resolves only the fixed Epic
+app ID from the current player's bounded Heroic `installed.json` and
+`GamesConfig` records. It requires `PlayGTAV.exe`, the game's
+`EpicGamesLauncher.exe` shim, Rockstar Launcher in the same private prefix, the
+configured Proton runner, UMU and an authenticated Legendary configuration.
+The launch chain is `Legendary` → package-owned Wine wrapper → `UMU` →
+`EpicGamesLauncher.exe PlayGTAV.exe` plus Legendary's transient Epic arguments.
+
+Live diagnosis showed that updates did not remove the old game-directory
+wrapper. Instead, Rockstar Launcher regenerated `ProgramData/Rockstar
+Games/Launcher/titles.dat`, after which it treated the title as a Rockstar scan
+rather than preserving the Epic ownership path. With GTA and Rockstar stopped,
+the managed adapter atomically moves that bounded regular metadata file to a
+fixed `.game-mover-disabled` name before every launch. It rejects symlinks,
+oversized metadata, an unsafe backup object, and a Proton `pfx` that resolves
+outside the selected Heroic prefix. The adapter is installed outside both the
+game payload and prefix, so their updaters cannot replace it. Direct Heroic
+launch remains explicitly outside this managed path.
+
 Adapters may discover endpoints from an authoritative game/runtime source and
 merge them with optional registry entries. Minecraft reads `server.properties`
 or Podman publication metadata. The Satisfactory systemd adapter reads the

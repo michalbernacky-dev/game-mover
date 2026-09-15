@@ -107,6 +107,7 @@ chmod 0644 "${INSTALL_DIR}/LICENSE" "${INSTALL_DIR}/NOTICE" \
   "${INSTALL_DIR}/SECURITY.md" "${INSTALL_DIR}/TRADEMARKS.md"
 chmod 0755 "${INSTALL_DIR}/game_mover_flask.py" "${INSTALL_DIR}/game_mover.py" "${INSTALL_DIR}/game-mover"
 chmod 0755 "${INSTALL_DIR}/game_mover_ea_epic.py"
+chmod 0755 "${INSTALL_DIR}/game_mover_rockstar_epic.py"
 find "${INSTALL_DIR}" -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 echo "[2/8] Odstraňuji starou službu ${LEGACY_SERVICE_NAME} (pokud existuje)"
@@ -211,8 +212,10 @@ rm -f "${autostart_tmp}"
 echo "[7/8] CLI helper symlinks"
 ln -sf "${INSTALL_DIR}/game-mover" /usr/local/bin/game-mover
 ln -sf "${INSTALL_DIR}/game_mover_ea_epic.py" /usr/local/bin/game-mover-ea-epic
+ln -sf "${INSTALL_DIR}/game_mover_rockstar_epic.py" /usr/local/bin/game-mover-rockstar-epic
 chmod +x /usr/local/bin/game-mover
 chmod +x /usr/local/bin/game-mover-ea-epic
+chmod +x /usr/local/bin/game-mover-rockstar-epic
 
 echo "[8/8] systemd daemon-reload"
 systemctl daemon-reload
