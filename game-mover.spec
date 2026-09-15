@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.35.1
+Version:        0.35.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -22,6 +22,7 @@ Requires:       rsync
 Requires:       podman
 Requires:       acl
 Requires:       PackageKit
+Requires:       /usr/bin/pkexec
 Requires:       systemd
 Requires(pre):  shadow-utils
 Requires(post): shadow-utils
@@ -180,6 +181,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.35.2-1
+- Authorize Heroic installation through desktop polkit before noninteractive pkcon
+
 * Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.35.1-1
 - Allow PackageKit to request polkit authorization for Heroic updates
 

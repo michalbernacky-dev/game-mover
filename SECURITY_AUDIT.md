@@ -24,15 +24,15 @@ are bounded or read-only, symlinked metadata is rejected, no Wine executable is
 run, and no paths or registry contents are returned to the backend. Optional
 versions come only from launcher metadata or a matching Wine product section.
 
-Version 0.35.1 corrects a locally reproduced Heroic update failure. The Qt
-client had invoked `pkcon --noninteractive`, so PackageKit could not request its
-separate polkit authorization and returned `Failed to obtain authentication`.
-The client now answers only PackageKit's package confirmation on standard input
-while leaving user interaction enabled for the desktop polkit agent. It still
-uses a fixed argument vector, performs no shell or sudo invocation, and submits
-only the previously downloaded and validated private temporary RPM. Regression
-coverage asserts that noninteractive authorization is not disabled. Runtime
-deployment verification remains pending.
+Version 0.35.1 corrected the first locally reproduced Heroic update failure:
+`pkcon --noninteractive` could not request PackageKit authorization. Live testing
+then exposed a second failure, `user declined simulation`, because interactive
+`pkcon` could not accept its confirmation without a terminal. Version 0.35.2
+uses desktop polkit through a fixed `pkexec /usr/bin/pkcon` argument vector, then
+runs `pkcon` noninteractively after that explicit administrator authorization.
+It still performs no shell or sudo invocation and submits only the previously
+downloaded and validated private temporary RPM. Regression coverage asserts the
+exact executables and flags. Runtime deployment verification remains pending.
 
 ## EA per-player deployment regression: 2026-09-13
 
@@ -544,10 +544,10 @@ containers use `keep-id` ownership. Steam filesystem operations run in a fixed
 internal worker after dropping to the selected player's UID with only the
 `gemers` supplementary group, so player-writable paths are never traversed as
 root. Installation of Heroic's unsigned upstream RPM was removed from the
-privileged workflow. Its local Qt client instead verifies the official release
-digest and RPM identity before handing the exact private temporary file to
-PackageKit, whose polkit transaction performs interactive authorization outside
-both the network API and its broker.
+network service's privileged workflow. Its local Qt client instead verifies the
+official release digest and RPM identity, requests explicit desktop polkit
+authorization through `pkexec`, and hands the exact private temporary file to
+PackageKit. This remains outside both the network API and its broker.
 
 `systemd-analyze verify` accepts both units. On the deployed Fedora host,
 `systemd-analyze security` reports **3.7 OK** for `game_mover.service` and
