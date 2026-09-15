@@ -73,7 +73,8 @@ against the official GitHub project. The upstream RPM is not signed for the
 host RPM trust store, so the split-service backend never installs it as root.
 The local Qt client downloads and verifies the release, then asks PackageKit to
 install that exact file through the desktop's standard polkit authorization;
-Heroic should be closed first.
+Heroic should be closed first. Unlocking Game Mover's local PAM controls does
+not replace PackageKit's separate administrator prompt.
 
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
@@ -821,7 +822,9 @@ spuštění/vypnutí/restartu/zálohy každého registrovaného serveru. `silent
 místní `api.token`, `pam` vyžaduje platnou relaci wheel uživatele a `disabled`
 operaci odmítne přímo backend. Aktualizaci Heroicu stáhne a ověří místní Qt
 klient; instalaci pak předá PackageKitu, který zobrazí standardní polkit
-autorizaci. Síťový backend ani jeho root helper balíček neinstalují.
+autorizaci. Odemčení místního PAM v Game Moveru nenahrazuje tento samostatný
+administrátorský dotaz PackageKitu. Síťový backend ani jeho root helper balíček
+neinstalují.
 Místní PAM tlačítka
 jsou modrozelená a hostitelská fialová; hranice je současně napsaná přímo v
 jejich popisku. V režimu SSH tunelu může PAM relace autorizovat i

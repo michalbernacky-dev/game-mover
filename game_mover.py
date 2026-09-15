@@ -728,9 +728,9 @@ class LauncherUpdateThread(QThread):
     @staticmethod
     def _packagekit_install(path):
         return subprocess.run(
-            ["/usr/bin/pkcon", "--plain", "--noninteractive",
-             "--allow-untrusted", "install-local", path],
-            text=True, capture_output=True, check=False, timeout=900,
+            ["/usr/bin/pkcon", "--plain", "--allow-untrusted",
+             "install-local", path],
+            input="y\n", text=True, capture_output=True, check=False, timeout=900,
         )
 
 
