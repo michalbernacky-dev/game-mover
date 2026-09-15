@@ -140,15 +140,17 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(len(self.window.local_pam_buttons), 1)
 
-    def test_heroic_client_installer_uses_packagekit_without_sudo(self):
+    def test_heroic_client_installer_allows_packagekit_polkit_prompt(self):
         completed = MagicMock(returncode=0, stdout="", stderr="")
         with patch.object(game_mover.subprocess, "run", return_value=completed) as run:
-            result = game_mover.LauncherUpdateThread._packagekit_install("/tmp/heroic.rpm")
+            result = game_mover.LauncherUpdateThread._packagekit_install("heroic.rpm")
         self.assertIs(result, completed)
         command = run.call_args.args[0]
         self.assertEqual(command[0], "/usr/bin/pkcon")
         self.assertIn("install-local", command)
+        self.assertNotIn("--noninteractive", command)
         self.assertNotIn("sudo", command)
+        self.assertEqual(run.call_args.kwargs["input"], "y\n")
 
     def test_mover_mutates_only_steam_and_heroic_ea_payloads(self):
         self.assertEqual(self.window.platform, "steam")

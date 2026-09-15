@@ -24,6 +24,16 @@ are bounded or read-only, symlinked metadata is rejected, no Wine executable is
 run, and no paths or registry contents are returned to the backend. Optional
 versions come only from launcher metadata or a matching Wine product section.
 
+Version 0.35.1 corrects a locally reproduced Heroic update failure. The Qt
+client had invoked `pkcon --noninteractive`, so PackageKit could not request its
+separate polkit authorization and returned `Failed to obtain authentication`.
+The client now answers only PackageKit's package confirmation on standard input
+while leaving user interaction enabled for the desktop polkit agent. It still
+uses a fixed argument vector, performs no shell or sudo invocation, and submits
+only the previously downloaded and validated private temporary RPM. Regression
+coverage asserts that noninteractive authorization is not disabled. Runtime
+deployment verification remains pending.
+
 ## EA per-player deployment regression: 2026-09-13
 
 Live 0.33.0 testing reproduced a denied EA move while creating
