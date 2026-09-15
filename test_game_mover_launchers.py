@@ -1,6 +1,10 @@
 import hashlib
+import json
 import os
+from pathlib import Path
+import sqlite3
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
@@ -71,6 +75,114 @@ class LauncherProviderTest(unittest.TestCase):
         self.assertTrue(by_id["heroic"]["update_available"])
         self.assertFalse(by_id["lutris"]["installed"])
         self.assertFalse(by_id["steam"]["update_available"])
+
+    def test_managed_catalog_uses_only_explicit_heroic_and_lutris_entries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home/player"
+            heroic = home / ".config/heroic"
+            games_config = heroic / "GamesConfig"
+            (heroic / "sideload_apps").mkdir(parents=True)
+            games_config.mkdir()
+            ea_prefix = home / "Games/EA App"
+            ea_prefix.mkdir(parents=True)
+            (ea_prefix / "system.reg").write_text(
+                '[Software\\\\Vendor\\\\EA]\n'
+                '"DisplayName"="EA app"\n'
+                '"BundleVersion"="13.788.2.6298"\n',
+            )
+            game_prefix = home / "Games/Battlefront"
+            (game_prefix / "drive_c/Program Files/Electronic Arts/EA Desktop").mkdir(
+                parents=True,
+            )
+            (heroic / "sideload_apps/library.json").write_text(json.dumps({
+                "games": [
+                    {
+                        "title": "EA app", "app_name": "ea-local",
+                        "is_installed": True,
+                    },
+                    {
+                        "title": "GOG Galaxy", "app_name": "gog-local",
+                        "is_installed": True, "version": "2.0.80.33",
+                    },
+                    {
+                        "title": "STAR WARS Battlefront II",
+                        "app_name": "battlefront", "is_installed": True,
+                    },
+                    {
+                        "title": "Origin", "app_name": "old-origin",
+                        "is_installed": False,
+                    },
+                ],
+            }))
+            for app_id, prefix in (
+                ("ea-local", ea_prefix), ("gog-local", home / "Games/GOG"),
+                ("battlefront", game_prefix),
+                ("old-origin", home / "Games/Old Origin"),
+            ):
+                prefix.mkdir(parents=True, exist_ok=True)
+                (games_config / f"{app_id}.json").write_text(json.dumps({
+                    app_id: {"winePrefix": str(prefix)},
+                }))
+
+            lutris = home / ".local/share/lutris"
+            lutris.mkdir(parents=True)
+            ubisoft = home / "Games/Ubisoft Connect"
+            ubisoft.mkdir(parents=True)
+            (ubisoft / "system.reg").write_text(
+                '[Software\\\\Vendor\\\\Ubisoft]\n'
+                '"DisplayName"="Ubisoft Connect"\n'
+                '"DisplayVersion"="168.0.12921"\n',
+            )
+            connection = sqlite3.connect(lutris / "pga.db")
+            connection.execute(
+                "CREATE TABLE games (name, slug, directory, configpath, installed)",
+            )
+            connection.execute(
+                "INSERT INTO games VALUES (?, ?, ?, ?, 1)",
+                ("Ubisoft Connect", "ubisoft-connect", str(ubisoft), None),
+            )
+            connection.execute(
+                "INSERT INTO games VALUES (?, ?, ?, ?, 1)",
+                ("Grand Theft Auto V", "gta-v", str(home / "Games/GTA"), None),
+            )
+            connection.commit()
+            connection.close()
+
+            statuses = launchers.managed_launcher_statuses(str(home))
+
+        by_id = {item["id"]: item for item in statuses}
+        self.assertEqual(set(by_id), {
+            "managed-ea-app", "managed-gog-galaxy", "managed-ubisoft-connect",
+        })
+        self.assertEqual(
+            by_id["managed-ea-app"]["installed_version"], "13.788.2.6298",
+        )
+        self.assertEqual(
+            by_id["managed-gog-galaxy"]["installed_version"], "2.0.80.33",
+        )
+        self.assertEqual(by_id["managed-ubisoft-connect"]["source"], "Lutris")
+        self.assertEqual(
+            by_id["managed-ubisoft-connect"]["installed_version"],
+            "168.0.12921",
+        )
+        self.assertFalse(any(item["update_supported"] for item in statuses))
+
+    def test_managed_catalog_merges_the_same_launcher_sources(self):
+        definition = launchers.MANAGED_LAUNCHER_BY_ALIAS["ea-app"]
+        with (
+            patch.object(
+                launchers, "_heroic_managed_launchers",
+                return_value=[(definition, "Heroic", "13.1.0")],
+            ),
+            patch.object(
+                launchers, "_lutris_managed_launchers",
+                return_value=[(definition, "Lutris", "13.2.0")],
+            ),
+        ):
+            statuses = launchers.managed_launcher_statuses("/home/player")
+        self.assertEqual(len(statuses), 1)
+        self.assertEqual(statuses[0]["source"], "Heroic + Lutris")
+        self.assertEqual(statuses[0]["installed_version"], "13.2.0")
 
     def test_repo_versions_from_multiple_architectures_stay_separate(self):
         runner = Mock(return_value=completed(

@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
+import sqlite3
+import stat
 import subprocess
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 import requests
+import yaml
 
 
 GITHUB_API = "https://api.github.com"
 HEROIC_REPOSITORY = "Heroic-Games-Launcher/HeroicGamesLauncher"
 MAX_RPM_BYTES = 256 * 1024 * 1024
+MAX_LOCAL_METADATA_BYTES = 64 * 1024 * 1024
 VERSION_RE = re.compile(r"^[vV]?(\d+(?:\.\d+)*)(?:[-+](.*))?$")
 
 
@@ -48,6 +54,57 @@ LAUNCHERS = (
 )
 
 
+@dataclass(frozen=True)
+class ManagedLauncherDefinition:
+    id: str
+    name: str
+    icon: str
+    aliases: tuple[str, ...]
+
+
+MANAGED_LAUNCHERS = (
+    ManagedLauncherDefinition(
+        "ea-app", "EA App", "lutris_ea-app", ("ea-app", "ea-desktop"),
+    ),
+    ManagedLauncherDefinition(
+        "ubisoft-connect", "Ubisoft Connect", "lutris_ubisoft-connect",
+        ("ubisoft-connect", "ubisoft-connect-pc", "uplay", "ubisoft-game-launcher"),
+    ),
+    ManagedLauncherDefinition(
+        "gog-galaxy", "GOG Galaxy", "lutris_gog-galaxy",
+        ("gog-galaxy", "gog-galaxy-2", "gog-galaxy-2-0"),
+    ),
+    ManagedLauncherDefinition(
+        "rockstar-games-launcher", "Rockstar Games Launcher",
+        "lutris_rockstar-games-launcher", ("rockstar-games-launcher",),
+    ),
+    ManagedLauncherDefinition(
+        "epic-games-launcher", "Epic Games Launcher", "lutris_epic-games-store",
+        ("epic-games-launcher", "epic-games-store", "epic-games-store-launcher"),
+    ),
+    ManagedLauncherDefinition(
+        "battle-net", "Battle.net", "lutris_battlenet",
+        ("battle-net", "battle-net-launcher", "battlenet", "blizzard-battle-net"),
+    ),
+    ManagedLauncherDefinition(
+        "amazon-games", "Amazon Games", "lutris_amazon-games",
+        ("amazon-games", "amazon-games-app"),
+    ),
+    ManagedLauncherDefinition(
+        "origin", "Origin", "lutris_origin", ("origin", "origin-client"),
+    ),
+    ManagedLauncherDefinition(
+        "riot-client", "Riot Client", "lutris_riot-client",
+        ("riot-client", "riot-games-client"),
+    ),
+)
+MANAGED_LAUNCHER_BY_ALIAS = {
+    alias: definition
+    for definition in MANAGED_LAUNCHERS
+    for alias in definition.aliases
+}
+
+
 def _run(command, *, timeout=30):
     return subprocess.run(
         command, text=True, capture_output=True, check=False, timeout=timeout,
@@ -62,6 +119,233 @@ def _version_key(version):
     suffix = match.group(2)
     # A stable release sorts after a prerelease with the same numeric version.
     return numbers, (1, "") if not suffix else (0, suffix.lower())
+
+
+def _launcher_slug(value):
+    value = unicodedata.normalize("NFKD", str(value or ""))
+    value = value.encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")[:128]
+
+
+def _managed_definition(*values):
+    for value in values:
+        definition = MANAGED_LAUNCHER_BY_ALIAS.get(_launcher_slug(value))
+        if definition:
+            return definition
+    return None
+
+
+def _safe_local_path(home, value, *, file=False):
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    try:
+        home = os.path.realpath(home)
+        candidate = os.path.abspath(os.path.expanduser(value.strip()))
+        resolved = os.path.realpath(candidate)
+        if os.path.commonpath((home, resolved)) != home or os.path.islink(candidate):
+            return ""
+        exists = os.path.isfile(resolved) if file else os.path.isdir(resolved)
+        return resolved if exists else ""
+    except (OSError, ValueError, TypeError):
+        return ""
+
+
+def _load_local_json(path):
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_LOCAL_METADATA_BYTES:
+            return None
+        with open(path, encoding="utf-8") as stream:
+            return json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
+def _metadata_version(*payloads):
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        for key in ("installedVersion", "appVersion", "app_version", "version"):
+            value = str(payload.get(key) or "").strip()
+            if VERSION_RE.fullmatch(value):
+                return value.removeprefix("v").removeprefix("V")
+    return ""
+
+
+def _registry_value(line, key):
+    match = re.fullmatch(rf'"{re.escape(key)}"="([^"\r\n]*)"', line.strip())
+    return match.group(1).replace(r"\\", "\\") if match else ""
+
+
+def _wine_registry_version(prefix, definition):
+    """Read an optional product version without executing anything in Wine."""
+    candidates = []
+    for root in (os.path.join(prefix, "pfx"), prefix):
+        registry = os.path.join(root, "system.reg")
+        try:
+            metadata = os.stat(registry, follow_symlinks=False)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_LOCAL_METADATA_BYTES:
+                continue
+            current = {}
+            with open(registry, encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    if line.startswith("["):
+                        name = current.get("name", "")
+                        if _managed_definition(name) == definition:
+                            candidates.extend(current.get("versions", ()))
+                        current = {"versions": []}
+                        continue
+                    name = _registry_value(line, "DisplayName")
+                    if name:
+                        current["name"] = name
+                    for key in ("DisplayVersion", "BundleVersion", "Version"):
+                        version = _registry_value(line, key)
+                        if VERSION_RE.fullmatch(version):
+                            current.setdefault("versions", []).append(version)
+                name = current.get("name", "")
+                if _managed_definition(name) == definition:
+                    candidates.extend(current.get("versions", ()))
+        except OSError:
+            continue
+    return max(candidates, key=_version_key) if candidates else ""
+
+
+def _heroic_managed_launchers(home):
+    found = []
+    config_roots = (
+        os.path.join(home, ".config/heroic"),
+        os.path.join(home, ".var/app/com.heroicgameslauncher.hgl/config/heroic"),
+    )
+    for config_root in config_roots:
+        library = _load_local_json(
+            os.path.join(config_root, "sideload_apps/library.json"),
+        )
+        games = library.get("games") if isinstance(library, dict) else None
+        if not isinstance(games, list):
+            continue
+        for item in games:
+            if not isinstance(item, dict):
+                continue
+            app_id = str(
+                item.get("app_name") or item.get("appName") or item.get("id") or "",
+            )
+            definition = _managed_definition(item.get("title"), app_id)
+            if (
+                not definition
+                or not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", app_id)
+            ):
+                continue
+            config = _load_local_json(
+                os.path.join(config_root, "GamesConfig", f"{app_id}.json"),
+            )
+            entry = config.get(app_id) if isinstance(config, dict) else None
+            prefix = _safe_local_path(
+                home, entry.get("winePrefix") if isinstance(entry, dict) else "",
+            )
+            install_path = _safe_local_path(
+                home, item.get("installPath") or item.get("install_path") or "",
+            )
+            if item.get("is_installed") is False:
+                continue
+            if item.get("is_installed") is not True and not prefix and not install_path:
+                continue
+            version = _metadata_version(item, entry)
+            if not version and prefix:
+                version = _wine_registry_version(prefix, definition)
+            found.append((definition, "Heroic", version))
+    return found
+
+
+def _lutris_managed_launchers(home):
+    found = []
+    databases = (
+        (
+            os.path.join(home, ".local/share/lutris/pga.db"),
+            os.path.join(home, ".config/lutris/games"),
+        ),
+        (
+            os.path.join(home, ".var/app/net.lutris.Lutris/data/lutris/pga.db"),
+            os.path.join(home, ".var/app/net.lutris.Lutris/config/lutris/games"),
+        ),
+    )
+    for database, config_root in databases:
+        try:
+            metadata = os.stat(database, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_size > MAX_LOCAL_METADATA_BYTES
+            ):
+                continue
+            connection = sqlite3.connect(
+                f"file:{database}?mode=ro", uri=True, timeout=1,
+            )
+            rows = connection.execute(
+                "SELECT name, slug, directory, configpath FROM games "
+                "WHERE installed = 1",
+            ).fetchall()
+            connection.close()
+        except (OSError, sqlite3.Error):
+            continue
+        for name, slug, directory, config_path in rows:
+            definition = _managed_definition(name, slug)
+            if not definition:
+                continue
+            prefix = ""
+            filename = str(config_path or "")
+            if filename and os.path.basename(filename) == filename:
+                if not filename.endswith((".yml", ".yaml")):
+                    filename += ".yml"
+                config_file = _safe_local_path(
+                    home, os.path.join(config_root, filename), file=True,
+                )
+                try:
+                    if config_file and os.path.getsize(config_file) <= 1024 * 1024:
+                        with open(config_file, encoding="utf-8") as stream:
+                            config = yaml.safe_load(stream)
+                        game = config.get("game") if isinstance(config, dict) else None
+                        if isinstance(game, dict):
+                            prefix = _safe_local_path(home, game.get("prefix"))
+                except (OSError, yaml.YAMLError):
+                    pass
+            prefix = prefix or _safe_local_path(home, directory)
+            version = _wine_registry_version(prefix, definition) if prefix else ""
+            found.append((definition, "Lutris", version))
+    return found
+
+
+def managed_launcher_statuses(home=None):
+    """Return launchers explicitly installed as Heroic/Lutris library entries."""
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    merged = {}
+    for definition, source, version in (
+        *_heroic_managed_launchers(home), *_lutris_managed_launchers(home),
+    ):
+        item = merged.setdefault(definition.id, {
+            "id": f"managed-{definition.id}",
+            "name": definition.name,
+            "icon": definition.icon,
+            "sources": set(),
+            "versions": [],
+        })
+        item["sources"].add(source)
+        if version:
+            item["versions"].append(version)
+    statuses = []
+    for item in merged.values():
+        versions = item.pop("versions")
+        sources = item.pop("sources")
+        statuses.append({
+            **item,
+            "source": " + ".join(sorted(sources)),
+            "installed": True,
+            "installed_version": max(versions, key=_version_key) if versions else "",
+            "latest_version": "",
+            "update_available": False,
+            "update_supported": False,
+            "managed_externally": True,
+            "error": "",
+        })
+    return sorted(statuses, key=lambda item: item["name"].casefold())
 
 
 def version_is_newer(candidate, installed):

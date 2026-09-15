@@ -64,7 +64,11 @@ the local computer and a purple panel marks the tunneled host. Game-library disk
 bars remain in Mover.
 
 The **Launchers** tab detects native Heroic, Lutris, and Steam installations and
-shows whether their installed versions are current. Heroic releases are checked
+also launchers explicitly installed as their own Heroic or Lutris library
+entries, such as EA App, Ubisoft Connect, or GOG Galaxy. Components found only
+inside an ordinary game's Wine prefix are ignored. Each managed launcher shows
+Heroic/Lutris as its source and its locally recorded product version when one is
+available; Game Mover does not update it. Native Heroic releases are checked
 against the official GitHub project. The upstream RPM is not signed for the
 host RPM trust store, so the split-service backend never installs it as root.
 The local Qt client downloads and verifies the release, then asks PackageKit to
@@ -688,6 +692,13 @@ jen informační, takže nevyžaduje PAM. U RAM uvádí také paměť, kterou j�
 skutečně považuje za dostupnou, což pomáhá před spuštěním dalšího náročného
 serveru. Stejně jako PAM tlačítka označuje modrý panel místní počítač a fialový
 panel hostitele přes tunel. Diskové ukazatele herních knihoven zůstávají v Moveru.
+
+Záložka **Launchery** vedle nativního Heroicu, Lutrisu a Steamu ukazuje také
+launchery nainstalované jako vlastní položka knihovny Heroicu nebo Lutrisu,
+například EA App, Ubisoft Connect či GOG Galaxy. Komponenta nalezená pouze uvnitř
+Wine prefixu běžné hry se ignoruje. U každé takové položky se zobrazí zdroj a,
+pokud jej lokální metadata nebo odpovídající produktový záznam Wine obsahují,
+také nainstalovaná verze. Game Mover tyto launchery neaktualizuje.
 
 Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi

@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.34.2
+Version:        0.35.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -180,6 +180,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.35.0-1
+- List launchers explicitly installed through Heroic and Lutris
+- Show a locally recorded Wine product version when available
+
 * Mon Sep 14 2026 Game Mover Packager <packager@example.invalid> - 0.34.2-1
 - Replace path-named EA mount units with a fixed validated bind-service template
 - Migrate and repair managed 0.34.0 and 0.34.1 EA mount units in place
