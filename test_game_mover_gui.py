@@ -607,6 +607,22 @@ class ServerManagementGuiTest(unittest.TestCase):
             json={"username": "admin", "password": "secret"}, timeout=8,
         )
 
+    def test_custom_systemd_add_control_requires_host_pam_even_with_silent_registry(self):
+        self.window.app_mode = "server"
+        self.window.global_operation_policies["server.registry"] = "silent"
+        self.window.timekpr_token = ""
+        with patch.object(game_mover, "load_local_admin_token", return_value="admin-token"):
+            self.window.update_management_action_availability()
+        self.assertTrue(self.window.local_services_table.isEnabled())
+        self.assertFalse(self.window.local_services_add.isEnabled())
+        self.assertIn("PAM", self.window.local_services_add.toolTip())
+
+        self.window.timekpr_token = "host-pam-token"
+        with patch.object(game_mover, "load_local_admin_token", return_value="admin-token"):
+            self.window.update_management_action_availability()
+        self.assertTrue(self.window.local_services_add.isEnabled())
+        self.assertIn("root autorizována", self.window.local_services_add.toolTip())
+
     def test_timekpr_switches_between_local_and_tunnel_host_context(self):
         local_payload = {
             "token": "local-token", "mode": "settimeleft",

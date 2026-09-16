@@ -404,9 +404,11 @@ Example entry in `/var/lib/game-mover/servers.json`:
 The status of every registered systemd workload is read directly by the
 unprivileged host API. Lifecycle operations and privileged log access are
 additionally constrained by the root-owned
-`/etc/game_mover/allowed-services.json`. Add a custom adopted `.service` unit
-there manually as root before controlling it in the UI. The API cannot edit
-this file and always rejects its own unit and the privileged broker unit.
+`/etc/game_mover/allowed-services.json`. Adding a custom adopted `.service`
+unit in the UI is available only during an unlocked local PAM session. On save,
+the root broker verifies that the exact service is loaded and atomically adds it
+to this allowlist. The unprivileged API cannot edit the file directly, and the
+broker always rejects its own unit and the Game Mover API unit.
 
 Every workload type can register host-facing TCP/UDP endpoints. They are shown
 in server cards and management views and checked for host port conflicts when
@@ -1034,9 +1036,10 @@ Příklad záznamu v `/var/lib/game-mover/servers.json`:
 Stav každého registrovaného systemd workloadu čte přímo neprivilegované API
 hostitele. Operace nad životním cyklem a privilegovaný přístup k logům jsou
 navíc omezené root-owned souborem `/etc/game_mover/allowed-services.json`.
-Vlastní adoptovanou `.service` jednotku tam správce přidá ručně jako root před
-jejím ovládáním v GUI. API tento allowlist neumí měnit a vždy odmítne vlastní
-jednotku i jednotku privilegovaného brokeru.
+Přidání vlastní adoptované `.service` jednotky je v GUI dostupné jen během
+odemčené místní PAM relace. Root broker při uložení ověří přesnou načtenou
+jednotku a atomicky ji přidá do allowlistu. Neprivilegované API soubor přímo
+měnit neumí a broker vždy odmítne vlastní jednotku i jednotku Game Mover API.
 
 Každý typ workloadu může registrovat hostitelské TCP/UDP endpointy. Zobrazují se
 na kartách a ve správě serveru a při uložení registru se kontrolují kolize portů:

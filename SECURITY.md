@@ -30,7 +30,8 @@ the management API directly to the public internet.
 The network-facing API runs without root privileges or Linux capabilities.
 Root-required host changes are isolated in a local Unix-socket broker that
 checks the API process UID and accepts only schema-validated semantic actions.
-Additional adopted systemd units must be explicitly listed by root in
+Additional adopted systemd units must be explicitly authorized by the root
+broker after local wheel PAM authentication and listed in
 `/etc/game_mover/allowed-services.json`; never make that file writable by the
 API account.
 

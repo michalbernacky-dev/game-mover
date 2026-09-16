@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.36.0
+Version:        0.36.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -184,6 +184,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Wed Sep 16 2026 Game Mover Packager <packager@example.invalid> - 0.36.1-1
+- Gate custom systemd registration behind a local PAM administrator session
+- Authorize exact loaded services through the root broker allowlist
+
 * Tue Sep 15 2026 Game Mover Packager <packager@example.invalid> - 0.36.0-1
 - Launch Epic-owned GTA V Enhanced through a package-owned Rockstar adapter
 - Quarantine Rockstar's regenerated title scan before each managed launch

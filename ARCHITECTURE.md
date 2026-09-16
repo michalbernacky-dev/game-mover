@@ -27,9 +27,11 @@ checks the peer UID with `SO_PEERCRED`, and dispatches only semantic actions for
 Steam moves/links, shared permissions, PAM, Timekpr, Pi-hole and allowlisted
 systemd services. It has no TCP/IP address family and cannot execute arbitrary
 client-supplied commands or paths. The API cannot control its own unit or the
-broker. Additional adopted systemd services must be entered manually in the
-root-owned `/etc/game_mover/allowed-services.json`; the API cannot modify that
-allowlist.
+broker. During an active local wheel PAM session, the broker can authorize an
+exact, already-loaded adopted `.service` and atomically extend the root-owned
+`/etc/game_mover/allowed-services.json`. The API cannot modify that allowlist
+directly, and the short-lived broker authorization is never returned to the
+GUI.
 
 Mutable registry, DNS, Gate and security-policy state lives under
 `/var/lib/game-mover`, owned by `gameplatform`. Authentication tokens and the

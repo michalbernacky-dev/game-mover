@@ -1130,6 +1130,18 @@ unavailable through the public boundary.
 
 ## Controls observed during the review
 
+### PAM-gated systemd registration: 2026-09-16
+
+The server registry previously allowed an authenticated administrator to save
+a custom systemd workload without granting the root broker permission to
+control it. The resulting UI exposed lifecycle buttons that always failed at
+the separate root allowlist boundary. Custom systemd registration is now
+available only with an active local PAM session. The PAM-authenticated root
+broker issues a short-lived, in-memory authorization that the API never returns
+to the GUI; on registry save the broker verifies each exact `.service` is
+loaded and atomically extends the root-owned allowlist. The API still cannot
+write that file, and the API and broker units remain explicitly denied.
+
 The following existing controls reduce exposure but do not close the open
 findings:
 

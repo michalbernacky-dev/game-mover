@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import secrets
 import shutil
 import socket
 import socketserver
@@ -25,6 +26,8 @@ import stat
 import struct
 import subprocess
 import sys
+import threading
+import time
 from typing import Any
 
 from game_mover_steam_cache import inspect_steam_cache
@@ -89,6 +92,11 @@ DENIED_SYSTEM_UNITS = {
 USER_FILESYSTEM_ACTIONS = {
     "move-game", "create-symlink", "set-steam-cache", "steam-cache-status",
 }
+PAM_AUTHORIZATION_TTL_SECONDS = 15 * 60
+PAM_AUTHORIZATION_LIMIT = 1024
+PAM_AUTHORIZATIONS: dict[str, tuple[str, float]] = {}
+PAM_AUTHORIZATIONS_LOCK = threading.Lock()
+SYSTEMD_ALLOWLIST_LOCK = threading.Lock()
 
 
 class PrivilegedError(RuntimeError):
@@ -695,14 +703,125 @@ def _configured_system_units() -> set[str]:
     return allowed
 
 
-def _systemd_unit(value: Any) -> str:
+def _normalize_custom_systemd_unit(value: Any) -> str:
     unit = str(value or "").strip()
     if not SYSTEMD_UNIT_RE.fullmatch(unit) or unit in DENIED_SYSTEM_UNITS:
         raise PrivilegedError("Systemd jednotka není povolena")
     if "." not in unit.rsplit("@", 1)[-1]:
         unit = f"{unit}.service"
-    if not unit.endswith(".service"):
+    if not unit.endswith(".service") or unit in DENIED_SYSTEM_UNITS:
         raise PrivilegedError("Povoleny jsou pouze systemd služby")
+    return unit
+
+
+def _write_configured_system_units(units: set[str]) -> None:
+    directory, filename = os.path.split(ALLOWED_UNITS_PATH)
+    directory = directory or "."
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    directory_fd = os.open(directory, flags)
+    temporary_name = f".{filename}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    temporary_fd = None
+    try:
+        metadata = os.fstat(directory_fd)
+        if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise PrivilegedError("Adresář allowlistu systemd jednotek není bezpečný")
+        temporary_fd = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o644,
+            dir_fd=directory_fd,
+        )
+        payload = (json.dumps(sorted(units), indent=2) + "\n").encode("utf-8")
+        written = 0
+        while written < len(payload):
+            written += os.write(temporary_fd, payload[written:])
+        os.fchmod(temporary_fd, 0o644)
+        os.fchown(temporary_fd, 0, 0)
+        os.fsync(temporary_fd)
+        os.close(temporary_fd)
+        temporary_fd = None
+        os.replace(
+            temporary_name, filename,
+            src_dir_fd=directory_fd, dst_dir_fd=directory_fd,
+        )
+        os.fsync(directory_fd)
+    finally:
+        if temporary_fd is not None:
+            os.close(temporary_fd)
+        try:
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+
+
+def _issue_pam_authorization(username: str) -> str:
+    authorization = secrets.token_urlsafe(32)
+    now = time.monotonic()
+    with PAM_AUTHORIZATIONS_LOCK:
+        expired = [
+            token for token, (_user, expiry) in PAM_AUTHORIZATIONS.items()
+            if expiry <= now
+        ]
+        for token in expired:
+            PAM_AUTHORIZATIONS.pop(token, None)
+        if len(PAM_AUTHORIZATIONS) >= PAM_AUTHORIZATION_LIMIT:
+            oldest = min(PAM_AUTHORIZATIONS, key=lambda token: PAM_AUTHORIZATIONS[token][1])
+            PAM_AUTHORIZATIONS.pop(oldest, None)
+        PAM_AUTHORIZATIONS[authorization] = (
+            username, now + PAM_AUTHORIZATION_TTL_SECONDS,
+        )
+    return authorization
+
+
+def _require_pam_authorization(value: Any) -> str:
+    authorization = str(value or "")
+    if not authorization or len(authorization) > 256:
+        raise PrivilegedError("Chybí platná PAM autorizace")
+    now = time.monotonic()
+    with PAM_AUTHORIZATIONS_LOCK:
+        expired = [
+            token for token, (_user, expiry) in PAM_AUTHORIZATIONS.items()
+            if expiry <= now
+        ]
+        for token in expired:
+            PAM_AUTHORIZATIONS.pop(token, None)
+        entry = PAM_AUTHORIZATIONS.get(authorization)
+    if entry is None:
+        raise PrivilegedError("PAM autorizace vypršela; odemkněte PAM znovu")
+    return entry[0]
+
+
+def _revoke_pam_authorization(parameters: dict) -> dict:
+    authorization = str(parameters.get("authorization") or "")
+    if authorization and len(authorization) <= 256:
+        with PAM_AUTHORIZATIONS_LOCK:
+            PAM_AUTHORIZATIONS.pop(authorization, None)
+    return {"revoked": True}
+
+
+def _authorize_systemd_units(parameters: dict) -> dict:
+    username = _require_pam_authorization(parameters.get("authorization"))
+    raw_units = parameters.get("units")
+    if not isinstance(raw_units, list) or len(raw_units) > 128:
+        raise PrivilegedError("Neplatný seznam systemd jednotek")
+    units = {_normalize_custom_systemd_unit(value) for value in raw_units}
+    for unit in sorted(units - FIXED_SYSTEM_UNITS):
+        result = _run([
+            "/usr/bin/systemctl", "show", "--property=LoadState", "--value",
+            "--no-pager", unit,
+        ], 15)
+        if result["returncode"] != 0 or result["stdout"].strip() != "loaded":
+            raise PrivilegedError(f"Systemd jednotka {unit} není načtená")
+    with SYSTEMD_ALLOWLIST_LOCK:
+        configured = _configured_system_units()
+        configured.update(units - FIXED_SYSTEM_UNITS)
+        _write_configured_system_units(configured)
+    return {"authorized": sorted(units), "user": username}
+
+
+def _systemd_unit(value: Any) -> str:
+    unit = _normalize_custom_systemd_unit(value)
     if unit not in FIXED_SYSTEM_UNITS and unit not in _configured_system_units():
         raise PrivilegedError("Systemd jednotka není v root allowlistu")
     return unit
@@ -821,7 +940,18 @@ def _pam_auth(parameters: dict) -> dict:
         authenticated = bool(pam.pam().authenticate(username, password))
     except Exception as error:
         raise PrivilegedError("PAM ověření selhalo") from error
-    return {"authenticated": authenticated}
+    try:
+        wheel = grp.getgrnam("wheel")
+    except KeyError:
+        return {"authenticated": authenticated, "administrator": False}
+    is_admin = username in wheel.gr_mem or account.pw_gid == wheel.gr_gid
+    if not authenticated or not is_admin:
+        return {"authenticated": authenticated, "administrator": False}
+    return {
+        "authenticated": True,
+        "administrator": True,
+        "authorization": _issue_pam_authorization(username),
+    }
 
 
 def _pihole(parameters: dict) -> dict:
@@ -900,6 +1030,8 @@ def dispatch(action: str, parameters: dict) -> dict:
     handlers = {
         "systemd": _systemd,
         "pam-auth": _pam_auth,
+        "revoke-pam-authorization": _revoke_pam_authorization,
+        "authorize-systemd-units": _authorize_systemd_units,
         "timekpr": _timekpr,
         "pihole": _pihole,
         "timekpr-config": _timekpr_config,

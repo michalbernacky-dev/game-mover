@@ -3745,10 +3745,17 @@ class GameMover(QWidget):
             self.local_operation_headers("server.registry")
         )
         for widget in (
-            self.local_services_table, self.local_services_refresh, self.local_services_add,
+            self.local_services_table, self.local_services_refresh,
             self.local_services_remove, self.local_services_save,
         ):
             widget.setEnabled(registry_enabled)
+        systemd_registration_enabled = registry_enabled and bool(self.timekpr_token)
+        self.local_services_add.setEnabled(systemd_registration_enabled)
+        self.local_services_add.setToolTip(
+            "Přidání vlastní systemd jednotky vyžaduje odemčený PAM hostitele."
+            if not systemd_registration_enabled else
+            "Přidá službu; vlastní systemd jednotka bude při uložení root autorizována."
+        )
         install_enabled = management_mode and bool(
             self.local_operation_headers("minecraft.install")
         )
