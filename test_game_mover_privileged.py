@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -100,6 +101,81 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 privileged.dispatch(
                     "pam-auth", {"username": "alice", "password": "x" * 4097},
                 )
+
+    def test_pam_admin_authorization_can_allow_loaded_systemd_unit(self):
+        account = Mock(pw_uid=1000, pw_gid=1000, pw_dir="/home/alice")
+        pam_module = Mock()
+        pam_module.pam.return_value.authenticate.return_value = True
+        loaded = {
+            "returncode": 0, "stdout": "loaded\n", "stderr": "",
+        }
+        with (
+            patch.dict(sys.modules, {"pam": pam_module}),
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(
+                privileged.grp, "getgrnam",
+                return_value=Mock(gr_gid=1000, gr_mem=["alice"]),
+            ),
+            patch.object(privileged, "_run", return_value=loaded) as run,
+            patch.object(
+                privileged, "_configured_system_units",
+                return_value={"existing.service"},
+            ),
+            patch.object(privileged, "_write_configured_system_units") as writer,
+        ):
+            authentication = privileged.dispatch(
+                "pam-auth", {"username": "alice", "password": "secret"},
+            )
+            result = privileged.dispatch("authorize-systemd-units", {
+                "authorization": authentication["authorization"],
+                "units": ["v-hra.service"],
+            })
+
+        self.assertTrue(authentication["administrator"])
+        self.assertEqual(result["authorized"], ["v-hra.service"])
+        run.assert_called_once_with([
+            "/usr/bin/systemctl", "show", "--property=LoadState", "--value",
+            "--no-pager", "v-hra.service",
+        ], 15)
+        writer.assert_called_once_with({"existing.service", "v-hra.service"})
+
+    def test_systemd_authorization_rejects_missing_or_forbidden_unit(self):
+        authorization = privileged._issue_pam_authorization("alice")
+        with self.assertRaisesRegex(privileged.PrivilegedError, "není povolena"):
+            privileged.dispatch("authorize-systemd-units", {
+                "authorization": authorization,
+                "units": ["game_mover.service"],
+            })
+        with (
+            patch.object(privileged, "_run", return_value={
+                "returncode": 0, "stdout": "not-found\n", "stderr": "",
+            }),
+            self.assertRaisesRegex(privileged.PrivilegedError, "není načtená"),
+        ):
+            privileged.dispatch("authorize-systemd-units", {
+                "authorization": authorization,
+                "units": ["missing.service"],
+            })
+
+    def test_systemd_allowlist_is_replaced_atomically_with_root_only_writer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            allowlist = Path(temporary) / "allowed-services.json"
+            directory_metadata = Mock(st_uid=0, st_mode=0o40755)
+            with (
+                patch.object(privileged, "ALLOWED_UNITS_PATH", str(allowlist)),
+                patch.object(privileged.os, "fstat", return_value=directory_metadata),
+                patch.object(privileged.os, "fchown"),
+            ):
+                privileged._write_configured_system_units({
+                    "v-hra.service", "example.service",
+                })
+
+            self.assertEqual(
+                allowlist.read_text(encoding="utf-8"),
+                '[\n  "example.service",\n  "v-hra.service"\n]\n',
+            )
+            self.assertEqual(allowlist.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(list(Path(temporary).iterdir()), [allowlist])
 
     def test_game_names_cannot_escape_managed_roots(self):
         for value in (

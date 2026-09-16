@@ -159,7 +159,10 @@ class ServerRegistryTest(unittest.TestCase):
         with (
             patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
             patch.object(
-                backend, "privileged_call", return_value={"authenticated": True},
+                backend, "privileged_call", return_value={
+                    "authenticated": True,
+                    "authorization": "root-only-authorization",
+                },
             ) as broker,
             patch.object(backend, "user_in_wheel", return_value=True),
         ):
@@ -169,6 +172,10 @@ class ServerRegistryTest(unittest.TestCase):
                 **self.local_options(),
             )
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn("authorization", response.json)
+        issued = backend.TIMEKPRA_TOKENS[response.json["token"]]
+        self.assertEqual(issued[2], "root-only-authorization")
+        backend.TIMEKPRA_TOKENS.pop(response.json["token"], None)
         broker.assert_called_once_with(
             "pam-auth",
             {"username": "alice", "password": "local-password"},
@@ -680,6 +687,49 @@ class ServerRegistryTest(unittest.TestCase):
             **self.local_options(self.pam_headers),
         )
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+
+    def test_custom_systemd_registration_requires_local_pam_even_if_registry_is_allowed(self):
+        custom = {
+            "id": "v-hra", "name": "V-HRA", "backend": "systemd",
+            "kind": "generic", "service": "v-hra.service",
+        }
+        with patch.object(backend, "require_local_operation", return_value=True):
+            response = self.client.put(
+                "/servers/config", json={"servers": [custom]},
+                **self.local_options(self.admin_headers),
+            )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("PAM", response.json["message"])
+        self.assertFalse(Path(self.config_path).exists())
+
+    def test_local_pam_registration_authorizes_exact_systemd_unit_in_root_broker(self):
+        custom = {
+            "id": "v-hra", "name": "V-HRA", "backend": "systemd",
+            "kind": "generic", "service": "v-hra.service",
+        }
+        backend.TIMEKPRA_TOKENS["test-session"] = (
+            "tester", time.time() + 60, "root-authorization",
+        )
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(
+                backend, "privileged_call", return_value={"authorized": ["v-hra.service"]},
+            ) as privileged_call,
+        ):
+            response = self.client.put(
+                "/servers/config", json={"servers": [custom]},
+                **self.local_options(self.pam_headers),
+            )
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        privileged_call.assert_called_once_with(
+            "authorize-systemd-units",
+            {
+                "authorization": "root-authorization",
+                "units": ["v-hra.service"],
+            },
+            timeout=30,
+        )
+        self.assertEqual(response.json["servers"][0]["service"], "v-hra.service")
 
     def test_config_preserves_each_minecraft_mods_path(self):
         (self.forge_data / "server.properties").write_text(

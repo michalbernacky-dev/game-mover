@@ -687,7 +687,7 @@ TIMEKPRA_DISABLE_SECONDS = 24 * 3600
 TIMEKPRA_SET_ALLOWED_HOURS = "--setallowedhours"
 
 TOKEN_TTL_SECONDS = 15 * 60
-TIMEKPRA_TOKENS = {}  # token -> (username, expiry)
+TIMEKPRA_TOKENS = {}  # token -> (username, expiry[, root broker PAM authorization])
 PAM_AUTH_BACKOFF_BASE_SECONDS = 1
 PAM_AUTH_BACKOFF_MAX_SECONDS = 60
 PAM_AUTH_THROTTLE_RETENTION_SECONDS = 15 * 60
@@ -1570,9 +1570,12 @@ def clear_pam_auth_failures(source: str, username: str) -> None:
         PAM_AUTH_USER_FAILURES.pop(normalized_user, None)
 
 
-def issue_token(username: str) -> str:
+def issue_token(username: str, privileged_authorization: str = "") -> str:
     token = secrets.token_hex(16)
-    TIMEKPRA_TOKENS[token] = (username, time.time() + TOKEN_TTL_SECONDS)
+    entry = (username, time.time() + TOKEN_TTL_SECONDS)
+    if privileged_authorization:
+        entry = (*entry, privileged_authorization)
+    TIMEKPRA_TOKENS[token] = entry
     return token
 
 
@@ -1584,11 +1587,20 @@ def require_token(req):
     entry = TIMEKPRA_TOKENS.get(tok)
     if not entry:
         return None
-    user, expiry = entry
+    user, expiry = entry[:2]
     if time.time() > expiry:
         del TIMEKPRA_TOKENS[tok]
         return None
     return user
+
+
+def privileged_pam_authorization(req) -> str:
+    payload = req.get_json(silent=True) or {}
+    token = req.headers.get("X-Timekpr-Token") or payload.get("token")
+    entry = TIMEKPRA_TOKENS.get(token) if token else None
+    if not entry or len(entry) < 3 or time.time() > entry[1]:
+        return ""
+    return str(entry[2] or "")
 
 
 def revoke_token(req):
@@ -1597,7 +1609,16 @@ def revoke_token(req):
     token = req.headers.get("X-Timekpr-Token") or payload.get("token")
     if not token or not require_token(req):
         return False
-    TIMEKPRA_TOKENS.pop(token, None)
+    entry = TIMEKPRA_TOKENS.pop(token, None)
+    if PRIVILEGED_HELPER_ENABLED and entry and len(entry) >= 3 and entry[2]:
+        try:
+            privileged_call(
+                "revoke-pam-authorization",
+                {"authorization": entry[2]},
+                timeout=5,
+            )
+        except PrivilegedError:
+            app.logger.warning("Root PAM authorization could not be revoked immediately")
     return True
 
 def require_local_pam_session(req):
@@ -2661,6 +2682,20 @@ def validate_game_server_entry(server, seen_ids):
     return item
 
 
+def registered_systemd_units(servers) -> set[str]:
+    units = set()
+    for server in servers:
+        if server.get("backend", "systemd") != "systemd":
+            continue
+        runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+        unit = str(runtime.get("unit") or server.get("service") or "").strip()
+        if "." not in unit.rsplit("@", 1)[-1]:
+            unit = f"{unit}.service"
+        if unit:
+            units.add(unit)
+    return units
+
+
 @app.route("/servers/config", methods=["GET", "PUT"])
 def servers_config():
     if not require_local_operation(request, "server.registry"):
@@ -2705,6 +2740,31 @@ def servers_config():
                     ),
                 }), 400
             occupied_endpoints[key] = item["id"]
+    requested_systemd_units = registered_systemd_units(validated)
+    current_systemd_units = registered_systemd_units(load_game_servers())
+    added_systemd_units = requested_systemd_units - current_systemd_units
+    has_local_pam = require_local_pam_session(request)
+    if added_systemd_units and not has_local_pam:
+        return jsonify({
+            "message": "Přidání vlastní systemd jednotky vyžaduje odemčený místní PAM",
+        }), 403
+    if PRIVILEGED_HELPER_ENABLED and has_local_pam and requested_systemd_units:
+        authorization = privileged_pam_authorization(request)
+        if not authorization:
+            return jsonify({
+                "message": "PAM relace nemá root autorizaci; odemkněte PAM znovu",
+            }), 403
+        try:
+            privileged_call(
+                "authorize-systemd-units",
+                {
+                    "authorization": authorization,
+                    "units": sorted(requested_systemd_units),
+                },
+                timeout=30,
+            )
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
     save_game_servers(validated)
     return jsonify({"servers": validated})
 
@@ -3708,6 +3768,7 @@ def timekpr_auth():
             response = jsonify({"message": "Příliš mnoho pokusů; zkuste to později"})
             response.headers["Retry-After"] = str(retry_after)
             return response, 429
+        privileged_authorization = ""
         try:
             if PRIVILEGED_HELPER_ENABLED:
                 result = privileged_call(
@@ -3715,6 +3776,7 @@ def timekpr_auth():
                     timeout=30,
                 )
                 authenticated = bool(result.get("authenticated"))
+                privileged_authorization = str(result.get("authorization") or "")
             else:
                 try:
                     import pam
@@ -3736,7 +3798,7 @@ def timekpr_auth():
             )
             return jsonify({"message": "Neplatné přihlášení"}), 401
         clear_pam_auth_failures(source, username)
-    token = issue_token(username)
+    token = issue_token(username, privileged_authorization)
     caps = TIMEKPRA_CAPS
     return jsonify({
         "token": token,
