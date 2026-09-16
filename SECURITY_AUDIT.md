@@ -1,18 +1,46 @@
 # Game Mover security audit register
 
-Last review: 2026-09-16 (0.36.0 publication readiness and live verification)
+Last review: 2026-09-16 (public repository controls verified)
 
 Reviewed version: 0.36.0 (source, package, deployment, and live workflows)
 
 Reviewed source: canonical `main` commit
-`61066858ddf52783aa8f08ada0a8c1e2a5e6ef4b`.
+`fe73b4c0779283648169a25b8b7ad145e9d41a93`.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: version 0.36.0 has passed source review, hosted CI,
-package inspection, deployment verification, and the required live per-player
-move/launch checks. It is ready to enter the coordinated final publication
-sequence in the general publication gate below. The repository must remain
-private until that sequence is executed completely.
+Publication verdict: version 0.36.0 passed source review, hosted CI, package
+inspection, deployment verification, and the required live per-player
+move/launch checks. The canonical repository was published on 2026-09-16 and
+all publication-time controls in the general gate below were verified.
+
+## Repository publication: 2026-09-16
+
+The canonical `michalbernacky-dev/game-mover` repository was changed from
+private to public at exact main commit `fe73b4c`. Immediately before the
+visibility change, full-history Gitleaks scanned all 170 reachable commits
+without a finding; the identity review contained only the intended GitHub and
+owner no-reply addresses; the example-data review was completed; and GitHub
+reported only `main`, no tags, and a clean exact upstream tip.
+
+GitHub post-merge RPM Build run `35121270238` passed for exact publication
+commit `fe73b4c`. Its inspected Fedora 43 binary RPM and SRPM have SHA-256
+digests `348778d58a415f5676fa5b654da4a9598a79ebbfd0605ddd19c89eb476f653de`
+and `58196948a6db65c58f9eea494b8786484f3a771c05a420f29b71875184c9f1b9`.
+Both RPM header and payload digests passed. Package identity and license were
+correct, and the SRPM source archive was byte-for-byte identical to
+`git archive` for the publication commit.
+
+After the visibility change, GitHub API verification confirmed secret scanning,
+push protection, dependency vulnerability alerts, automated security fixes,
+and private vulnerability reporting are enabled. `main` protection requires a
+pull request, a strict current `build-rpm` check, dismissal of stale reviews,
+and conversation resolution; it applies to administrators and blocks force
+pushes and branch deletion.
+
+An unauthenticated API request returned the public repository and exact
+publication commit. Each of the three known excluded web-merge SHAs returned
+`422 No commit found`, and the historical `game-mover-rpm` repository returned
+`404` through the same public boundary while remaining private to its owner.
 
 ## Publication readiness and live verification: 2026-09-16
 
@@ -52,10 +80,9 @@ and `352ac7fecbb4a97656bd38c4ee3bb0e7ec0507e7f8b458f1df27162a387adeee`.
 Both RPM header and payload digests passed, and the SRPM source archive was
 byte-for-byte identical to `git archive` for `6106685`.
 
-This accepted-risk update creates a later candidate commit. Consequently, the
-final hosted build and artifact inspection must be repeated for its post-merge
-commit before visibility changes. The pre-visibility and post-visibility
-controls in the general publication gate remain mandatory.
+The accepted-risk update was merged as publication commit `fe73b4c`; its final
+hosted build and artifact inspection are recorded in the repository publication
+section above.
 
 ## Accepted public fixture-alias risk: 2026-09-16
 
@@ -998,7 +1025,7 @@ passed.
 ## GM-SA-2026-008: Public security and licensing policy is incomplete
 
 - Severity: **Informational**
-- Status: **Mitigated**
+- Status: **Fixed**
 
 ### Description
 
@@ -1090,6 +1117,17 @@ documented as a same-machine development tool because it rebuilds the current
 working tree; CI must not receive production credentials or deploy automatically.
 Regression coverage requires these deployment gates to remain in `AGENTS.md`.
 
+### Publication resolution: 2026-09-16
+
+Resolved when the canonical repository was made public in the coordinated
+publication recorded above. The required security and licensing files were
+already present in the exact publication tree. Secret scanning, push
+protection, dependency alerts, automated security fixes, private vulnerability
+reporting, and protected-branch enforcement were then enabled and verified
+through the GitHub API. Anonymous checks confirmed the intended repository and
+commit are public while the excluded history and old repository remain
+unavailable through the public boundary.
+
 ## Controls observed during the review
 
 The following existing controls reduce exposure but do not close the open
@@ -1122,12 +1160,9 @@ written rationale. The current concrete gates are:
    while blocking force pushes and deletion, and repeat the known-old-SHA checks
    through the unauthenticated public boundary.
 
-The 2026-09-11 review completed the current-tree, remote-ref, package,
-deployment-documentation, local-host, and CI portions of this gate. Item 2 is
-complete for the reviewed pre-migration tip, including the exact Fedora 43 CI
-artifacts. The hosted-history isolation is also complete. Items 1 and 2 must be
-repeated for the exact final publication commit, and item 3 is necessarily a
-coordinated post-visibility step on the current GitHub plan.
+The initial publication completed all three items on 2026-09-16 for exact
+commit `fe73b4c`; evidence is recorded in the repository publication section.
+These remain release and repository-control invariants for future changes.
 
 This review is a source, configuration, and Git-history assessment. It is not
 a penetration test of a deployed host and does not certify that installed
