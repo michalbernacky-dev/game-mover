@@ -5,7 +5,7 @@ Last review: 2026-09-16 (0.36.0 publication readiness and live verification)
 Reviewed version: 0.36.0 (source, package, deployment, and live workflows)
 
 Reviewed source: canonical `main` commit
-`90b76e691711adf86c70dcda9d65b408fd8b9096`.
+`61066858ddf52783aa8f08ada0a8c1e2a5e6ef4b`.
 Historical commit identifiers in this register may predate metadata rewriting.
 
 Publication verdict: version 0.36.0 has passed source review, hosted CI,
@@ -44,10 +44,44 @@ dependencies, file list, scriptlets, and source contents were inspected. The
 SRPM source archive was byte-for-byte identical to `git archive` for the exact
 commit.
 
-This audit update creates a later candidate commit. Consequently, the final
-hosted build and artifact inspection must be repeated for the post-merge audit
+The first audit update was merged as canonical main commit `6106685`. GitHub
+post-merge RPM Build run `35117436382` passed for that exact commit. Its
+inspected binary RPM and SRPM have SHA-256 digests
+`6f7c0d4374fa7f8ed280ee007c5c183855ecdf371acd925130f280279359fb77`
+and `352ac7fecbb4a97656bd38c4ee3bb0e7ec0507e7f8b458f1df27162a387adeee`.
+Both RPM header and payload digests passed, and the SRPM source archive was
+byte-for-byte identical to `git archive` for `6106685`.
+
+This accepted-risk update creates a later candidate commit. Consequently, the
+final hosted build and artifact inspection must be repeated for its post-merge
 commit before visibility changes. The pre-visibility and post-visibility
 controls in the general publication gate remain mandatory.
+
+## Accepted public fixture-alias risk: 2026-09-16
+
+- Status: **Accepted**
+- Severity: **Informational**
+
+The final example-data review found the aliases `Bernye` and `Luky` in tests
+and historical audit examples. A public-web review found that `Bernye` and
+`BernyeCZ` are already deliberately used as public gaming and technical
+pseudonyms. `Luky` is a common, highly ambiguous diminutive and gaming alias.
+The reviewed public results did not associate the two aliases with each other
+or with Game Mover.
+
+The repository contains no surname, age, address, credential, contact detail,
+or family relationship for `Luky`. Neither alias is an authentication secret,
+and Game Mover does not rely on login-name secrecy. Publication can add a small
+amount of linkability between the public `Bernye` identity, this project, and
+the fixture data, but it does not expose an authentication factor or identify
+the person behind `Luky`.
+
+On 2026-09-16, the owner explicitly accepted this low residual linkability
+risk after reviewing the public search results. Rewriting or replacing the
+clean publication repository solely for these aliases would be disproportionate
+to the information exposed. This acceptance does not permit adding further
+real names, account relationships, hostnames, addresses, or other personal
+fixture data.
 
 ## Rockstar/Epic launch-state regression: 2026-09-15
 
