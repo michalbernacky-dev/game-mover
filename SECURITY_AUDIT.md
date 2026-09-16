@@ -1,16 +1,53 @@
 # Game Mover security audit register
 
-Last review: 2026-09-15 (Rockstar/Epic launch-state regression)
+Last review: 2026-09-16 (0.36.0 publication readiness and live verification)
 
-Reviewed version: 0.36.0 (source; deployment verification pending)
+Reviewed version: 0.36.0 (source, package, deployment, and live workflows)
 
-Reviewed source: `feature/rockstar-epic-launch` working tree based on the
-verified 0.35.2 main commit `974032f`.
+Reviewed source: canonical `main` commit
+`90b76e691711adf86c70dcda9d65b408fd8b9096`.
 Historical commit identifiers in this register may predate metadata rewriting.
 
-Publication verdict: version 0.36.0 is **not ready to publish** until review,
-hosted CI, deployment, and live per-player move/launch verification pass. The
-remaining general publication gate below still applies.
+Publication verdict: version 0.36.0 has passed source review, hosted CI,
+package inspection, deployment verification, and the required live per-player
+move/launch checks. It is ready to enter the coordinated final publication
+sequence in the general publication gate below. The repository must remain
+private until that sequence is executed completely.
+
+## Publication readiness and live verification: 2026-09-16
+
+The owner explicitly confirmed successful managed launches of GTA V Enhanced
+through the Rockstar/Epic adapter and Star Wars Battlefront II through the
+EA/Epic adapter on deployed version 0.36.0. The owner also confirmed that the
+EA App game-data move and its conversion to the persistent bind mount work in
+the live per-player installation. This completes the previously pending live
+Rockstar/Epic launch, EA/Epic launch, EA mover, and bind-mount compatibility
+checks. Direct launch from Heroic remains outside the Rockstar adapter, as
+documented below. Runtime verification of the separate Heroic PackageKit
+updater was not part of these confirmations and remains a functional follow-up,
+not a security or publication blocker.
+
+Read-only host verification found the installed package
+`game-mover-0.36.0-1.fc44.noarch`; `rpm -V game-mover` reported no differences.
+The API and privileged broker were active under `gameplatform:gameplatform`
+and `root:gameplatform` respectively, and the loopback health endpoint reported
+version 0.36.0.
+
+For canonical main commit `90b76e6`, Ruff, full-history Gitleaks over 168
+commits, all 327 unit tests, Bash syntax checks, and `git diff --check` passed.
+GitHub post-merge RPM Build run `34981292767` succeeded for that exact commit.
+Its inspected Fedora 43 binary RPM and SRPM have SHA-256 digests
+`0f4e0070fed210e3bf98f005a2de590aa91c89922ec16a95b30434a183043920`
+and `47e34c4a232b306be4d2571d4fef7b23b414100959ea041f3eae6758316ee3f6`.
+Both RPM header and payload digests passed; the package identity, license,
+dependencies, file list, scriptlets, and source contents were inspected. The
+SRPM source archive was byte-for-byte identical to `git archive` for the exact
+commit.
+
+This audit update creates a later candidate commit. Consequently, the final
+hosted build and artifact inspection must be repeated for the post-merge audit
+commit before visibility changes. The pre-visibility and post-visibility
+controls in the general publication gate remain mandatory.
 
 ## Rockstar/Epic launch-state regression: 2026-09-15
 
