@@ -923,6 +923,26 @@ class GameMover(QWidget):
             QAbstractItemView {
                 alternate-background-color: #2d3439;
             }
+            QComboBox QAbstractItemView {
+                background-color: #1b2b35;
+                color: #f3f6f8;
+                border: 1px solid #587080;
+                outline: 0;
+                selection-background-color: #2878a0;
+                selection-color: #ffffff;
+            }
+            QComboBox QAbstractItemView::item {
+                min-height: 28px;
+                padding: 3px 8px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #3b6478;
+                color: #ffffff;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #2878a0;
+                color: #ffffff;
+            }
             QPushButton {
                 background-color: #2c414d;
                 color: #f3f6f8;
@@ -5052,26 +5072,6 @@ class GameMover(QWidget):
                 )
                 local_worlds.view().setMouseTracking(True)
                 local_worlds.view().viewport().setMouseTracking(True)
-                local_worlds.view().setStyleSheet("""
-                    QAbstractItemView {
-                        background-color: #1b2b35;
-                        color: #f3f6f8;
-                        border: 1px solid #587080;
-                        outline: 0;
-                    }
-                    QAbstractItemView::item {
-                        min-height: 28px;
-                        padding: 3px 8px;
-                    }
-                    QAbstractItemView::item:hover {
-                        background-color: #3b6478;
-                        color: #ffffff;
-                    }
-                    QAbstractItemView::item:selected {
-                        background-color: #2878a0;
-                        color: #ffffff;
-                    }
-                """)
                 worlds_layout.addWidget(local_worlds)
                 import_form = QFormLayout()
                 import_name = QLineEdit(worlds_page)

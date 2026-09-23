@@ -188,6 +188,15 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("pouze rozpoznávaný", self.window.mover_scope_label.text())
         self.assertFalse(self.window.move_button.isEnabled())
 
+    def test_combo_popups_highlight_hovered_and_selected_rows_globally(self):
+        style = self.window.styleSheet()
+        self.assertIn("QComboBox QAbstractItemView::item:hover", style)
+        self.assertIn("QComboBox QAbstractItemView::item:selected", style)
+        self.assertIn("selection-background-color: #2878a0", style)
+        self.assertIn("selection-color: #ffffff", style)
+        self.assertTrue(self.window.platform_combo.view().hasMouseTracking())
+        self.assertTrue(self.window.platform_combo.view().viewport().hasMouseTracking())
+
     def test_global_resource_bars_show_local_capacity(self):
         gib = 1024 ** 3
         self.window.on_system_resources_loaded({
@@ -455,8 +464,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(entry["local_worlds"].count(), 1)
         self.assertEqual(entry["local_worlds"].currentData()["path"], detected[0]["path"])
         self.assertEqual(entry["import_name"].text(), "Family World")
-        self.assertIn("QAbstractItemView::item:hover", entry["local_worlds"].view().styleSheet())
-        self.assertIn("QAbstractItemView::item:selected", entry["local_worlds"].view().styleSheet())
+        self.assertEqual(entry["local_worlds"].view().styleSheet(), "")
         self.assertTrue(entry["local_worlds"].view().hasMouseTracking())
         self.assertTrue(entry["worlds_progress"].isHidden())
 

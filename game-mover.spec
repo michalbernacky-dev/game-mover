@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.37.1
+Version:        0.37.2
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 
@@ -184,6 +184,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Wed Sep 23 2026 Game Mover Packager <packager@example.invalid> - 0.37.2-1
+- Highlight hovered and selected rows in every combo box popup
+- Share one consistent dropdown style between Mover and server management
+
 * Wed Sep 23 2026 Game Mover Packager <packager@example.invalid> - 0.37.1-1
 - Show indeterminate progress and busy action labels during Minecraft world operations
 - Highlight hovered and selected worlds in the local-world picker
