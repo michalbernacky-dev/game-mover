@@ -464,6 +464,7 @@ class ServerWorldsThread(QThread):
         self.world = world
 
     def run(self):
+        action = "load" if self.world is None else "activate"
         try:
             if self.world is None:
                 response = requests.get(
@@ -471,14 +472,12 @@ class ServerWorldsThread(QThread):
                     params={"server_id": self.server_id},
                     headers=self.headers, timeout=30,
                 )
-                action = "load"
             else:
                 response = requests.post(
                     f"{self.base_url}/servers/minecraft/worlds",
                     json={"server_id": self.server_id, "world": self.world},
                     headers=self.headers, timeout=300,
                 )
-                action = "activate"
             data = response.json()
             if response.status_code != 200:
                 raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
@@ -486,7 +485,9 @@ class ServerWorldsThread(QThread):
                 "server_id": self.server_id, "action": action, "payload": data,
             })
         except Exception as error:
-            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+            self.completed.emit({
+                "server_id": self.server_id, "action": action, "error": str(error),
+            })
 
 
 class MinecraftWorldImportThread(QThread):
@@ -5002,6 +5003,11 @@ class GameMover(QWidget):
                 worlds_status.setWordWrap(True)
                 worlds_status.setStyleSheet("color: #aab7c0;")
                 worlds_layout.addWidget(worlds_status)
+                worlds_progress = QProgressBar(worlds_page)
+                worlds_progress.setRange(0, 0)
+                worlds_progress.setTextVisible(False)
+                worlds_progress.setVisible(False)
+                worlds_layout.addWidget(worlds_progress)
                 worlds_table = QTableWidget(worlds_page)
                 worlds_table.setColumnCount(2)
                 worlds_table.setHorizontalHeaderLabels(["Svět na serveru", "Stav"])
@@ -5040,6 +5046,32 @@ class GameMover(QWidget):
                 import_help.setWordWrap(True)
                 worlds_layout.addWidget(import_help)
                 local_worlds = QComboBox(worlds_page)
+                local_worlds.setMaxVisibleItems(20)
+                local_worlds.setToolTip(
+                    "Vyber nalezený lokální svět; zvýrazněný řádek je ten pod kurzorem."
+                )
+                local_worlds.view().setMouseTracking(True)
+                local_worlds.view().viewport().setMouseTracking(True)
+                local_worlds.view().setStyleSheet("""
+                    QAbstractItemView {
+                        background-color: #1b2b35;
+                        color: #f3f6f8;
+                        border: 1px solid #587080;
+                        outline: 0;
+                    }
+                    QAbstractItemView::item {
+                        min-height: 28px;
+                        padding: 3px 8px;
+                    }
+                    QAbstractItemView::item:hover {
+                        background-color: #3b6478;
+                        color: #ffffff;
+                    }
+                    QAbstractItemView::item:selected {
+                        background-color: #2878a0;
+                        color: #ffffff;
+                    }
+                """)
                 worlds_layout.addWidget(local_worlds)
                 import_form = QFormLayout()
                 import_name = QLineEdit(worlds_page)
@@ -5070,6 +5102,7 @@ class GameMover(QWidget):
                 sections.addTab(worlds_page, "Světy")
                 entry.update({
                     "worlds_status": worlds_status,
+                    "worlds_progress": worlds_progress,
                     "worlds_table": worlds_table,
                     "worlds_activate": worlds_activate,
                     "worlds_reload": worlds_reload,
@@ -5937,13 +5970,16 @@ class GameMover(QWidget):
                 self.server_world_import_thread is not None
                 and self.server_world_import_thread.isRunning()
             )
-            entry["worlds_reload"].setEnabled(worlds_allowed and not import_running)
-            entry["worlds_activate"].setEnabled(worlds_allowed and not import_running)
-            entry["local_worlds"].setEnabled(worlds_allowed and not import_running)
-            entry["import_name"].setEnabled(worlds_allowed and not import_running)
-            entry["local_worlds_refresh"].setEnabled(worlds_allowed and not import_running)
-            entry["local_world_browse"].setEnabled(worlds_allowed and not import_running)
-            entry["world_import"].setEnabled(worlds_allowed and not import_running)
+            world_thread = self.server_worlds_threads.get(server.get("id"))
+            world_running = world_thread is not None and world_thread.isRunning()
+            worlds_busy = import_running or world_running
+            entry["worlds_reload"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["worlds_activate"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["local_worlds"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["import_name"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["local_worlds_refresh"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["local_world_browse"].setEnabled(worlds_allowed and not worlds_busy)
+            entry["world_import"].setEnabled(worlds_allowed and not worlds_busy)
             if not worlds_allowed:
                 entry["worlds_status"].setText(
                     "Světy vyžadují správu hostitele a oprávnění podle zásady „Správa Minecraft světů“."
@@ -6263,6 +6299,27 @@ class GameMover(QWidget):
         combo.addItem(world["label"], world)
         combo.setCurrentIndex(combo.count() - 1)
 
+    def set_server_worlds_busy(self, server_id, busy, action=None):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "worlds_progress" not in entry:
+            return
+        entry["worlds_progress"].setVisible(bool(busy))
+        entry["worlds_activate"].setText(
+            "Přepínám a spouštím…" if busy and action == "activate"
+            else "Vybrat a spustit"
+        )
+        entry["worlds_reload"].setText(
+            "Načítám…" if busy and action == "load" else "Načíst znovu"
+        )
+        entry["world_import"].setText(
+            "Importuji…" if busy and action == "import" else "Importovat svět"
+        )
+        for key in (
+            "worlds_reload", "worlds_activate", "local_worlds", "import_name",
+            "local_worlds_refresh", "local_world_browse", "world_import",
+        ):
+            entry[key].setEnabled(not busy)
+
     def load_server_worlds(self, server_id):
         entry = self.server_management_pages.get(server_id)
         if not entry or "worlds_table" not in entry:
@@ -6275,8 +6332,7 @@ class GameMover(QWidget):
         if running and running.isRunning():
             return
         entry["worlds_status"].setText("Načítám světy uložené na serveru…")
-        entry["worlds_reload"].setEnabled(False)
-        entry["worlds_activate"].setEnabled(False)
+        self.set_server_worlds_busy(server_id, True, "load")
         thread = ServerWorldsThread(
             self.host_management_api_url(), server_id, headers,
         )
@@ -6307,6 +6363,7 @@ class GameMover(QWidget):
         if answer != QMessageBox.Yes:
             return
         entry["worlds_status"].setText(f"Přepínám na svět {world} a spouštím server…")
+        self.set_server_worlds_busy(server_id, True, "activate")
         thread = ServerWorldsThread(
             self.host_management_api_url(), server_id, headers, world=world,
         )
@@ -6319,6 +6376,7 @@ class GameMover(QWidget):
         entry = self.server_management_pages.get(server_id)
         if not entry or "worlds_table" not in entry:
             return
+        self.set_server_worlds_busy(server_id, False)
         error = result.get("error")
         if error:
             if "Unauthorized" in error or "403" in error:
@@ -6393,6 +6451,7 @@ class GameMover(QWidget):
         if answer != QMessageBox.Yes:
             return
         entry["worlds_status"].setText("Kontroluji, balím a odesílám svět…")
+        self.set_server_worlds_busy(server_id, True, "import")
         self.server_world_import_thread = MinecraftWorldImportThread(
             self.host_management_api_url(), server_id, source["path"], world_name, headers,
         )
@@ -6406,6 +6465,7 @@ class GameMover(QWidget):
         if not entry:
             self.refresh_server_statuses()
             return
+        self.set_server_worlds_busy(server_id, False)
         error = result.get("error")
         if error:
             entry["worlds_status"].setText(f"Import světa selhal: {error}")
