@@ -281,6 +281,18 @@ Minecraft tabs also contain the existing mod inventory and client comparison. Th
 Servers card keeps only the status, a context-sensitive quick start/stop action
 and **Management**.
 
+The Minecraft **Worlds** section is available only for platform-managed Podman
+instances. It lists regular world directories containing `level.dat`, marks the
+`level-name` selected in `server.properties`, and can stop the current instance,
+select another stored world, and start it again. Worlds are never deleted by a
+switch. The desktop discovers Vanilla, CurseForge, Prism Launcher, and MultiMC
+saves in the current player's profile and uploads a bounded archive over the
+existing authenticated management connection, so a remote server never receives
+an arbitrary client filesystem path. The host validates archive paths, entry
+types, counts, expanded size, managed destination confinement, and name
+collisions before atomically publishing the imported world. A failed switch
+restores the previous `level-name` and running state where possible.
+
 The management overview exposes destructive deletion only for platform-created
 managed Podman Minecraft workloads. The backend enforces an independent policy,
 exact workload-ID confirmation, canonical managed paths, and optional deletion
@@ -294,7 +306,7 @@ The Minecraft management tab will progressively add:
 - live logs and an RCON console;
 - a validated `server.properties` editor;
 - online players, allowlist, operators and bans;
-- worlds, backups and restore;
+- broader backup restore and world maintenance;
 - loader, version, mods/modpacks and Gate Lite routing.
 
 Form changes use **Save and close** and **Discard changes**. Closing with dirty

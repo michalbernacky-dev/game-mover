@@ -1,5 +1,7 @@
 import os
 import sys
+import io
+import tarfile
 import tempfile
 import time
 import unittest
@@ -249,6 +251,132 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(payload["memory"]["available_bytes"], 8 * 1024**3)
         self.assertEqual(payload["memory"]["percent"], 75.0)
         self.assertEqual(payload["swap"]["used_bytes"], 2 * 1024**3)
+
+    def managed_minecraft_world_fixture(self):
+        data_root = Path(self.temp_dir.name) / "managed-servers"
+        data = data_root / "family" / "data"
+        (data / "world").mkdir(parents=True)
+        (data / "world" / "level.dat").write_bytes(b"old")
+        (data / "server.properties").write_text(
+            "level-name=world\nmotd=Family\ngamemode=survival\ndifficulty=easy\n"
+            "max-players=20\nwhite-list=false\nonline-mode=true\npvp=true\n"
+            "allow-flight=false\nenable-command-block=false\nview-distance=10\n"
+            "simulation-distance=10\n",
+            encoding="utf-8",
+        )
+        server = {
+            "id": "family", "name": "Family", "kind": "minecraft",
+            "backend": "podman", "management_mode": "managed",
+            "runtime": {"container_name": "family"},
+            "data": {"directory": str(data)},
+            "mods_dir": str(data / "mods"),
+        }
+        backend.save_game_servers([server])
+        return data_root, data, server
+
+    def test_managed_minecraft_can_list_and_switch_worlds(self):
+        data_root, data, _server = self.managed_minecraft_world_fixture()
+        (data / "kids-two").mkdir()
+        (data / "kids-two" / "level.dat").write_bytes(b"second")
+        workload = Mock()
+        workload.status.return_value = WorkloadState("inactive", "exited", "Neběží")
+        workload.start.return_value = BackendResult(0)
+
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "backend_for", return_value=workload),
+        ):
+            listed = self.client.get(
+                "/servers/minecraft/worlds?server_id=family",
+                **self.local_options(self.pam_headers),
+            )
+            switched = self.client.post(
+                "/servers/minecraft/worlds",
+                json={"server_id": "family", "world": "kids-two"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(
+            {item["name"] for item in listed.json["worlds"]},
+            {"world", "kids-two"},
+        )
+        self.assertEqual(switched.status_code, 200)
+        self.assertIn("level-name=kids-two\n", (data / "server.properties").read_text())
+        workload.start.assert_called_once()
+        workload.stop.assert_not_called()
+
+    def test_world_switch_failure_restores_previous_world_and_running_state(self):
+        data_root, data, _server = self.managed_minecraft_world_fixture()
+        (data / "kids-two").mkdir()
+        (data / "kids-two" / "level.dat").write_bytes(b"second")
+        workload = Mock()
+        workload.status.return_value = WorkloadState("active", "running", "Běží")
+        workload.stop.return_value = BackendResult(0)
+        workload.start.side_effect = [
+            BackendResult(1, error="new world failed"),
+            BackendResult(0),
+        ]
+
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "backend_for", return_value=workload),
+        ):
+            response = self.client.post(
+                "/servers/minecraft/worlds",
+                json={"server_id": "family", "world": "kids-two"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("level-name=world\n", (data / "server.properties").read_text())
+        workload.stop.assert_called_once()
+        self.assertEqual(workload.start.call_count, 2)
+
+    def test_world_import_avoids_collision_and_keeps_previous_world(self):
+        data_root, data, _server = self.managed_minecraft_world_fixture()
+        (data / "Friends").mkdir()
+        (data / "Friends" / "level.dat").write_bytes(b"existing")
+        archive_stream = io.BytesIO()
+        with tarfile.open(fileobj=archive_stream, mode="w:gz") as archive:
+            directory = tarfile.TarInfo("world")
+            directory.type = tarfile.DIRTYPE
+            archive.addfile(directory)
+            level = tarfile.TarInfo("world/level.dat")
+            level.size = 8
+            archive.addfile(level, io.BytesIO(b"imported"))
+        archive_stream.seek(0)
+        workload = Mock()
+        workload.status.return_value = WorkloadState("inactive", "exited", "Neběží")
+
+        denied = self.client.post(
+            "/servers/minecraft/worlds/import",
+            data={"server_id": "family"},
+            content_type="multipart/form-data",
+            **self.local_options(),
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        with (
+            patch.object(backend, "PODMAN_DATA_ROOT", str(data_root)),
+            patch.object(backend, "backend_for", return_value=workload),
+        ):
+            response = self.client.post(
+                "/servers/minecraft/worlds/import",
+                data={
+                    "server_id": "family",
+                    "world_name": "Friends",
+                    "world": (archive_stream, "world.tar.gz"),
+                },
+                content_type="multipart/form-data",
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.json["world"], "Friends-2")
+        self.assertEqual((data / "Friends-2" / "level.dat").read_bytes(), b"imported")
+        self.assertEqual((data / "world" / "level.dat").read_bytes(), b"old")
+        self.assertIn("level-name=Friends-2\n", (data / "server.properties").read_text())
 
     def test_mover_api_exposes_steam_and_ea_without_legacy_mutation(self):
         self.assertEqual(set(backend.PLATFORMS), {"steam", "ea"})

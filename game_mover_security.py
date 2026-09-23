@@ -72,6 +72,12 @@ GLOBAL_OPERATION_DEFINITIONS = (
         "default": "pam",
     },
     {
+        "id": "minecraft.worlds",
+        "label": "Správa Minecraft světů",
+        "description": "Nahrání hráčského světa a bezpečné přepínání světů na spravovaném Podman serveru.",
+        "default": "pam",
+    },
+    {
         "id": "minecraft.operators",
         "label": "Operátoři Minecraftu",
         "description": "Načtení a změny seznamu OP hráčů přes interní RCON.",

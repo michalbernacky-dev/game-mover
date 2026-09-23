@@ -1130,6 +1130,21 @@ unavailable through the public boundary.
 
 ## Controls observed during the review
 
+### Minecraft world import and switching boundary: 2026-09-23
+
+Version 0.37.0 adds PAM-policy-controlled world import and switching only for
+platform-managed Podman Minecraft workloads. The desktop scans the current
+player's private profile and sends archive bytes rather than giving the host an
+arbitrary source path. Both archive creation and host extraction reject links
+and special files; host extraction additionally enforces a single `world` root,
+blocks traversal, and bounds compressed bytes, expanded bytes, and file count.
+The destination is derived from the registered workload ID under the canonical
+managed data root. Imports use a staging directory and a collision-free name,
+retain the previous world, and roll back `server.properties` and runtime state
+after a failed switch where possible. Focused coverage exercises launcher
+discovery, archive round trips, symlink and traversal rejection, managed-world
+listing and switching, collision handling, and preservation of the prior world.
+
 ### PAM-gated systemd registration: 2026-09-16
 
 The server registry previously allowed an authenticated administrator to save

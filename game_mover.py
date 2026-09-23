@@ -9,6 +9,7 @@ import re
 import json
 import time
 import subprocess
+import tempfile
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QLabel, QPushButton,
     QMessageBox, QComboBox, QProgressBar, QListWidget, QListWidgetItem,
@@ -21,6 +22,11 @@ from PyQt5.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPainter, QPixm
 from PyQt5.QtCore import Qt, QCoreApplication, QProcess, QSize, QThread, QUrl, pyqtSignal, QTimer
 
 from game_mover_mods import compare_inventories, scan_mod_directory
+from game_mover_worlds import (
+    MinecraftWorldError,
+    create_world_archive,
+    discover_minecraft_worlds,
+)
 from game_mover_game_filters import is_excluded_game, is_possible_game_residue
 from game_mover_game_inventory import scan_user_installed_games
 from game_mover_ea import (
@@ -447,6 +453,79 @@ class ServerPropertiesThread(QThread):
             self.completed.emit({"server_id": self.server_id, "error": str(error)})
 
 
+class ServerWorldsThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, headers, world=None):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.headers = headers
+        self.world = world
+
+    def run(self):
+        try:
+            if self.world is None:
+                response = requests.get(
+                    f"{self.base_url}/servers/minecraft/worlds",
+                    params={"server_id": self.server_id},
+                    headers=self.headers, timeout=30,
+                )
+                action = "load"
+            else:
+                response = requests.post(
+                    f"{self.base_url}/servers/minecraft/worlds",
+                    json={"server_id": self.server_id, "world": self.world},
+                    headers=self.headers, timeout=300,
+                )
+                action = "activate"
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({
+                "server_id": self.server_id, "action": action, "payload": data,
+            })
+        except Exception as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+
+
+class MinecraftWorldImportThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, server_id, source_path, world_name, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.server_id = server_id
+        self.source_path = source_path
+        self.world_name = world_name
+        self.headers = headers
+
+    def run(self):
+        try:
+            with tempfile.TemporaryDirectory(prefix="game-mover-world-") as temporary:
+                archive_path = os.path.join(temporary, "world.tar.gz")
+                create_world_archive(self.source_path, archive_path)
+                with open(archive_path, "rb") as archive:
+                    response = requests.post(
+                        f"{self.base_url}/servers/minecraft/worlds/import",
+                        data={
+                            "server_id": self.server_id,
+                            "world_name": self.world_name,
+                        },
+                        files={"world": ("world.tar.gz", archive, "application/gzip")},
+                        headers=self.headers,
+                        timeout=3600,
+                    )
+                data = response.json()
+                if response.status_code != 200:
+                    raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({"server_id": self.server_id, "payload": data})
+        except (MinecraftWorldError, OSError, requests.RequestException) as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+        except Exception as error:
+            self.completed.emit({"server_id": self.server_id, "error": str(error)})
+
+
 class ServerOperatorsThread(QThread):
     completed = pyqtSignal(dict)
 
@@ -809,6 +888,8 @@ class GameMover(QWidget):
         self.compare_mod_threads = {}
         self.server_backups_threads = {}
         self.server_properties_threads = {}
+        self.server_worlds_threads = {}
+        self.server_world_import_thread = None
         self.server_operator_threads = {}
         self.server_whitelist_threads = {}
         self.server_log_threads = {}
@@ -4907,6 +4988,102 @@ class GameMover(QWidget):
                 "properties_save": properties_save,
             })
 
+            if server.get("worlds_supported"):
+                worlds_page = QWidget(sections)
+                worlds_layout = QVBoxLayout(worlds_page)
+                worlds_help = QLabel(
+                    "Server může uchovávat více oddělených světů. Vybraný svět se "
+                    "nastaví jako aktivní a server se s ním spustí; ostatní světy zůstanou uložené.",
+                    worlds_page,
+                )
+                worlds_help.setWordWrap(True)
+                worlds_layout.addWidget(worlds_help)
+                worlds_status = QLabel("Světy na serveru zatím nebyly načteny.", worlds_page)
+                worlds_status.setWordWrap(True)
+                worlds_status.setStyleSheet("color: #aab7c0;")
+                worlds_layout.addWidget(worlds_status)
+                worlds_table = QTableWidget(worlds_page)
+                worlds_table.setColumnCount(2)
+                worlds_table.setHorizontalHeaderLabels(["Svět na serveru", "Stav"])
+                worlds_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+                worlds_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+                worlds_table.setSelectionMode(QAbstractItemView.SingleSelection)
+                worlds_table.setAlternatingRowColors(True)
+                worlds_table.verticalHeader().setVisible(False)
+                worlds_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+                worlds_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+                worlds_layout.addWidget(worlds_table)
+                server_world_actions = QHBoxLayout()
+                worlds_activate = QPushButton("Vybrat a spustit", worlds_page)
+                worlds_activate.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.activate_server_world(selected_id)
+                )
+                server_world_actions.addWidget(worlds_activate)
+                worlds_reload = QPushButton("Načíst znovu", worlds_page)
+                worlds_reload.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.load_server_worlds(selected_id)
+                )
+                server_world_actions.addWidget(worlds_reload)
+                server_world_actions.addStretch()
+                worlds_layout.addLayout(server_world_actions)
+
+                import_title = QLabel("Import světa z tohoto počítače", worlds_page)
+                import_title.setStyleSheet("font-size: 16px; font-weight: bold;")
+                worlds_layout.addWidget(import_title)
+                import_help = QLabel(
+                    "Game Mover nabízí světy z Vanilla, CurseForge, Prism Launcheru a MultiMC. "
+                    "Lze také vybrat libovolný adresář obsahující level.dat.",
+                    worlds_page,
+                )
+                import_help.setWordWrap(True)
+                worlds_layout.addWidget(import_help)
+                local_worlds = QComboBox(worlds_page)
+                worlds_layout.addWidget(local_worlds)
+                import_form = QFormLayout()
+                import_name = QLineEdit(worlds_page)
+                import_name.setMaxLength(64)
+                import_form.addRow("Název na serveru:", import_name)
+                worlds_layout.addLayout(import_form)
+                import_actions = QHBoxLayout()
+                local_worlds_refresh = QPushButton("Znovu najít světy", worlds_page)
+                local_worlds_refresh.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.populate_local_worlds(selected_id)
+                )
+                import_actions.addWidget(local_worlds_refresh)
+                local_world_browse = QPushButton("Vybrat jiný adresář…", worlds_page)
+                local_world_browse.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.browse_local_world(selected_id)
+                )
+                import_actions.addWidget(local_world_browse)
+                world_import = QPushButton("Importovat svět", worlds_page)
+                world_import.clicked.connect(
+                    lambda _checked=False, selected_id=server_id:
+                    self.import_server_world(selected_id)
+                )
+                import_actions.addWidget(world_import)
+                import_actions.addStretch()
+                worlds_layout.addLayout(import_actions)
+                sections.addTab(worlds_page, "Světy")
+                entry.update({
+                    "worlds_status": worlds_status,
+                    "worlds_table": worlds_table,
+                    "worlds_activate": worlds_activate,
+                    "worlds_reload": worlds_reload,
+                    "local_worlds": local_worlds,
+                    "import_name": import_name,
+                    "local_worlds_refresh": local_worlds_refresh,
+                    "local_world_browse": local_world_browse,
+                    "world_import": world_import,
+                })
+                local_worlds.currentIndexChanged.connect(
+                    lambda _index, selected_id=server_id:
+                    self.on_local_world_selected(selected_id)
+                )
+
             players_page = QWidget(sections)
             players_layout = QVBoxLayout(players_page)
             operators_title = QLabel("Operátoři serveru (OP)", players_page)
@@ -5152,6 +5329,8 @@ class GameMover(QWidget):
             })
 
         self.server_management_pages[server_id] = entry
+        if "local_worlds" in entry:
+            self.populate_local_worlds(server_id)
         index = self.tabs.addTab(page, f"Správa: {server.get('name', server_id)}")
         self.tabs.setCurrentIndex(index)
         self.update_server_management_page(server)
@@ -5159,6 +5338,8 @@ class GameMover(QWidget):
             self.load_server_logs(server_id)
         if "properties_fields" in entry:
             self.load_server_properties(server_id)
+        if "worlds_table" in entry:
+            self.load_server_worlds(server_id)
         if "operators_table" in entry:
             self.load_server_operators(server_id)
         if "whitelist_table" in entry:
@@ -5748,6 +5929,25 @@ class GameMover(QWidget):
                 entry["properties_status"].setText(
                     "Nastavení vyžaduje správu hostitele a oprávnění podle zásady „Nastavení Minecraft serveru“."
                 )
+        if "worlds_table" in entry:
+            worlds_allowed = management and bool(
+                self.local_operation_headers("minecraft.worlds")
+            )
+            import_running = (
+                self.server_world_import_thread is not None
+                and self.server_world_import_thread.isRunning()
+            )
+            entry["worlds_reload"].setEnabled(worlds_allowed and not import_running)
+            entry["worlds_activate"].setEnabled(worlds_allowed and not import_running)
+            entry["local_worlds"].setEnabled(worlds_allowed and not import_running)
+            entry["import_name"].setEnabled(worlds_allowed and not import_running)
+            entry["local_worlds_refresh"].setEnabled(worlds_allowed and not import_running)
+            entry["local_world_browse"].setEnabled(worlds_allowed and not import_running)
+            entry["world_import"].setEnabled(worlds_allowed and not import_running)
+            if not worlds_allowed:
+                entry["worlds_status"].setText(
+                    "Světy vyžadují správu hostitele a oprávnění podle zásady „Správa Minecraft světů“."
+                )
         if "logs_output" in entry:
             logs_allowed = management and bool(self.local_operation_headers("server.logs"))
             entry["logs_tail"].setEnabled(logs_allowed)
@@ -6004,6 +6204,219 @@ class GameMover(QWidget):
             f"Nastavení bylo uloženo. Změněno: {changed_text}. Projeví se po restartu serveru."
         )
         self.set_server_properties(server_id, payload.get("settings", {}))
+        self.refresh_server_statuses()
+
+    @staticmethod
+    def suggested_server_world_name(name):
+        value = re.sub(r"[^A-Za-z0-9_. -]+", "-", str(name or "")).strip(" .-")
+        return (value[:64] or "importovany-svet")
+
+    def populate_local_worlds(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "local_worlds" not in entry:
+            return
+        combo = entry["local_worlds"]
+        combo.blockSignals(True)
+        combo.clear()
+        try:
+            worlds = discover_minecraft_worlds()
+        except OSError as error:
+            worlds = []
+            entry["worlds_status"].setText(f"Hledání lokálních světů selhalo: {error}")
+        for world in worlds:
+            combo.addItem(world["label"], world)
+        if not worlds:
+            combo.addItem("Nebyl nalezen žádný svět – vyber adresář ručně", None)
+        combo.blockSignals(False)
+        self.on_local_world_selected(server_id)
+
+    def on_local_world_selected(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "local_worlds" not in entry:
+            return
+        world = entry["local_worlds"].currentData()
+        if isinstance(world, dict):
+            entry["import_name"].setText(
+                self.suggested_server_world_name(world.get("name"))
+            )
+
+    def browse_local_world(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "local_worlds" not in entry:
+            return
+        path = QFileDialog.getExistingDirectory(
+            self, "Vyber adresář Minecraft světa", os.path.expanduser("~"),
+        )
+        if not path:
+            return
+        if not os.path.isfile(os.path.join(path, "level.dat")):
+            QMessageBox.warning(
+                self, "Import světa", "Vybraný adresář neobsahuje soubor level.dat.",
+            )
+            return
+        world = {
+            "name": os.path.basename(os.path.normpath(path)),
+            "path": path,
+            "label": f"Vlastní adresář · {path}",
+        }
+        combo = entry["local_worlds"]
+        combo.addItem(world["label"], world)
+        combo.setCurrentIndex(combo.count() - 1)
+
+    def load_server_worlds(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "worlds_table" not in entry:
+            return
+        headers = self.local_operation_headers("minecraft.worlds")
+        if not is_host_management_mode(self.app_mode) or not headers:
+            entry["worlds_status"].setText("Pro správu světů chybí oprávnění podle zásady.")
+            return
+        running = self.server_worlds_threads.get(server_id)
+        if running and running.isRunning():
+            return
+        entry["worlds_status"].setText("Načítám světy uložené na serveru…")
+        entry["worlds_reload"].setEnabled(False)
+        entry["worlds_activate"].setEnabled(False)
+        thread = ServerWorldsThread(
+            self.host_management_api_url(), server_id, headers,
+        )
+        self.server_worlds_threads[server_id] = thread
+        thread.completed.connect(self.on_server_worlds_completed)
+        thread.start()
+
+    def activate_server_world(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "worlds_table" not in entry:
+            return
+        row = entry["worlds_table"].currentRow()
+        item = entry["worlds_table"].item(row, 0) if row >= 0 else None
+        if item is None:
+            QMessageBox.information(self, "Minecraft světy", "Nejdřív vyber svět.")
+            return
+        world = item.data(Qt.UserRole)
+        headers = self.local_operation_headers("minecraft.worlds")
+        if not headers:
+            QMessageBox.warning(self, "Minecraft světy", "Pro přepnutí světa chybí oprávnění.")
+            return
+        answer = QMessageBox.question(
+            self, "Přepnout Minecraft svět",
+            f"Spustit server se světem {world}?\n\n"
+            "Běžící server bude korektně zastaven. Připojení hráči se přeruší; ostatní světy se nemažou.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        entry["worlds_status"].setText(f"Přepínám na svět {world} a spouštím server…")
+        thread = ServerWorldsThread(
+            self.host_management_api_url(), server_id, headers, world=world,
+        )
+        self.server_worlds_threads[server_id] = thread
+        thread.completed.connect(self.on_server_worlds_completed)
+        thread.start()
+
+    def on_server_worlds_completed(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry or "worlds_table" not in entry:
+            return
+        error = result.get("error")
+        if error:
+            if "Unauthorized" in error or "403" in error:
+                entry["worlds_status"].setText(
+                    self.host_pam_session_expired("Pak správu světů načti znovu")
+                )
+            else:
+                entry["worlds_status"].setText(f"Správa světů selhala: {error}")
+            server = self.server_status_by_id(server_id)
+            if server:
+                self.update_server_management_page(server)
+            return
+        payload = result.get("payload", {})
+        activation_message = None
+        if result.get("action") == "activate":
+            activation_message = payload.get("message", "Svět byl přepnut.")
+            self.load_server_properties(server_id)
+            self.refresh_server_statuses()
+        worlds = payload.get("worlds", [])
+        table = entry["worlds_table"]
+        table.setRowCount(0)
+        for world in worlds:
+            row = table.rowCount()
+            table.insertRow(row)
+            name = str(world.get("name", ""))
+            name_item = QTableWidgetItem(name)
+            name_item.setData(Qt.UserRole, name)
+            state_item = QTableWidgetItem("aktivní" if world.get("active") else "uložený")
+            if world.get("active"):
+                name_item.setForeground(QBrush(QColor("#66cc99")))
+                state_item.setForeground(QBrush(QColor("#66cc99")))
+            table.setItem(row, 0, name_item)
+            table.setItem(row, 1, state_item)
+        if activation_message:
+            entry["worlds_status"].setText(activation_message)
+        else:
+            entry["worlds_status"].setText(
+                f"Na serveru je {len(worlds)} světů."
+                if worlds else "Na serveru nebyl nalezen žádný svět."
+            )
+        server = self.server_status_by_id(server_id)
+        if server:
+            self.update_server_management_page(server)
+
+    def import_server_world(self, server_id):
+        entry = self.server_management_pages.get(server_id)
+        server = self.server_status_by_id(server_id)
+        if not entry or not server:
+            return
+        if self.server_world_import_thread and self.server_world_import_thread.isRunning():
+            QMessageBox.information(self, "Import světa", "Jiný import světa právě probíhá.")
+            return
+        source = entry["local_worlds"].currentData()
+        if not isinstance(source, dict) or not source.get("path"):
+            QMessageBox.warning(self, "Import světa", "Vyber svět nebo jeho adresář.")
+            return
+        world_name = entry["import_name"].text().strip()
+        if not world_name:
+            QMessageBox.warning(self, "Import světa", "Zadej název světa na serveru.")
+            return
+        headers = self.local_operation_headers("minecraft.worlds")
+        if not headers:
+            QMessageBox.warning(self, "Import světa", "Pro import chybí oprávnění podle zásady.")
+            return
+        answer = QMessageBox.question(
+            self, "Importovat Minecraft svět",
+            f"Importovat {source.get('label', source['path'])} na server "
+            f"{server.get('name', server_id)} jako {world_name}?\n\n"
+            "Pokud server běží, bude během přepnutí korektně zastaven. Původní svět zůstane uložený.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        entry["worlds_status"].setText("Kontroluji, balím a odesílám svět…")
+        self.server_world_import_thread = MinecraftWorldImportThread(
+            self.host_management_api_url(), server_id, source["path"], world_name, headers,
+        )
+        self.server_world_import_thread.completed.connect(self.on_world_import_completed)
+        self.server_world_import_thread.start()
+        self.update_server_management_page(server)
+
+    def on_world_import_completed(self, result):
+        server_id = result.get("server_id", "")
+        entry = self.server_management_pages.get(server_id)
+        if not entry:
+            self.refresh_server_statuses()
+            return
+        error = result.get("error")
+        if error:
+            entry["worlds_status"].setText(f"Import světa selhal: {error}")
+        else:
+            payload = result.get("payload", {})
+            size_mib = int(payload.get("size_bytes", 0)) / (1024 * 1024)
+            entry["worlds_status"].setText(
+                f"{payload.get('message', 'Svět byl importován.')} ({size_mib:.1f} MiB)"
+            )
+            self.load_server_properties(server_id)
+        self.load_server_worlds(server_id)
         self.refresh_server_statuses()
 
     def set_server_operators(self, server_id, operators):

@@ -21,6 +21,8 @@ import socket
 import stat
 import math
 import psutil
+import tempfile
+import tarfile
 from concurrent.futures import ThreadPoolExecutor
 
 from game_mover_backups import BackupError, create_workload_backup
@@ -69,6 +71,12 @@ from game_mover_properties import (
     MinecraftPropertiesError,
     read_minecraft_properties,
     write_minecraft_properties,
+)
+from game_mover_worlds import (
+    MAX_ARCHIVE_BYTES,
+    MinecraftWorldError,
+    extract_world_archive,
+    validate_world_name,
 )
 from game_mover_operators import (
     MinecraftOperatorsError,
@@ -120,6 +128,7 @@ from game_mover_workloads import (
 )
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_ARCHIVE_BYTES + 8 * 1024**2
 
 # ------------------------------------------------------------
 # KONFIGURACE
@@ -1289,6 +1298,7 @@ def game_server_status(server, security_config=None):
         and backend_name == "podman"
         and server.get("management_mode") == "managed"
     )
+    result["worlds_supported"] = result["deletion_supported"]
     connection = server.get("connection") if isinstance(server.get("connection"), dict) else {}
     configured_port = connection.get("direct_port")
     direct_port = None
@@ -3436,6 +3446,250 @@ def minecraft_properties():
         "server_id": server["id"],
         "settings": result["settings"],
         "changed": result["changed"],
+    })
+
+
+def _managed_minecraft_data_directory(server):
+    if not (
+        server.get("kind") == "minecraft"
+        and server.get("backend") == "podman"
+        and server.get("management_mode") == "managed"
+    ):
+        raise MinecraftWorldError(
+            "Správa světů je dostupná jen pro platformou spravovaný Podman Minecraft"
+        )
+    runtime = server.get("runtime") if isinstance(server.get("runtime"), dict) else {}
+    if runtime.get("container_name") != server.get("id"):
+        raise MinecraftWorldError("Jméno spravovaného containeru neodpovídá ID serveru")
+    _managed_server_deletion_paths(server, delete_data=False, delete_backups=False)
+    data = server.get("data") if isinstance(server.get("data"), dict) else {}
+    directory = os.path.realpath(str(data.get("directory", "")))
+    if not os.path.isdir(directory) or os.path.islink(directory):
+        raise MinecraftWorldError("Spravovaný datový adresář serveru neexistuje")
+    return directory
+
+
+def _available_world_name(data_directory, requested_name):
+    requested_name = validate_world_name(requested_name)
+    if not os.path.lexists(os.path.join(data_directory, requested_name)):
+        return requested_name
+    for suffix in range(2, 10_000):
+        ending = f"-{suffix}"
+        candidate = f"{requested_name[:64 - len(ending)]}{ending}"
+        if not os.path.lexists(os.path.join(data_directory, candidate)):
+            return candidate
+    raise MinecraftWorldError("Pro importovaný svět nelze najít volný název")
+
+
+def _server_worlds(data_directory):
+    active = read_minecraft_properties(data_directory)["settings"]["level-name"]
+    worlds = []
+    with os.scandir(data_directory) as entries:
+        for entry in entries:
+            if len(worlds) >= 1_000:
+                raise MinecraftWorldError("Datový adresář obsahuje příliš mnoho světů")
+            try:
+                if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                    continue
+                level_path = os.path.join(entry.path, "level.dat")
+                level_details = os.stat(level_path, follow_symlinks=False)
+                if not stat.S_ISREG(level_details.st_mode):
+                    continue
+                name = validate_world_name(entry.name)
+            except (FileNotFoundError, MinecraftWorldError, OSError):
+                continue
+            worlds.append({"name": name, "active": name == active})
+    return sorted(worlds, key=lambda item: (not item["active"], item["name"].casefold()))
+
+
+@app.route("/servers/minecraft/worlds", methods=["GET", "POST"])
+def minecraft_worlds():
+    if not require_local_operation(request, "minecraft.worlds"):
+        return jsonify({"message": "Unauthorized"}), 403
+    payload = request.get_json(silent=True) or {}
+    server_id = str(request.args.get("server_id") or payload.get("server_id", "")).strip()
+    server = find_game_server(server_id)
+    if not server:
+        return jsonify({"message": "Minecraft server not found"}), 404
+    try:
+        data_directory = _managed_minecraft_data_directory(server)
+        if request.method == "GET":
+            return jsonify({"server_id": server_id, "worlds": _server_worlds(data_directory)})
+
+        world_name = validate_world_name(payload.get("world", ""))
+        previous_settings = read_minecraft_properties(data_directory)["settings"]
+        previous_world = previous_settings["level-name"]
+        backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock(server_id):
+            state = backend.status(server)
+            if state.status not in ("active", "inactive"):
+                raise MinecraftWorldError(
+                    f"Server nemá stabilní stav pro přepnutí světa: {state.message}"
+                )
+            was_running = state.status == "active"
+            stopped = False
+            settings_changed = False
+            try:
+                if was_running:
+                    result = backend.stop(server)
+                    if result.returncode != 0:
+                        raise MinecraftWorldError(
+                            result.error or result.output or "Server se nepodařilo zastavit"
+                    )
+                    stopped = True
+                available = {item["name"] for item in _server_worlds(data_directory)}
+                if world_name not in available:
+                    raise MinecraftWorldError("Vybraný svět na serveru neexistuje")
+                updated_settings = dict(previous_settings)
+                updated_settings["level-name"] = world_name
+                write_minecraft_properties(data_directory, updated_settings)
+                settings_changed = True
+                result = backend.start(server)
+                if result.returncode != 0:
+                    raise MinecraftWorldError(
+                        result.error or result.output or "Server se nepodařilo spustit"
+                    )
+                stopped = False
+            except Exception:
+                if settings_changed:
+                    write_minecraft_properties(data_directory, previous_settings)
+                if was_running and stopped:
+                    backend.start(server)
+                raise
+    except (MinecraftPropertiesError, MinecraftWorldError, OSError, ValueError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": f"Server byl spuštěn se světem {world_name}",
+        "server_id": server_id,
+        "world": world_name,
+        "previous_world": previous_world,
+        "server_restarted": was_running,
+        "worlds": _server_worlds(data_directory),
+    })
+
+
+@app.route("/servers/minecraft/worlds/import", methods=["POST"])
+def minecraft_world_import():
+    if not require_local_operation(request, "minecraft.worlds"):
+        return jsonify({"message": "Unauthorized"}), 403
+    server_id = str(request.form.get("server_id", "")).strip()
+    server = find_game_server(server_id)
+    if not server:
+        return jsonify({"message": "Minecraft server not found"}), 404
+    upload = request.files.get("world")
+    if upload is None:
+        return jsonify({"message": "Chybí archiv Minecraft světa"}), 400
+
+    archive_path = None
+    staging_directory = None
+    imported_directory = None
+    data_directory = None
+    backend = None
+    stopped = False
+    was_running = False
+    previous_settings = None
+    properties_changed = False
+    try:
+        data_directory = _managed_minecraft_data_directory(server)
+        requested_world_name = validate_world_name(request.form.get("world_name", ""))
+        server_root = os.path.dirname(data_directory)
+        descriptor, archive_path = tempfile.mkstemp(
+            prefix=".world-upload-", suffix=".tar.gz", dir=server_root,
+        )
+        uploaded_bytes = 0
+        with os.fdopen(descriptor, "wb") as destination:
+            while True:
+                chunk = upload.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                uploaded_bytes += len(chunk)
+                if uploaded_bytes > MAX_ARCHIVE_BYTES:
+                    raise MinecraftWorldError("Zabalený svět překračuje limit pro přenos")
+                destination.write(chunk)
+        staging_directory = os.path.join(
+            server_root, f".world-import-{secrets.token_hex(8)}",
+        )
+        extracted = extract_world_archive(archive_path, staging_directory)
+        source_world = extracted["world_directory"]
+
+        backend = backend_for(
+            server,
+            podman_user=PODMAN_USER,
+            podman_socket_path=PODMAN_SOCKET_PATH,
+        )
+        with workload_lock(server_id):
+            state = backend.status(server)
+            if state.status not in ("active", "inactive"):
+                raise MinecraftWorldError(
+                    f"Server nemá stabilní stav pro import světa: {state.message}"
+                )
+            was_running = state.status == "active"
+            if was_running:
+                result = backend.stop(server)
+                if result.returncode != 0:
+                    raise MinecraftWorldError(
+                        result.error or result.output or "Server se nepodařilo zastavit"
+                )
+                stopped = True
+            world_name = _available_world_name(data_directory, requested_world_name)
+            imported_directory = os.path.join(data_directory, world_name)
+            previous_settings = read_minecraft_properties(data_directory)["settings"]
+            os.replace(source_world, imported_directory)
+            updated_settings = dict(previous_settings)
+            updated_settings["level-name"] = world_name
+            write_minecraft_properties(data_directory, updated_settings)
+            properties_changed = True
+            if was_running:
+                result = backend.start(server)
+                if result.returncode != 0:
+                    raise MinecraftWorldError(
+                        result.error or result.output or "Server se nepodařilo znovu spustit"
+                    )
+                stopped = False
+    except (
+        MinecraftPropertiesError, MinecraftWorldError, OSError, RuntimeError,
+        tarfile.TarError, ValueError,
+    ) as error:
+        rollback_errors = []
+        if properties_changed and previous_settings is not None and data_directory:
+            try:
+                write_minecraft_properties(data_directory, previous_settings)
+            except (MinecraftPropertiesError, OSError) as rollback_error:
+                rollback_errors.append(f"obnova server.properties selhala: {rollback_error}")
+        if imported_directory and os.path.isdir(imported_directory):
+            try:
+                shutil.rmtree(imported_directory)
+            except OSError as rollback_error:
+                rollback_errors.append(f"úklid importu selhal: {rollback_error}")
+        if was_running and stopped and backend is not None:
+            result = backend.start(server)
+            if result.returncode != 0:
+                rollback_errors.append(
+                    result.error or result.output or "obnovení běhu serveru selhalo"
+                )
+        detail = f"; {'; '.join(rollback_errors)}" if rollback_errors else ""
+        return jsonify({"message": f"Import světa selhal: {error}{detail}"}), 400
+    finally:
+        if archive_path:
+            try:
+                os.unlink(archive_path)
+            except FileNotFoundError:
+                pass
+        if staging_directory:
+            shutil.rmtree(staging_directory, ignore_errors=True)
+
+    return jsonify({
+        "message": f"Svět {world_name} byl importován a nastaven jako aktivní",
+        "server_id": server_id,
+        "world": world_name,
+        "previous_world": previous_settings.get("level-name", "world"),
+        "files": extracted["files"],
+        "size_bytes": extracted["size_bytes"],
+        "server_restarted": was_running,
     })
 
 

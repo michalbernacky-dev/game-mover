@@ -287,6 +287,19 @@ already online.
 Remote Client mode may inspect safe read-only content but cannot run host
 operations.
 
+The **Worlds** section for platform-managed Podman Minecraft servers lists all
+stored world directories, marks the active `level-name`, and provides **Select
+and start**. Switching cleanly stops a running server, updates only the validated
+world name, and starts the server; inactive servers are started with the selected
+world. Other worlds remain untouched. The same section discovers worlds in the
+current desktop player's Vanilla, CurseForge, Prism Launcher, and MultiMC
+profiles, or accepts a manually selected directory containing `level.dat`.
+Imports are archived locally and uploaded through the authenticated management
+connection, making the workflow usable with a remote host through the existing
+SSH tunnel. The host rejects links, special files, path traversal, oversized
+archives, and destinations outside the managed server data root. Name collisions
+receive a suffix, and the previous world is retained.
+
 Restore into an existing workload is intentionally not presented as an active
 button yet. Current verified restore creates a new isolated Minecraft workload
 through the installer. In-place restore will be added later as a separate
@@ -916,6 +929,18 @@ Samostatná sekce **Whitelist** zobrazuje účinný stav a bezpečně čte regis
 `whitelist.json`. Formulář se mapuje pouze na příkazy `whitelist on`, `off`,
 `add`, `remove` a `reload`; samostatná zásada `minecraft.whitelist` má výchozí
 režim PAM. Zapnutí whitelistu neodpojí hráče, kteří už jsou online.
+
+Sekce **Světy** u platformou spravovaných Podman Minecraft serverů vypíše všechny
+uložené adresáře světů, označí aktivní `level-name` a nabídne akci **Vybrat a
+spustit**. Běžící server se při přepnutí korektně zastaví, nastaví se pouze
+validovaný název světa a server se znovu spustí; vypnutý server se s vybraným
+světem rovnou spustí. Ostatní světy zůstávají beze změny. Ve stejné sekci Game
+Mover nabídne světy z profilů Vanilla, CurseForge, Prism Launcher a MultiMC
+aktuálního hráče nebo ručně vybraný adresář s `level.dat`. Svět se zabalí na
+klientovi a nahraje ověřeným správcovským spojením, takže import funguje i na
+vzdálený hostitel přes existující SSH tunel. Hostitel odmítá odkazy, speciální
+soubory, únik z archivu, překročení limitů a cíle mimo spravovaný datový kořen.
+Kolize názvu dostane příponu a původní svět zůstává uložený.
 
 Obnova do existujícího workloadu zatím záměrně není nabízena jako funkční
 tlačítko. Současná ověřená obnova vytváří přes instalátor nový izolovaný Minecraft
