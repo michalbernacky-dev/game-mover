@@ -28,6 +28,7 @@ SAMPLE_SERVER = {
     },
     "backup_supported": True,
     "deletion_supported": True,
+    "worlds_supported": True,
     "has_mods": True,
 }
 
@@ -48,6 +49,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             "refresh_system_resources",
             "update_disk_bars",
             "load_server_mods",
+            "load_server_worlds",
         )
         self.patches = [
             patch.object(game_mover.GameMover, method, lambda self, *args: None)
@@ -424,11 +426,11 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(entry["connection"].text(), "vanilla.mc.example:25581")
         self.assertEqual(entry["direct_connection"].text(), "127.0.0.1:25570")
         self.assertTrue(entry["direct_connection"].isVisibleTo(entry["page"]))
-        self.assertEqual(entry["sections"].count(), 8)
+        self.assertEqual(entry["sections"].count(), 9)
         self.assertEqual(
-            [entry["sections"].tabText(index) for index in range(8)],
+            [entry["sections"].tabText(index) for index in range(9)],
             [
-                "Přehled", "Poznámky", "Logy", "Nastavení", "Hráči",
+                "Přehled", "Poznámky", "Logy", "Nastavení", "Světy", "Hráči",
                 "Whitelist", "Zálohy", "Mody",
             ],
         )
@@ -437,7 +439,22 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("logs_output", entry)
         self.assertIn("operators_table", entry)
         self.assertIn("whitelist_table", entry)
+        self.assertIn("worlds_table", entry)
         self.assertTrue(entry["delete_server"].isVisibleTo(entry["page"]))
+
+    def test_world_tab_offers_detected_client_worlds(self):
+        detected = [{
+            "name": "Family World",
+            "path": "/home/player/curseforge/Instances/Pack/saves/Family World",
+            "label": "CurseForge · Pack · Family World",
+        }]
+        with patch.object(game_mover, "discover_minecraft_worlds", return_value=detected):
+            self.window.open_server_management("mc-test")
+
+        entry = self.window.server_management_pages["mc-test"]
+        self.assertEqual(entry["local_worlds"].count(), 1)
+        self.assertEqual(entry["local_worlds"].currentData()["path"], detected[0]["path"])
+        self.assertEqual(entry["import_name"].text(), "Family World")
 
     def test_management_page_renders_platform_specific_notes(self):
         server = {
