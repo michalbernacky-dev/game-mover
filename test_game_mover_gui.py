@@ -455,6 +455,19 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(entry["local_worlds"].count(), 1)
         self.assertEqual(entry["local_worlds"].currentData()["path"], detected[0]["path"])
         self.assertEqual(entry["import_name"].text(), "Family World")
+        self.assertIn("QAbstractItemView::item:hover", entry["local_worlds"].view().styleSheet())
+        self.assertIn("QAbstractItemView::item:selected", entry["local_worlds"].view().styleSheet())
+        self.assertTrue(entry["local_worlds"].view().hasMouseTracking())
+        self.assertTrue(entry["worlds_progress"].isHidden())
+
+        self.window.set_server_worlds_busy("mc-test", True, "import")
+        self.assertFalse(entry["worlds_progress"].isHidden())
+        self.assertEqual(entry["world_import"].text(), "Importuji…")
+        self.assertFalse(entry["local_worlds"].isEnabled())
+
+        self.window.set_server_worlds_busy("mc-test", False)
+        self.assertTrue(entry["worlds_progress"].isHidden())
+        self.assertEqual(entry["world_import"].text(), "Importovat svět")
 
     def test_management_page_renders_platform_specific_notes(self):
         server = {
