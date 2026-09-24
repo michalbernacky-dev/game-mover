@@ -180,7 +180,13 @@ These are Bash scripts: use `./install.sh` or `bash install.sh`, not
 `sh install.sh`. Both installation paths must include all `game_mover*.py`
 modules, required policy/license files, units, dependencies, and equivalent
 state/ownership migrations. Keep the version in `game_mover_version.py`
-synchronized with `game-mover.spec`.
+synchronized with `game-mover.spec`. Every release must also add a newest-first
+entry with meaningful user-facing notes and the release date to
+`game-mover.metainfo.xml`; keep its latest version synchronized with the
+application and RPM versions. Preserve the canonical repository homepage in
+both the AppStream metadata and the RPM `URL` field. Validate changed desktop
+metadata with `appstreamcli validate --no-net game-mover.metainfo.xml` and
+`desktop-file-validate game-mover.desktop`.
 
 Treat workstation builds as potentially contaminated by machine-local state.
 `build_rpm.sh` packages the current source directory and its explicit exclusions

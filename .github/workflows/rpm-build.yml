@@ -24,6 +24,8 @@ jobs:
         run: |
           dnf -y install \
             acl \
+            appstream \
+            desktop-file-utils \
             git \
             gitleaks \
             ruff \
@@ -49,6 +51,11 @@ jobs:
 
       - name: Run Python security checks
         run: ruff check game_mover*.py
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate game-mover.desktop
+          appstreamcli validate --no-net game-mover.metainfo.xml
 
       - name: Run complete test suite
         run: python3 -m unittest discover -v

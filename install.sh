@@ -14,6 +14,7 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 PRIVILEGED_SERVICE_PATH="/etc/systemd/system/${PRIVILEGED_SERVICE_NAME}"
 EA_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-ea-bind@.service"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
+APP_METAINFO="/usr/share/metainfo/game-mover.metainfo.xml"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
 LOCAL_ADMIN_DIR="/etc/game_mover"
 LOCAL_ADMIN_TOKEN_PATH="${LOCAL_ADMIN_DIR}/api.token"
@@ -181,6 +182,7 @@ Categories=Game;Utility;
 EOF
 copy_if_changed "${desktop_tmp}" "${APP_DESKTOP}" 644
 rm -f "${desktop_tmp}"
+copy_if_changed "${SCRIPT_DIR}/game-mover.metainfo.xml" "${APP_METAINFO}" 644
 
 echo "[6/8] (Volitelně) GNOME autostart (${AUTOSTART_DESKTOP})"
 autostart_tmp="$(mktemp)"

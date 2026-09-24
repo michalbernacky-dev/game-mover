@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.michalbernacky_dev.game_mover</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>PolyForm-Noncommercial-1.0.0</project_license>
+  <name>Game Mover</name>
+  <summary>Manage a shared game library</summary>
+  <description>
+    <p>
+      Game Mover manages a shared local game library through a Qt desktop
+      application and a local Flask service.
+    </p>
+    <p>
+      It can move and link supported game directories, inspect game launchers,
+      and manage local game-server workloads.
+    </p>
+  </description>
+  <launchable type="desktop-id">game-mover.desktop</launchable>
+  <url type="homepage">https://github.com/michalbernacky-dev/game-mover</url>
+  <url type="bugtracker">https://github.com/michalbernacky-dev/game-mover/issues</url>
+  <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.37.3" date="2026-09-24">
+      <description>
+        <ul>
+          <li>Add release notes and canonical project links for desktop software centers.</li>
+          <li>Validate AppStream metadata and keep its release version synchronized.</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.37.2" date="2026-09-23">
+      <description>
+        <ul>
+          <li>Highlight hovered and selected rows in every combo box popup.</li>
+          <li>Share one consistent dropdown style between Mover and server management.</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+</component>

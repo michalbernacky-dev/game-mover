@@ -1,7 +1,8 @@
 Name:           game-mover
-Version:        0.37.2
+Version:        0.37.3
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
+URL:            https://github.com/michalbernacky-dev/game-mover
 
 License:        PolyForm-Noncommercial-1.0.0
 Source0:        %{name}-%{version}.tar.gz
@@ -72,6 +73,8 @@ install -Dpm0644 game-mover-ea-bind@.service \
 install -Dpm0644 game-mover.sysusers \
     %{buildroot}%{_sysusersdir}/game-mover.conf
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
+install -Dpm0644 game-mover.metainfo.xml \
+    %{buildroot}%{_metainfodir}/game-mover.metainfo.xml
 install -d -m 0750 %{buildroot}%{_sharedstatedir}/game-mover
 
 %pre
@@ -181,9 +184,14 @@ fi
 %{_unitdir}/game-mover-ea-bind@.service
 %{_sysusersdir}/game-mover.conf
 %{_datadir}/applications/game-mover.desktop
+%{_metainfodir}/game-mover.metainfo.xml
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Thu Sep 24 2026 Game Mover Packager <packager@example.invalid> - 0.37.3-1
+- Add release notes and canonical project links for desktop software centers
+- Validate AppStream metadata and keep its release version synchronized
+
 * Wed Sep 23 2026 Game Mover Packager <packager@example.invalid> - 0.37.2-1
 - Highlight hovered and selected rows in every combo box popup
 - Share one consistent dropdown style between Mover and server management
