@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import game_mover_privileged as privileged
 from game_mover_ea import EaInstallation
@@ -185,7 +185,25 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 with self.assertRaises(privileged.PrivilegedError):
                     privileged._safe_game_name(value)
 
-    def test_fix_permissions_uses_only_fixed_steam_root(self):
+    def test_fix_permissions_uses_only_fixed_steam_roots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            games = Path(temporary) / "games"
+            steam = games / "steam"
+            cache = games / "steam-cache/downloading"
+            steam.mkdir(parents=True)
+            cache.mkdir(parents=True)
+            with (
+                patch.object(privileged, "GAMES_ROOT", str(games)),
+                patch.object(privileged, "_set_shared_permissions") as setter,
+            ):
+                result = privileged.dispatch("fix-permissions", {"path": "/etc"})
+        self.assertEqual(
+            setter.call_args_list,
+            [call(str(steam)), call(str(cache))],
+        )
+        self.assertIn("oprávnění", result["message"].lower())
+
+    def test_fix_permissions_allows_an_unconfigured_steam_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             games = Path(temporary) / "games"
             steam = games / "steam"
@@ -194,9 +212,8 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 patch.object(privileged, "GAMES_ROOT", str(games)),
                 patch.object(privileged, "_set_shared_permissions") as setter,
             ):
-                result = privileged.dispatch("fix-permissions", {"path": "/etc"})
+                privileged.dispatch("fix-permissions", {})
         setter.assert_called_once_with(str(steam))
-        self.assertIn("oprávnění", result["message"].lower())
 
     def test_setfacl_inherits_the_validated_directory_descriptor(self):
         with tempfile.TemporaryDirectory() as temporary:
