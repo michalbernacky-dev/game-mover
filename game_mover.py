@@ -8325,7 +8325,7 @@ class GameMover(QWidget):
         reply = QMessageBox.question(
             self,
             "Opravit oprávnění Steam knihovny",
-            "Opravdu chceš opravit oprávnění pro /var/Games/steam?",
+            "Opravdu chceš opravit oprávnění sdílené Steam knihovny a cache?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

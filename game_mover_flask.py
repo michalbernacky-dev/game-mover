@@ -859,6 +859,26 @@ def permission_target_path(target_id):
     return resolved
 
 
+def permission_target_paths(target_id):
+    """Resolve every fixed directory covered by a permission repair."""
+    paths = [permission_target_path(target_id)]
+    if target_id != "steam-library":
+        return paths
+
+    cache = os.path.join(GAMES_ROOT, "steam-cache", "downloading")
+    if not os.path.lexists(cache):
+        return paths
+    if os.path.islink(cache):
+        raise ValueError("Permission target must not be a symbolic link")
+    resolved = os.path.realpath(cache)
+    if os.path.commonpath([resolved, os.path.realpath(GAMES_ROOT)]) != os.path.realpath(GAMES_ROOT):
+        raise ValueError("Permission target escapes the game library")
+    if not os.path.isdir(resolved):
+        raise FileNotFoundError("Permission target does not exist")
+    paths.append(resolved)
+    return paths
+
+
 def _set_group_perms_fd(directory_fd, gid):
     """Apply shared-library modes using descriptors and never follow symlinks."""
     os.fchown(directory_fd, -1, gid)
@@ -1995,9 +2015,10 @@ def fix_perms():
         except PrivilegedError as error:
             return jsonify({"message": str(error)}), 400
     try:
-        path = permission_target_path(target_id)
-        set_group_perms(path)
-        return jsonify({"message": f"Permissions fixed for {path}"})
+        paths = permission_target_paths(target_id)
+        for path in paths:
+            set_group_perms(path)
+        return jsonify({"message": f"Permissions fixed for {', '.join(paths)}"})
     except (ValueError, FileNotFoundError) as e:
         return jsonify({"message": str(e)}), 400
     except Exception as e:

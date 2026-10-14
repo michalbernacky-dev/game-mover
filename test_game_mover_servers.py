@@ -712,7 +712,7 @@ class ServerRegistryTest(unittest.TestCase):
         with (
             patch.object(backend, "load_local_admin_token", return_value="local-secret"),
             patch.object(
-                backend, "permission_target_path", return_value=self.temp_dir.name,
+                backend, "permission_target_paths", return_value=[self.temp_dir.name],
             ),
             patch.object(backend, "set_group_perms") as set_perms,
         ):
@@ -731,7 +731,7 @@ class ServerRegistryTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         with (
             patch.object(
-                backend, "permission_target_path", return_value=self.temp_dir.name,
+                backend, "permission_target_paths", return_value=[self.temp_dir.name],
             ),
             patch.object(backend, "set_group_perms") as set_perms,
         ):
@@ -779,6 +779,27 @@ class ServerRegistryTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "symbolic link"):
                 backend.permission_target_path("steam-library")
+
+    def test_permission_targets_reject_symbolic_linked_steam_cache(self):
+        games_root = Path(self.temp_dir.name) / "games"
+        steam = games_root / "steam"
+        cache_root = games_root / "steam-cache"
+        outside = games_root / "outside"
+        steam.mkdir(parents=True)
+        cache_root.mkdir()
+        outside.mkdir()
+        (cache_root / "downloading").symlink_to(outside, target_is_directory=True)
+
+        with (
+            patch.object(backend, "GAMES_ROOT", str(games_root)),
+            patch.dict(
+                backend.PERMISSION_TARGETS,
+                {"steam-library": str(steam)},
+                clear=True,
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                backend.permission_target_paths("steam-library")
 
     def test_group_permission_fix_does_not_follow_file_symlinks(self):
         library = Path(self.temp_dir.name) / "library"

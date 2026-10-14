@@ -1021,7 +1021,14 @@ def _timekpr_config(parameters: dict) -> dict:
 
 def _fix_permissions(_parameters: dict) -> dict:
     _set_shared_permissions(_beneath(GAMES_ROOT, "steam"))
-    return {"message": "Oprávnění sdílené knihovny byla opravena"}
+
+    cache = _beneath(GAMES_ROOT, "steam-cache", "downloading")
+    cache_repaired = os.path.isdir(cache)
+    if cache_repaired:
+        _set_shared_permissions(cache)
+
+    target = "knihovny a Steam cache" if cache_repaired else "sdílené knihovny"
+    return {"message": f"Oprávnění {target} byla opravena"}
 
 
 def dispatch(action: str, parameters: dict) -> dict:

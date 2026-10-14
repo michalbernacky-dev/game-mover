@@ -21,6 +21,14 @@
   <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.37.4" date="2026-10-14">
+      <description>
+        <ul>
+          <li>Repair permissions in the shared Steam download cache as well as the game library.</li>
+          <li>Preserve the fixed-path and symlink protections for privileged permission repairs.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.37.3" date="2026-09-24">
       <description>
         <ul>

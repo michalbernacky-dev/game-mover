@@ -13,6 +13,18 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Steam shared-cache permission repair regression: 2026-10-14
+
+The fixed `steam-library` repair action covered `/var/Games/steam` but omitted
+the separately managed `/var/Games/steam-cache/downloading` tree. Files created
+there by one member of the shared gaming group could therefore remain mode
+`0755`, causing another member's Steam client to fail an update with
+`EACCES`. The repair action now applies the same descriptor-confined recursive
+ACL repair to the fixed cache path when that directory exists. It still accepts
+no client path, rejects a cache symlink, and remains confined beneath the
+managed game root. Focused regression coverage verifies both configured and
+absent-cache cases. Live cache data was not changed during source validation.
+
 ## Repository publication: 2026-09-16
 
 The canonical `michalbernacky-dev/game-mover` repository was changed from
