@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.38.0
+Version:        0.38.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 URL:            https://github.com/michalbernacky-dev/game-mover
@@ -188,6 +188,9 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Thu Oct 22 2026 Game Mover Packager <packager@example.invalid> - 0.38.1-1
+- Fix the Mover GUI to consume the direct Steam shader-cache status response
+
 * Thu Oct 22 2026 Game Mover Packager <packager@example.invalid> - 0.38.0-1
 - Inspect per-game Steam shader cache sizes without moving cache to the game disk
 - Delete only explicitly selected AppID cache directories through the player worker

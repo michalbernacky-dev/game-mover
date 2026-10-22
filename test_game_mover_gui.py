@@ -195,6 +195,14 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertEqual(self.window.format_cache_size(1024), "1.0 KiB")
         self.assertEqual(self.window.format_cache_size(64 * 1024 ** 3), "64.0 GiB")
 
+    def test_shader_cache_payload_accepts_direct_api_response(self):
+        direct = {"status": "local", "entries": [{"app_id": "3125250"}]}
+        self.assertIs(self.window.shader_cache_payload(direct), direct)
+        self.assertEqual(
+            self.window.shader_cache_payload({"shader_cache": direct}), direct
+        )
+        self.assertEqual(self.window.shader_cache_payload(None), {})
+
     def test_combo_popups_highlight_hovered_and_selected_rows_globally(self):
         style = self.window.styleSheet()
         self.assertIn("QComboBox QAbstractItemView::item:hover", style)

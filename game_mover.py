@@ -8325,6 +8325,14 @@ class GameMover(QWidget):
                 return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
             size /= 1024
 
+    @staticmethod
+    def shader_cache_payload(data):
+        """Accept the direct API payload and the legacy nested test shape."""
+        if not isinstance(data, dict):
+            return {}
+        nested = data.get("shader_cache")
+        return nested if isinstance(nested, dict) else data
+
     def manage_shader_cache(self):
         try:
             resp = requests.get(
@@ -8341,7 +8349,7 @@ class GameMover(QWidget):
             )
             return
 
-        shader_cache = data.get("shader_cache", {})
+        shader_cache = self.shader_cache_payload(data)
         entries = shader_cache.get("entries", [])
         if shader_cache.get("status") not in ("local", "missing"):
             QMessageBox.warning(
