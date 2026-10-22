@@ -21,6 +21,15 @@
   <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.38.0" date="2026-10-22">
+      <description>
+        <ul>
+          <li>Show Steam shader-cache usage by game in Mover.</li>
+          <li>Safely remove only selected, reproducible shader-cache entries.</li>
+          <li>Keep shader cache on the home disk instead of consuming shared game storage.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.37.4" date="2026-10-14">
       <description>
         <ul>

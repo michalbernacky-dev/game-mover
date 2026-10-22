@@ -13,6 +13,32 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Local build sandbox-directory exclusion: 2026-10-22
+
+Inspection of a local 0.38.0 development source archive found three empty,
+environment-mounted directories (`.agents`, `.aws`, and `.codex`). No files or
+credentials were present, and the hosted release workflow remains based on
+tracked `git archive` content. The local `build_rpm.sh` filter now excludes all
+three directory names, and CI regression coverage requires those exclusions.
+The replacement development archive was inspected to confirm their absence.
+
+## Per-player Steam shader-cache management: 2026-10-22
+
+Version 0.38.0 adds an on-demand, read-only inventory of the selected player's
+local Steam shader cache and an authorized action that removes only explicitly
+selected numeric AppID directories. Shader cache remains in the player's home;
+it is not moved into shared game storage or exposed to other players. The API
+accepts AppIDs rather than paths, applies the existing `steam.cache` policy, and
+routes both inspection and deletion through a filesystem worker running as the
+selected player. Deletion opens the fixed shader-cache parent without following
+symlinks, rejects unexpected objects, and uses descriptor-relative removal.
+
+Focused tests cover read-only inspection, manifest-name mapping, selective
+deletion, traversal and symlink rejection, local policy enforcement, remote
+request rejection, and dropped-identity broker routing. Live shader data was
+inspected but not deleted during source validation. Full source and package
+verification is recorded with the release handoff; deployment remains pending.
+
 ## Steam shared-cache permission repair regression: 2026-10-14
 
 The fixed `steam-library` repair action covered `/var/Games/steam` but omitted

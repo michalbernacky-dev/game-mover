@@ -56,6 +56,9 @@ class CiSecurityTest(unittest.TestCase):
 
         build_helper = BUILD_HELPER_PATH.read_text(encoding="utf-8")
         for excluded_path in (
+            ".agents",
+            ".aws",
+            ".codex",
             ".ruff_cache",
             ".pytest_cache",
             ".mypy_cache",

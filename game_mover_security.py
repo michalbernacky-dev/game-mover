@@ -31,8 +31,11 @@ GLOBAL_OPERATION_DEFINITIONS = (
     },
     {
         "id": "steam.cache",
-        "label": "Sdílená Steam cache",
-        "description": "Přesun rozpracovaných Steam downloadů a vytvoření sdíleného symlinku.",
+        "label": "Steam cache",
+        "description": (
+            "Sdílení rozpracovaných Steam downloadů a mazání vybrané "
+            "lokální shader cache."
+        ),
         "default": "silent",
     },
     {
