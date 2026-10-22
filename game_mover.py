@@ -1212,9 +1212,13 @@ class GameMover(QWidget):
         self.mover_scope_label.setWordWrap(True)
         layout.addWidget(self.mover_scope_label)
 
-        self.cache_button = QPushButton('Nastav sdílenou Steam cache', self)
+        self.cache_button = QPushButton('Nastavit sdílenou download cache', self)
         self.cache_button.clicked.connect(self.set_shared_cache)
         layout.addWidget(self.cache_button)
+
+        self.shader_cache_button = QPushButton('Spravovat Steam shader cache', self)
+        self.shader_cache_button.clicked.connect(self.manage_shader_cache)
+        layout.addWidget(self.shader_cache_button)
 
         self.fix_perms_button = QPushButton('Opravit oprávnění Steam knihovny', self)
         self.fix_perms_button.clicked.connect(self.fix_shared_permissions)
@@ -3941,6 +3945,10 @@ class GameMover(QWidget):
             and bool(self.local_mover_operation_headers("library.permissions"))
         )
         self.cache_button.setEnabled(
+            self.platform == "steam"
+            and bool(self.local_mover_operation_headers("steam.cache"))
+        )
+        self.shader_cache_button.setEnabled(
             self.platform == "steam"
             and bool(self.local_mover_operation_headers("steam.cache"))
         )
@@ -7676,12 +7684,14 @@ class GameMover(QWidget):
         steam_supported = self.platform == "steam"
         ea_supported = self.platform == "ea"
         self.cache_button.setVisible(steam_supported)
+        self.shader_cache_button.setVisible(steam_supported)
         self.fix_perms_button.setVisible(steam_supported)
         self.show_move_residue_checkbox.setEnabled(steam_supported or ea_supported)
         if steam_supported:
             self.mover_scope_label.setText(
                 "Steam podporuje přesun herních dat do sdílené knihovny, "
-                "uživatelské symlinky a sdílenou download cache."
+                "uživatelské symlinky, sdílenou download cache a bezpečné "
+                "čištění lokální shader cache."
             )
             self.label_move.setText("Steam hry k přesunu do sdílené knihovny:")
             self.label_symlink.setText(
@@ -8267,9 +8277,11 @@ class GameMover(QWidget):
     def refresh_cache_status(self):
         if self.platform != "steam":
             self.cache_button.setVisible(False)
+            self.shader_cache_button.setVisible(False)
             return
 
         self.cache_button.setVisible(True)
+        self.shader_cache_button.setVisible(True)
         status = "unknown"
         tooltip = ""
         try:
@@ -8287,14 +8299,148 @@ class GameMover(QWidget):
             tooltip = str(e)
 
         border = "green" if status == "shared" else "red"
-        label = "Steam cache je sdílená" if status == "shared" else "Nastav sdílenou Steam cache"
+        label = (
+            "Steam download cache je sdílená"
+            if status == "shared"
+            else "Nastavit sdílenou download cache"
+        )
         self.cache_button.setText(label)
         self.cache_button.setStyleSheet(
             f"QPushButton {{ background-color: #444444; color: white; border: 2px solid {border}; }}"
             f"QPushButton:disabled {{ background-color: #888888; color: #AAAAAA; border: 2px solid {border}; }}"
         )
         self.cache_button.setToolTip(tooltip)
+        self.shader_cache_button.setText("Spravovat Steam shader cache")
+        self.shader_cache_button.setToolTip(
+            "Shader cache zůstává v profilu hráče. Lze bezpečně odstranit "
+            "cache vybraných her; Steam ji podle potřeby znovu vytvoří."
+        )
         self.update_mover_action_availability()
+
+    @staticmethod
+    def format_cache_size(size_bytes):
+        size = max(0, int(size_bytes or 0))
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if size < 1024 or unit == "TiB":
+                return f"{size:.1f} {unit}" if unit != "B" else f"{size} B"
+            size /= 1024
+
+    def manage_shader_cache(self):
+        try:
+            resp = requests.get(
+                f"{FLASK_URL}/steam_shader_cache_status",
+                params={"user": self.user}, timeout=60,
+            )
+            data = resp.json()
+        except Exception as error:
+            QMessageBox.critical(self, "Shader cache", str(error))
+            return
+        if resp.status_code != 200:
+            QMessageBox.warning(
+                self, "Shader cache", data.get("message", "Cache nelze načíst")
+            )
+            return
+
+        shader_cache = data.get("shader_cache", {})
+        entries = shader_cache.get("entries", [])
+        if shader_cache.get("status") not in ("local", "missing"):
+            QMessageBox.warning(
+                self, "Shader cache",
+                "Shader cache není běžný lokální adresář a nelze ji bezpečně spravovat.",
+            )
+            return
+        if not entries:
+            QMessageBox.information(self, "Shader cache", "Shader cache je prázdná.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Správa Steam shader cache")
+        dialog.resize(680, 480)
+        layout = QVBoxLayout(dialog)
+        truncation_note = ""
+        if shader_cache.get("truncated"):
+            truncation_note = (
+                f" Zobrazeno je největších {len(entries)} z "
+                f"{int(shader_cache.get('entry_count', len(entries)))} položek."
+            )
+        info = QLabel(
+            f"Celkem: {self.format_cache_size(shader_cache.get('total_size_bytes', 0))}. "
+            "Vyber hry, jejichž obnovitelnou shader cache chceš odstranit. "
+            "Před mazáním ukonči Steam i spuštěné hry. Při příštím spuštění "
+            "může Steam cache znovu stáhnout nebo vytvořit."
+            f"{truncation_note}",
+            dialog,
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        table = QTableWidget(len(entries), 3, dialog)
+        table.setHorizontalHeaderLabels(("Hra", "AppID", "Velikost"))
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        for row, entry in enumerate(entries):
+            name_item = QTableWidgetItem(str(entry.get("name", "")))
+            name_item.setData(Qt.UserRole, str(entry.get("app_id", "")))
+            table.setItem(row, 0, name_item)
+            table.setItem(row, 1, QTableWidgetItem(str(entry.get("app_id", ""))))
+            table.setItem(
+                row, 2,
+                QTableWidgetItem(self.format_cache_size(entry.get("size_bytes", 0))),
+            )
+        layout.addWidget(table)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+        buttons.button(QDialogButtonBox.Ok).setText("Smazat vybrané")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        rows = sorted({item.row() for item in table.selectedItems()})
+        app_ids = [str(table.item(row, 0).data(Qt.UserRole)) for row in rows]
+        if not app_ids:
+            QMessageBox.information(self, "Shader cache", "Nebyla vybrána žádná hra.")
+            return
+        selected_size = sum(
+            int(entries[row].get("size_bytes", 0) or 0) for row in rows
+        )
+        reply = QMessageBox.question(
+            self, "Smazat shader cache",
+            f"Odstranit cache {len(app_ids)} her "
+            f"({self.format_cache_size(selected_size)})?\n\n"
+            "Steam i spuštěné hry musí být ukončené.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        headers = self.local_mover_operation_headers("steam.cache")
+        if not headers:
+            QMessageBox.warning(
+                self, "Shader cache",
+                "Operace není povolená, nebo vyžaduje místní PAM odemčení v Zabezpečení.",
+            )
+            return
+        try:
+            response = requests.post(
+                f"{FLASK_URL}/clear_steam_shader_cache",
+                json={"user": self.user, "app_ids": app_ids},
+                headers=headers, timeout=180,
+            )
+            result = response.json()
+            if response.status_code >= 400:
+                QMessageBox.warning(
+                    self, "Shader cache", result.get("message", "Mazání selhalo")
+                )
+            else:
+                QMessageBox.information(
+                    self, "Shader cache",
+                    f"Uvolněno {self.format_cache_size(result.get('freed_bytes', 0))}.",
+                )
+        except Exception as error:
+            QMessageBox.critical(self, "Shader cache", str(error))
+        finally:
+            self.refresh_cache_status()
 
     def set_shared_cache(self):
         if self.platform != "steam":

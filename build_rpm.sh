@@ -27,6 +27,9 @@ rsync -a --no-owner --no-group \
   --exclude '.git' \
   --exclude '.venv' \
   --exclude '.vscode' \
+  --exclude '.agents' \
+  --exclude '.aws' \
+  --exclude '.codex' \
   --exclude '.ruff_cache' \
   --exclude '.pytest_cache' \
   --exclude '.mypy_cache' \

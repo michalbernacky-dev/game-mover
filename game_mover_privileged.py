@@ -30,7 +30,11 @@ import threading
 import time
 from typing import Any
 
-from game_mover_steam_cache import inspect_steam_cache
+from game_mover_steam_cache import (
+    clear_shader_cache_entries,
+    inspect_shader_cache,
+    inspect_steam_cache,
+)
 from game_mover_ea import (
     ea_game_install_in_progress,
     ea_runtime_active,
@@ -91,6 +95,8 @@ DENIED_SYSTEM_UNITS = {
 }
 USER_FILESYSTEM_ACTIONS = {
     "move-game", "create-symlink", "set-steam-cache", "steam-cache-status",
+    "clear-steam-shader-cache",
+    "steam-shader-cache-status",
 }
 PAM_AUTHORIZATION_TTL_SECONDS = 15 * 60
 PAM_AUTHORIZATION_LIMIT = 1024
@@ -642,6 +648,14 @@ def _steam_cache_status(parameters: dict) -> dict:
     return inspect_steam_cache(_steamapps(username, missing_ok=True), GAMES_ROOT)
 
 
+def _steam_shader_cache_status(parameters: dict) -> dict:
+    username = _safe_username(parameters.get("user"))
+    steamapps = _steamapps(username, missing_ok=True)
+    if steamapps is None:
+        return {"message": "Steam knihovna nenalezena", "status": "missing-library"}
+    return inspect_shader_cache(steamapps)
+
+
 def _set_steam_cache(parameters: dict) -> dict:
     username = _safe_username(parameters.get("user"))
     steamapps = _steamapps(username)
@@ -666,6 +680,11 @@ def _set_steam_cache(parameters: dict) -> dict:
     os.symlink(shared, download)
     _set_shared_permissions(shared)
     return {"message": "Steam cache byla bezpečně nasdílena", "status": "shared", "shared_path": shared}
+
+
+def _clear_steam_shader_cache(parameters: dict) -> dict:
+    username = _safe_username(parameters.get("user"))
+    return clear_shader_cache_entries(_steamapps(username), parameters.get("app_ids"))
 
 
 def _configured_system_units() -> set[str]:
@@ -1046,6 +1065,8 @@ def dispatch(action: str, parameters: dict) -> dict:
         "create-symlink": _create_symlink,
         "set-steam-cache": _set_steam_cache,
         "steam-cache-status": _steam_cache_status,
+        "steam-shader-cache-status": _steam_shader_cache_status,
+        "clear-steam-shader-cache": _clear_steam_shader_cache,
         "fix-permissions": _fix_permissions,
     }
     handler = handlers.get(action)

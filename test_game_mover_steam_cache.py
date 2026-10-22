@@ -7,6 +7,11 @@ from unittest.mock import Mock, patch
 
 import game_mover_flask as api
 import game_mover_privileged as broker
+from game_mover_steam_cache import (
+    clear_shader_cache_entries,
+    inspect_shader_cache,
+    inspect_steam_cache,
+)
 
 
 class SteamCacheSecurityTest(unittest.TestCase):
@@ -196,6 +201,98 @@ class SteamCacheSecurityTest(unittest.TestCase):
             )
             worker.assert_called_once_with("set-steam-cache", {"user": "alice"})
 
+    def test_status_lists_local_shader_cache_without_mutation(self):
+        self.download.mkdir()
+        shader = self.steamapps / "shadercache"
+        (shader / "3125250").mkdir(parents=True)
+        (shader / "3125250" / "pipeline.bin").write_bytes(b"x" * 4096)
+        (self.steamapps / "appmanifest_3125250.acf").write_text(
+            '"AppState"\n{\n\t"appid"\t\t"3125250"\n'
+            '\t"name"\t\t"STORROR Parkour PRO"\n}\n',
+            encoding="utf-8",
+        )
+        before = self.snapshot()
+
+        result = inspect_steam_cache(str(self.steamapps), str(self.games))
+        shader_result = inspect_shader_cache(str(self.steamapps))
+
+        self.assertNotIn("shader_cache", result)
+        self.assertEqual(shader_result["status"], "local")
+        self.assertGreater(shader_result["total_size_bytes"], 0)
+        self.assertEqual(shader_result["entries"][0]["app_id"], "3125250")
+        self.assertEqual(
+            shader_result["entries"][0]["name"], "STORROR Parkour PRO"
+        )
+        self.assertEqual(self.snapshot(), before)
+
+    def test_clear_shader_cache_removes_only_selected_numeric_appids(self):
+        shader = self.steamapps / "shadercache"
+        selected = shader / "3125250"
+        preserved = shader / "730"
+        selected.mkdir(parents=True)
+        preserved.mkdir()
+        (selected / "pipeline.bin").write_bytes(b"x" * 4096)
+        (preserved / "pipeline.bin").write_bytes(b"y" * 2048)
+
+        result = clear_shader_cache_entries(str(self.steamapps), ["3125250"])
+
+        self.assertEqual(result["removed_app_ids"], ["3125250"])
+        self.assertGreater(result["freed_bytes"], 0)
+        self.assertFalse(selected.exists())
+        self.assertTrue(preserved.is_dir())
+
+    def test_clear_shader_cache_rejects_traversal_and_symlink(self):
+        shader = self.steamapps / "shadercache"
+        shader.mkdir()
+        outside = self.root / "outside"
+        outside.mkdir()
+        (shader / "3125250").symlink_to(outside, target_is_directory=True)
+
+        for app_ids in (["../outside"], ["3125250"]):
+            with self.subTest(app_ids=app_ids), self.assertRaises(ValueError):
+                clear_shader_cache_entries(str(self.steamapps), app_ids)
+        self.assertTrue(outside.is_dir())
+
+    def test_shader_cache_post_requires_policy_and_dispatches_selected_appids(self):
+        api.TIMEKPRA_TOKENS["fixture-session"] = ("alice", time.time() + 60)
+        pam = {"X-Timekpr-Token": "fixture-session"}
+        with (
+            patch.object(api, "operation_policy", return_value="pam"),
+            patch.object(
+                api, "privileged_call",
+                return_value={"removed_app_ids": ["3125250"], "freed_bytes": 4096},
+            ) as transport,
+        ):
+            denied = self.client.post(
+                "/clear_steam_shader_cache",
+                json={"user": "alice", "app_ids": ["3125250"]},
+                **self.local,
+            )
+            allowed = self.client.post(
+                "/clear_steam_shader_cache",
+                json={"user": "alice", "app_ids": ["3125250"]},
+                headers=pam, **self.local,
+            )
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 200)
+        transport.assert_called_once_with(
+            "clear-steam-shader-cache",
+            {"user": "alice", "app_ids": ["3125250"]}, timeout=180,
+        )
+
+    def test_shader_cache_status_uses_read_only_worker_action(self):
+        with patch.object(
+            api, "privileged_call",
+            return_value={"status": "local", "entries": [], "total_size_bytes": 0},
+        ) as transport:
+            response = self.client.get(
+                "/steam_shader_cache_status?user=alice", **self.local
+            )
+        self.assertEqual(response.status_code, 200)
+        transport.assert_called_once_with(
+            "steam-shader-cache-status", {"user": "alice"}, timeout=60,
+        )
+
     def test_remote_requests_never_reach_broker(self):
         with patch.object(api, "privileged_call") as transport:
             self.assertEqual(
@@ -209,6 +306,21 @@ class SteamCacheSecurityTest(unittest.TestCase):
                 self.client.post(
                     "/set_steam_cache",
                     json={"user": "alice"},
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                self.client.get(
+                    "/steam_shader_cache_status?user=alice",
+                    environ_base={"REMOTE_ADDR": "192.0.2.10"},
+                ).status_code,
+                403,
+            )
+            self.assertEqual(
+                self.client.post(
+                    "/clear_steam_shader_cache",
+                    json={"user": "alice", "app_ids": ["3125250"]},
                     environ_base={"REMOTE_ADDR": "192.0.2.10"},
                 ).status_code,
                 403,
@@ -233,6 +345,32 @@ class SteamCacheSecurityTest(unittest.TestCase):
             self.assertEqual(
                 run.call_args.args[0][-2:],
                 ["--filesystem-worker", "steam-cache-status"],
+            )
+            self.assertEqual(run.call_args.kwargs["user"], 1000)
+            self.assertEqual(run.call_args.kwargs["group"], 1000)
+            self.assertEqual(run.call_args.kwargs["extra_groups"], [1234])
+
+    def test_shader_clear_worker_launch_drops_to_player_identity(self):
+        with (
+            patch.object(broker.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(
+                broker.subprocess,
+                "run",
+                return_value=Mock(
+                    returncode=0,
+                    stdout='{"removed_app_ids":["3125250"],"freed_bytes":4096}',
+                    stderr="",
+                ),
+            ) as run,
+        ):
+            result = broker._broker_dispatch(
+                "clear-steam-shader-cache",
+                {"user": "alice", "app_ids": ["3125250"]},
+            )
+            self.assertEqual(result["removed_app_ids"], ["3125250"])
+            self.assertEqual(
+                run.call_args.args[0][-2:],
+                ["--filesystem-worker", "clear-steam-shader-cache"],
             )
             self.assertEqual(run.call_args.kwargs["user"], 1000)
             self.assertEqual(run.call_args.kwargs["group"], 1000)

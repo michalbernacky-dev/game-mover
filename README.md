@@ -14,6 +14,11 @@ profile. The EA prefix must be dedicated (for example
 and EA App must be closed, and staged downloads are shown only informationally
 and cannot be moved. Steam runtimes and possible stale
 installations remain hidden by default behind an explicit recovery checkbox.
+Steam's shared download cache and the current player's local shader cache are
+managed separately. Mover can inspect shader-cache usage by game and delete
+only explicitly selected AppID directories; it does not move shader cache onto
+the shared game disk. Deleted shader data is reproducible and may be downloaded
+or compiled again by Steam on the next launch.
 The persistent EA mount uses a fixed systemd service template keyed by a
 root-owned identifier, so spaces in Wine-prefix paths are not encoded into a
 native `.mount` unit name.
@@ -680,6 +685,12 @@ Heroic. Ostatní launchery zůstávají jen zdrojem read-only
 inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
+
+Sdílená download cache Steamu a lokální shader cache aktuálního hráče se
+spravují odděleně. Mover ukazuje velikost shader cache podle her a smaže pouze
+výslovně označené adresáře AppID; shader cache nepřesouvá na sdílený herní disk.
+Odstraněná shader data jsou obnovitelná a Steam je při dalším spuštění může
+znovu stáhnout nebo sestavit.
 
 Trvalý EA mount používá pevnou šablonu systemd identifikovanou hashem root-only
 evidence, takže mezery v cestě Wine prefixu nejsou součástí názvu nativní

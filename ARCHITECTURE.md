@@ -72,6 +72,15 @@ directory in each player's prefix,
 because EA App does not reliably recognize a Unix directory symlink as an
 installed game.
 
+Steam's shared `steamapps/downloading` directory and each player's private
+`steamapps/shadercache` have different lifecycles. The former may be moved into
+the fixed shared cache root. Shader cache remains on the player's home volume;
+Mover exposes an inspection-only inventory and an authorized deletion action
+for selected numeric AppID directories. Both operations execute after dropping
+to that player's identity. The deletion action accepts no filesystem path,
+rejects symbolic links and unexpected objects, and uses a fixed open parent
+directory so it cannot escape the player's shader-cache root.
+
 The EA adapter accepts only an EA App sideload entry found in Heroic's own
 configuration and a Wine prefix confined below that player's home. It moves one
 child directory below `drive_c/Program Files/EA Games`, never the prefix itself.

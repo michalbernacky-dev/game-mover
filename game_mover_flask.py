@@ -102,7 +102,11 @@ from game_mover_notes import (
     NotesError, delete_target_notes, initialize_notes_database, list_all_notes,
     list_notes, replace_notes,
 )
-from game_mover_steam_cache import inspect_steam_cache
+from game_mover_steam_cache import (
+    clear_shader_cache_entries,
+    inspect_shader_cache,
+    inspect_steam_cache,
+)
 from game_mover_version import __version__
 from game_mover_gate import (
     GateConfigError,
@@ -2040,6 +2044,26 @@ def steam_cache_status():
     return jsonify(result), 200 if "download_path" in result else 404
 
 
+@app.route("/steam_shader_cache_status", methods=["GET"])
+def steam_shader_cache_status():
+    user = request.args.get("user", "")
+    if not user:
+        return jsonify({"message": "Missing user"}), 400
+    try:
+        if PRIVILEGED_HELPER_ENABLED:
+            result = privileged_call(
+                "steam-shader-cache-status", {"user": user}, timeout=60,
+            )
+        else:
+            steamapps = steamapps_dir(user)
+            if not steamapps:
+                return jsonify({"message": "Steam knihovna nenalezena"}), 404
+            result = inspect_shader_cache(steamapps)
+    except (ValueError, PrivilegedError) as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify(result), 404 if result.get("status") == "missing-library" else 200
+
+
 @app.route("/set_steam_cache", methods=["POST"])
 def set_steam_cache():
     if not require_local_operation(request, "steam.cache"):
@@ -2106,6 +2130,37 @@ def set_steam_cache():
         return jsonify({"message": "Nepodařilo se vytvořit symlink, cesta už existuje"}), 409
     except Exception as e:
         return jsonify({"message": str(e)}), 500
+
+
+@app.route("/clear_steam_shader_cache", methods=["POST"])
+def clear_steam_shader_cache():
+    if not require_local_operation(request, "steam.cache"):
+        return jsonify({"message": "Unauthorized"}), 403
+    data = request.get_json(silent=True) or {}
+    user = data.get("user")
+    app_ids = data.get("app_ids")
+    if not user:
+        return jsonify({"message": "Missing user"}), 400
+
+    if PRIVILEGED_HELPER_ENABLED:
+        try:
+            return jsonify(privileged_call(
+                "clear-steam-shader-cache",
+                {"user": user, "app_ids": app_ids},
+                timeout=180,
+            ))
+        except PrivilegedError as error:
+            return jsonify({"message": str(error)}), 400
+
+    try:
+        steamapps = steamapps_dir(user)
+        if not steamapps:
+            return jsonify({"message": "Steam knihovna nenalezena"}), 404
+        return jsonify(clear_shader_cache_entries(steamapps, app_ids))
+    except ValueError as error:
+        return jsonify({"message": str(error)}), 400
+    except Exception as error:
+        return jsonify({"message": str(error)}), 500
 
 # ------------------------------------------------------------
 # DNSmasq

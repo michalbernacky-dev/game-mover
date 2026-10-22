@@ -173,6 +173,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertFalse(self.window.move_button.isEnabled())
         self.assertFalse(self.window.link_button.isEnabled())
         self.assertFalse(self.window.cache_button.isVisible())
+        self.assertFalse(self.window.shader_cache_button.isVisible())
 
         self.window.platform_combo.setCurrentIndex(
             self.window.platform_combo.findData("ea")
@@ -181,12 +182,18 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertIn("/var/Games/EA", self.window.mover_scope_label.text())
         self.assertNotIn("prefix", self.window.label_move.text().lower())
         self.assertFalse(self.window.cache_button.isVisible())
+        self.assertFalse(self.window.shader_cache_button.isVisible())
 
         self.window.platform_combo.setCurrentIndex(
             self.window.platform_combo.findData("ubisoft")
         )
         self.assertIn("pouze rozpoznávaný", self.window.mover_scope_label.text())
         self.assertFalse(self.window.move_button.isEnabled())
+
+    def test_shader_cache_size_formatter(self):
+        self.assertEqual(self.window.format_cache_size(0), "0 B")
+        self.assertEqual(self.window.format_cache_size(1024), "1.0 KiB")
+        self.assertEqual(self.window.format_cache_size(64 * 1024 ** 3), "64.0 GiB")
 
     def test_combo_popups_highlight_hovered_and_selected_rows_globally(self):
         style = self.window.styleSheet()
