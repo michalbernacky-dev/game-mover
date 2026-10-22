@@ -13,6 +13,16 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Shader-cache GUI response-contract regression: 2026-10-22
+
+The 0.38.0 API correctly returned the read-only shader-cache inventory as its
+top-level JSON response, but the Mover GUI looked for a nonexistent nested
+`shader_cache` member. It consequently treated a valid local cache as unsafe
+and refused to open its management dialog. Version 0.38.1 normalizes the direct
+API response in the GUI while retaining compatibility with the earlier nested
+test shape. Regression coverage verifies both representations. The change does
+not widen deletion authority or modify the broker filesystem boundary.
+
 ## Local build sandbox-directory exclusion: 2026-10-22
 
 Inspection of a local 0.38.0 development source archive found three empty,
