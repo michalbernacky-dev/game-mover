@@ -657,7 +657,11 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertEqual(len(self.window.host_pam_buttons), 5)
         self.assertTrue(all(
-            button.text() == "PAM hostitele odemčeno" and not button.isEnabled()
+            button.text() == "Místní PAM odemčeno" and not button.isEnabled()
+            for button in self.window.host_pam_buttons
+        ))
+        self.assertTrue(all(
+            "#69db7c" in button.styleSheet()
             for button in self.window.host_pam_buttons
         ))
         post.assert_called_once_with(
@@ -775,6 +779,33 @@ class ServerManagementGuiTest(unittest.TestCase):
             button.text() == "Odemknout PAM hostitele…" and not button.isEnabled()
             for button in self.window.host_pam_buttons
         ))
+
+    def test_locked_pam_color_identifies_local_or_remote_target(self):
+        self.window.app_mode = "server"
+        self.window.timekpr_token = ""
+        self.window.update_server_mode_ui()
+        self.assertTrue(all(
+            button.text() == "Odemknout místní PAM…"
+            and "#4dabf7" in button.styleSheet()
+            and "#cc8de8" not in button.styleSheet()
+            for button in self.window.host_pam_buttons
+        ))
+        self.assertIn("Místní PAM relace", self.window.security_host_pam_status.text())
+        host_index = self.window.security_scope_combo.findData("host")
+        self.assertEqual(
+            self.window.security_scope_combo.itemText(host_index),
+            "Tento počítač – herní servery",
+        )
+
+        self.window.app_mode = "ssh_tunnel"
+        self.window.update_server_mode_ui()
+        self.assertTrue(all(
+            button.text() == "Odemknout PAM hostitele…"
+            and "#cc8de8" in button.styleSheet()
+            and "#4dabf7" not in button.styleSheet()
+            for button in self.window.host_pam_buttons
+        ))
+        self.assertIn("Vzdálená PAM relace", self.window.security_host_pam_status.text())
 
     def test_security_tab_can_immediately_revoke_shared_pam_session(self):
         self.window.app_mode = "server"
