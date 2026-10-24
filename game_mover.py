@@ -2300,7 +2300,7 @@ class GameMover(QWidget):
         scope_row.addWidget(self.security_scope_combo, 1)
         layout.addLayout(scope_row)
         host_pam_row = QHBoxLayout()
-        self.security_host_pam_status = QLabel("PAM relace hostitele: uzamčeno", content)
+        self.security_host_pam_status = QLabel("Místní PAM relace: uzamčeno", content)
         self.security_host_pam_status.setStyleSheet("color: #aab7c0;")
         host_pam_row.addWidget(self.security_host_pam_status, 1)
         host_pam_row.addWidget(
@@ -2317,7 +2317,10 @@ class GameMover(QWidget):
         self.security_status_label.setStyleSheet("color: #aab7c0;")
         layout.addWidget(self.security_status_label)
 
-        layout.addWidget(QLabel("Místní PAM a vzdálená správa hostitele:", content))
+        self.security_tunnel_caption = QLabel(
+            "Místní PAM a vzdálená správa hostitele:", content,
+        )
+        layout.addWidget(self.security_tunnel_caption)
         tunnel_unlock_row = QHBoxLayout()
         self.security_tunnel_lock_status = QLabel(
             "Místní PAM operace a nastavení spravovaného SSH tunelu jsou uzamčené.",
@@ -2889,10 +2892,16 @@ class GameMover(QWidget):
 
     def update_security_mode_ui(self):
         management_mode = is_host_management_mode(self.app_mode)
+        local_host = self.app_mode == "server"
         host_index = self.security_scope_combo.findData("host")
         host_item = self.security_scope_combo.model().item(host_index)
         if host_item is not None:
             host_item.setEnabled(management_mode)
+        self.security_scope_combo.setItemText(
+            host_index,
+            "Tento počítač – herní servery"
+            if local_host else "Vzdálený hostitel herních serverů",
+        )
         if not management_mode and self.security_policy_scope() == "host":
             self.security_scope_combo.setCurrentIndex(
                 self.security_scope_combo.findData("local")
@@ -2907,14 +2916,18 @@ class GameMover(QWidget):
         host_unlocked = management_mode and bool(self.timekpr_token)
         self.security_host_pam_lock_button.setEnabled(host_unlocked)
         self.security_host_pam_status.setText(
-            "PAM relace hostitele: odemčeno"
-            if host_unlocked else "PAM relace hostitele: uzamčeno"
+            f"{'Místní PAM relace' if local_host else 'Vzdálená PAM relace'}: "
+            f"{'odemčeno' if host_unlocked else 'uzamčeno'}"
         )
         self.security_host_pam_status.setStyleSheet(
             "color: #69db7c; font-weight: bold;"
             if host_unlocked else "color: #aab7c0;"
         )
         local_scope = scope == "local"
+        self.security_tunnel_caption.setText(
+            "Místní PAM a nastavení spravovaného SSH tunelu:"
+            if local_host else "Místní PAM a vzdálená správa hostitele:"
+        )
         self.security_global_caption.setText(
             "Operace tohoto počítače:" if local_scope else "Globální operace hostitele:"
         )
@@ -2924,7 +2937,11 @@ class GameMover(QWidget):
             text = (
                 "Pro načtení a změnu místních zásad použij Odemknout místní PAM níže."
                 if local_scope else
-                "Otevři spravovaný SSH tunel a odemkni PAM hostitele."
+                (
+                    "Odemkni místní PAM tohoto počítače."
+                    if local_host else
+                    "Otevři spravovaný SSH tunel a odemkni PAM hostitele."
+                )
             )
         elif self.security_payload:
             text = f"Bezpečnostní zásady {scope_label} jsou načtené."
@@ -4078,25 +4095,38 @@ class GameMover(QWidget):
         if not hasattr(self, "host_pam_buttons"):
             return
         management_mode = is_host_management_mode(self.app_mode)
+        local_host = self.app_mode == "server"
         unlocked = management_mode and bool(self.timekpr_token)
         for button in self.host_pam_buttons:
             if unlocked:
-                button.setText("PAM hostitele odemčeno")
+                button.setText(
+                    "Místní PAM odemčeno" if local_host else "PAM hostitele odemčeno"
+                )
                 button.setToolTip(
-                    "Sdílená PAM relace hostitele je aktivní; heslo není uložené."
+                    "Místní PAM relace tohoto počítače je aktivní; heslo není uložené."
+                    if local_host else
+                    "Vzdálená PAM relace hostitele je aktivní; heslo není uložené."
                 )
                 button.setStyleSheet(
                     "color: #b2f2bb; background-color: #244b3a; "
                     "border: 1px solid #69db7c;"
                 )
             else:
-                button.setText("Odemknout PAM hostitele…")
+                button.setText(
+                    "Odemknout místní PAM…"
+                    if local_host else "Odemknout PAM hostitele…"
+                )
                 button.setToolTip(
-                    "Ověří wheel uživatele hostitele a dočasně odemkne chráněné operace."
+                    "Ověří místního wheel uživatele pro chráněné operace tohoto počítače."
+                    if local_host else
+                    "Ověří wheel uživatele vzdáleného hostitele a dočasně odemkne "
+                    "chráněné operace."
                     if management_mode else
                     "Nejprve zvol režim Server nebo otevři spravovaný SSH tunel."
                 )
                 button.setStyleSheet(
+                    "background-color: #214653; border: 1px solid #4dabf7;"
+                    if local_host else
                     "background-color: #49354f; border: 1px solid #cc8de8;"
                 )
             button.setEnabled(management_mode and not unlocked)
@@ -4147,12 +4177,16 @@ class GameMover(QWidget):
             )
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("Odemknout PAM")
+        local_host = self.app_mode == "server"
+        dialog.setWindowTitle(
+            "Odemknout místní PAM" if local_host else "Odemknout PAM hostitele"
+        )
         dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
         explanation = QLabel(
             f"Wheel ověření dočasně odemkne {context} i ostatní chráněné operace "
-            "na tomto hostiteli. Heslo se neukládá.", dialog,
+            f"na {'tomto počítači' if local_host else 'vzdáleném hostiteli'}. "
+            "Heslo se neukládá.", dialog,
         )
         explanation.setWordWrap(True)
         layout.addWidget(explanation)
@@ -4165,8 +4199,11 @@ class GameMover(QWidget):
         username.addItems(wheel_users)
         password = QLineEdit(dialog)
         password.setEchoMode(QLineEdit.Password)
-        password.setPlaceholderText("heslo wheel uživatele hostitele")
-        form.addRow("Uživatel:", username)
+        password.setPlaceholderText(
+            "heslo místního wheel uživatele"
+            if local_host else "heslo wheel uživatele vzdáleného hostitele"
+        )
+        form.addRow("Místní uživatel:" if local_host else "Uživatel hostitele:", username)
         form.addRow("Heslo:", password)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)

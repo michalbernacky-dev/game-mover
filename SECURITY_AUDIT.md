@@ -13,6 +13,18 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## PAM target and state presentation follow-up: 2026-10-24
+
+Version 0.38.2 synchronized the actual local-server PAM session, but the GUI
+still rendered Server-mode host controls with the purple remote-host treatment
+and host wording. This did not bypass authorization, but it obscured which
+machine received credentials and made the single local session look like a
+second remote context. Version 0.38.3 reserves blue for a locked local target,
+purple for a locked remote SSH-tunnel target, and green for a successfully
+unlocked session. Server-mode labels now consistently identify the target as
+this computer. Focused GUI coverage checks both target modes and all three
+visual states. Package installation and live-host verification remain pending.
+
 ## Local-server PAM context synchronization regression: 2026-10-24
 
 The desktop kept separate local-workstation and managed-host PAM tokens even
