@@ -21,6 +21,14 @@
   <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.38.3" date="2026-10-24">
+      <description>
+        <ul>
+          <li>Use blue for locked local PAM, purple for a locked remote host, and green only for an unlocked session.</li>
+          <li>Describe Server-mode PAM consistently as local throughout the security interface.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.38.2" date="2026-10-24">
       <description>
         <ul>
