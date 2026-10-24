@@ -1889,6 +1889,13 @@ class GameMover(QWidget):
                 json={"notes": notes}, headers=headers, timeout=8,
             )
             payload = response.json()
+            if response.status_code in (401, 403):
+                self.knowledge_status.setText(
+                    self.host_pam_session_expired(
+                        payload.get("message", f"HTTP {response.status_code}")
+                    )
+                )
+                return
             if response.status_code != 200:
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
             self.render_knowledge_notes(payload.get("notes", []))
@@ -2437,6 +2444,38 @@ class GameMover(QWidget):
             if self.local_security_token else {}
         )
 
+    def set_local_pam_session(self, payload):
+        """Store local PAM and share it with the host view in server mode."""
+        self.local_security_token = payload["token"]
+        self.local_timekpr_payload = dict(payload)
+        if self.app_mode == "server":
+            self.timekpr_token = payload["token"]
+            self.host_timekpr_payload = dict(payload)
+
+    def set_host_pam_session(self, payload):
+        """Store host PAM and share it with the local view for the local server."""
+        self.timekpr_token = payload["token"]
+        self.host_timekpr_payload = dict(payload)
+        if self.app_mode == "server":
+            self.local_security_token = payload["token"]
+            self.local_timekpr_payload = dict(payload)
+
+    def clear_local_pam_session(self):
+        """Discard local PAM, including the identical local-host server session."""
+        self.local_security_token = ""
+        self.local_timekpr_payload = None
+        if self.app_mode == "server":
+            self.timekpr_token = ""
+            self.host_timekpr_payload = None
+
+    def clear_host_pam_session(self):
+        """Discard host PAM, including the identical local-host server session."""
+        self.timekpr_token = ""
+        self.host_timekpr_payload = None
+        if self.app_mode == "server":
+            self.local_security_token = ""
+            self.local_timekpr_payload = None
+
     def unlock_tunnel_management(self):
         dialog = QDialog(self)
         dialog.setWindowTitle("Odemknout místní chráněné operace")
@@ -2486,8 +2525,7 @@ class GameMover(QWidget):
             payload = response.json()
             if response.status_code != 200 or not payload.get("token"):
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
-            self.local_security_token = payload["token"]
-            self.local_timekpr_payload = dict(payload)
+            self.set_local_pam_session(payload)
             if self.app_mode != "ssh_tunnel":
                 self.apply_active_timekpr_context()
             self.security_tunnel_lock_status.setText(
@@ -2514,8 +2552,10 @@ class GameMover(QWidget):
                 self, "Zabezpečení", "Před zamknutím nejprve zavři spravovaný SSH tunel.",
             )
             return
-        self.local_security_token = ""
-        self.local_timekpr_payload = None
+        if self.app_mode == "server" and self.timekpr_token:
+            self.lock_host_pam_session()
+        else:
+            self.clear_local_pam_session()
         if self.app_mode != "ssh_tunnel":
             self.apply_active_timekpr_context()
         self.security_tunnel_lock_status.setText(
@@ -2904,6 +2944,10 @@ class GameMover(QWidget):
                 f"{base_url}/security/policies", headers=headers, timeout=10,
             )
             payload = response.json()
+            if response.status_code in (401, 403):
+                raise RuntimeError(self.security_pam_session_expired(
+                    payload.get("message", f"HTTP {response.status_code}")
+                ))
             if response.status_code != 200:
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
             self.populate_security_tables(payload)
@@ -3034,6 +3078,10 @@ class GameMover(QWidget):
                 headers=headers, timeout=15,
             )
             payload = response.json()
+            if response.status_code in (401, 403):
+                raise RuntimeError(self.security_pam_session_expired(
+                    payload.get("message", f"HTTP {response.status_code}")
+                ))
             if response.status_code != 200:
                 raise RuntimeError(payload.get("message", f"HTTP {response.status_code}"))
             self.populate_security_tables(payload)
@@ -3969,8 +4017,7 @@ class GameMover(QWidget):
         except Exception as error:
             warning = str(error)
         finally:
-            self.timekpr_token = ""
-            self.host_timekpr_payload = None
+            self.clear_host_pam_session()
             self.security_payload = None
             if self.security_policy_scope() == "host":
                 self.clear_security_policy_tables()
@@ -4067,8 +4114,7 @@ class GameMover(QWidget):
         if response.status_code != 200 or not payload.get("token"):
             message = payload.get("message") if isinstance(payload, dict) else response.text
             raise RuntimeError(message or f"PAM ověření selhalo (HTTP {response.status_code})")
-        self.timekpr_token = payload["token"]
-        self.host_timekpr_payload = dict(payload)
+        self.set_host_pam_session(payload)
         self.update_server_mode_ui()
         self.refresh_server_statuses()
         return payload
@@ -4173,13 +4219,25 @@ class GameMover(QWidget):
 
     def host_pam_session_expired(self, detail=""):
         """Fail closed immediately when the host rejects a cached PAM session."""
-        self.timekpr_token = ""
-        self.host_timekpr_payload = None
+        self.clear_host_pam_session()
         self.security_payload = None
         self.update_server_mode_ui()
         message = (
             "Hostitelská PAM relace už není platná. Použij Odemknout PAM "
             "v aktuální záložce."
+        )
+        return f"{message} ({detail})" if detail else message
+
+    def security_pam_session_expired(self, detail=""):
+        """Expire the PAM context whose security policies are currently shown."""
+        if self.security_policy_scope() == "host":
+            return self.host_pam_session_expired(detail)
+        self.clear_local_pam_session()
+        self.security_payload = None
+        self.update_server_mode_ui()
+        message = (
+            "Místní PAM relace už není platná. Použij Odemknout místní PAM "
+            "v záložce Zabezpečení."
         )
         return f"{message} ({detail})" if detail else message
 

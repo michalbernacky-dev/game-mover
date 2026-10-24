@@ -646,6 +646,11 @@ class ServerManagementGuiTest(unittest.TestCase):
 
         self.window.update_host_pam_buttons()
         self.assertEqual(self.window.timekpr_token, "shared-host-token")
+        self.assertEqual(self.window.local_security_token, "shared-host-token")
+        self.assertEqual(
+            self.window.local_timekpr_payload["managed_users"],
+            ["alice", "bob", "carol", "dave"],
+        )
         self.assertEqual(
             self.window.host_timekpr_payload["managed_users"],
             ["alice", "bob", "carol", "dave"],
@@ -727,6 +732,41 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertFalse(hasattr(self.window, "timekpr_auth_pass"))
         self.assertFalse(hasattr(self.window, "timekpr_auth_user_combo"))
 
+    def test_local_and_host_pam_stay_separate_in_client_mode(self):
+        self.window.app_mode = "client"
+        self.window.local_security_token = "local-token"
+        self.window.local_timekpr_payload = {"token": "local-token"}
+
+        self.window.set_host_pam_session({"token": "remote-token"})
+
+        self.assertEqual(self.window.local_security_token, "local-token")
+        self.assertEqual(self.window.timekpr_token, "remote-token")
+
+    def test_local_pam_unlock_is_shared_with_host_in_server_mode(self):
+        self.window.app_mode = "server"
+
+        self.window.set_local_pam_session({"token": "shared-local-token"})
+
+        self.assertEqual(self.window.local_security_token, "shared-local-token")
+        self.assertEqual(self.window.timekpr_token, "shared-local-token")
+
+    def test_knowledge_unauthorized_expires_shared_server_pam(self):
+        self.window.app_mode = "server"
+        self.window.set_host_pam_session({"token": "expired-token"})
+        self.window.set_knowledge_target("game", "dota-2")
+        response = MagicMock(status_code=403)
+        response.json.return_value = {"message": "Unauthorized"}
+
+        with (
+            patch.object(game_mover.requests, "put", return_value=response),
+            patch.object(self.window, "update_server_mode_ui"),
+        ):
+            self.window.save_knowledge_target()
+
+        self.assertEqual(self.window.timekpr_token, "")
+        self.assertEqual(self.window.local_security_token, "")
+        self.assertIn("PAM relace už není platná", self.window.knowledge_status.text())
+
     def test_host_pam_controls_stay_locked_in_read_only_client_mode(self):
         self.window.app_mode = "client"
         self.window.timekpr_token = ""
@@ -739,6 +779,7 @@ class ServerManagementGuiTest(unittest.TestCase):
     def test_security_tab_can_immediately_revoke_shared_pam_session(self):
         self.window.app_mode = "server"
         self.window.timekpr_token = "temporary-host-token"
+        self.window.local_security_token = "temporary-host-token"
         self.window.update_security_mode_ui()
         self.assertTrue(self.window.security_host_pam_lock_button.isEnabled())
         self.assertIn("odemčeno", self.window.security_host_pam_status.text())
@@ -749,6 +790,7 @@ class ServerManagementGuiTest(unittest.TestCase):
         ):
             self.window.lock_host_pam_session()
         self.assertEqual(self.window.timekpr_token, "")
+        self.assertEqual(self.window.local_security_token, "")
         post.assert_called_once_with(
             "http://127.0.0.1:5000/timekpr/logout",
             headers={"X-Timekpr-Token": "temporary-host-token"}, timeout=8,
