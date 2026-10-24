@@ -13,6 +13,23 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Local-server PAM context synchronization regression: 2026-10-24
+
+The desktop kept separate local-workstation and managed-host PAM tokens even
+when running in Server mode, where both contexts address the same loopback
+backend. Re-authenticating one view could leave the other view displaying a
+different or expired token, so protected actions such as knowledge-note writes
+returned `403 Unauthorized` while part of the UI still appeared unlocked.
+
+The source now shares one PAM token and payload between both views only in
+Server mode, clears both views together on lock or authorization failure, and
+keeps the contexts separate for a client managing a remote host through its
+SSH tunnel. Knowledge and security-policy requests now fail closed and update
+the UI when the backend rejects a cached token. Focused GUI regression coverage
+checks local-to-host and host-to-local sharing, joint revocation, remote-client
+separation, and the knowledge-write authorization failure. Source verification
+passed; package installation and live-host verification remain pending.
+
 ## Shader-cache GUI response-contract regression: 2026-10-22
 
 The 0.38.0 API correctly returned the read-only shader-cache inventory as its
