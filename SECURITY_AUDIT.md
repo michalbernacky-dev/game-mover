@@ -13,6 +13,25 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Local Heroic launcher profiles: 2026-11-05
+
+Version 0.39.0 adds an unprivileged local launch action for launchers explicitly
+installed as Heroic sideload library entries. Discovery is performed by the Qt
+client in the current player's home. A runnable profile requires exactly one
+matching managed launcher, an executable confined to its resolved Wine prefix,
+an executable Proton runner recorded by Heroic, and Heroic's executable UMU.
+The launch uses an argument array with `shell=False` semantics, a bounded local
+argument parser, detached standard streams, and the player's existing process
+identity. It does not call the Flask API or privileged broker.
+
+Optional arguments are stored with mode `0600` in the existing local client
+configuration. Shared Tips and Notes and remote API responses cannot provide or
+trigger them. Focused tests cover profile discovery, EXE confinement, argument
+bounds, shell-free process construction, local GUI persistence and dispatch.
+Package build, installation and live launch through the new GUI remain pending;
+the equivalent UMU/Proton command was verified interactively before the feature
+was implemented.
+
 ## PAM target and state presentation follow-up: 2026-10-24
 
 Version 0.38.2 synchronized the actual local-server PAM session, but the GUI

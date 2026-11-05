@@ -154,6 +154,40 @@ class ServerManagementGuiTest(unittest.TestCase):
         self.assertNotIn("sudo", command)
         self.assertNotIn("input", run.call_args.kwargs)
 
+    def test_managed_battle_net_card_saves_arguments_and_launches_locally(self):
+        self.window.on_launcher_statuses_loaded({
+            "launchers": [{
+                "id": "managed-battle-net", "name": "Battle.net",
+                "icon": "lutris_battlenet", "source": "Heroic",
+                "installed": True, "installed_version": "",
+                "latest_version": "", "update_available": False,
+                "update_supported": False, "managed_externally": True,
+                "launch_supported": True, "error": "",
+            }],
+            "update_policy": "pam",
+        })
+        card = self.window.launcher_cards["managed-battle-net"]
+        self.assertIsNotNone(card["arguments"])
+        self.assertIsNotNone(card["launch"])
+        card["arguments"].setText("--no-sandbox")
+
+        with (
+            patch.object(game_mover, "save_client_config") as save,
+            patch.object(
+                game_mover, "perform_managed_launcher_launch",
+                return_value={"pid": 123, "name": "Battle.net"},
+            ) as launch,
+        ):
+            card["launch"].click()
+
+        self.assertEqual(
+            self.window.client_config["launcher_arguments"]["managed-battle-net"],
+            "--no-sandbox",
+        )
+        save.assert_called_once_with(self.window.client_config)
+        launch.assert_called_once_with("managed-battle-net", "--no-sandbox")
+        self.assertIn("předán UMU", card["status"].text())
+
     def test_mover_mutates_only_steam_and_heroic_ea_payloads(self):
         self.assertEqual(self.window.platform, "steam")
         self.assertFalse(hasattr(self.window, "source_user_combo"))

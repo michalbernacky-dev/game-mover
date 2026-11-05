@@ -50,6 +50,40 @@ def heroic_payload(version="2.22.1", *, digest=""):
 
 
 class LauncherProviderTest(unittest.TestCase):
+    @staticmethod
+    def create_heroic_battle_net_profile(home):
+        heroic = home / ".config/heroic"
+        (heroic / "sideload_apps").mkdir(parents=True)
+        (heroic / "GamesConfig").mkdir()
+        umu = heroic / "tools/runtimes/umu/umu-run"
+        umu.parent.mkdir(parents=True)
+        umu.write_text("#!/bin/sh\n")
+        umu.chmod(0o755)
+        proton = heroic / "tools/proton/GE-Proton/proton"
+        proton.parent.mkdir(parents=True)
+        proton.write_text("#!/bin/sh\n")
+        proton.chmod(0o755)
+        prefix = home / "Games/Heroic/Prefixes/Battle.net"
+        executable = prefix / "drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"MZ")
+        executable.chmod(0o755)
+        app_id = "battle-local"
+        (heroic / "sideload_apps/library.json").write_text(json.dumps({
+            "games": [{
+                "title": "Battle.net", "app_name": app_id,
+                "is_installed": True,
+                "install": {"executable": str(executable), "platform": "Windows"},
+            }],
+        }))
+        (heroic / "GamesConfig" / f"{app_id}.json").write_text(json.dumps({
+            app_id: {
+                "winePrefix": str(prefix),
+                "wineVersion": {"type": "proton", "bin": str(proton)},
+            },
+        }))
+        return prefix, executable, proton, umu
+
     def test_semantic_versions_and_prereleases_are_compared(self):
         self.assertTrue(launchers.version_is_newer("2.22.1", "2.22.0"))
         self.assertTrue(launchers.version_is_newer("2.23.0", "2.23.0-beta.1"))
@@ -183,6 +217,64 @@ class LauncherProviderTest(unittest.TestCase):
         self.assertEqual(len(statuses), 1)
         self.assertEqual(statuses[0]["source"], "Heroic + Lutris")
         self.assertEqual(statuses[0]["installed_version"], "13.2.0")
+
+    def test_heroic_managed_launcher_can_launch_with_local_arguments(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home/player"
+            prefix, executable, proton, umu = self.create_heroic_battle_net_profile(home)
+            status = next(
+                item for item in launchers.managed_launcher_statuses(str(home))
+                if item["id"] == "managed-battle-net"
+            )
+            process = Mock(pid=4321)
+            popen = Mock(return_value=process)
+
+            result = launchers.launch_managed_launcher(
+                "managed-battle-net", '--no-sandbox "two words"',
+                home=str(home), popen=popen,
+            )
+
+        self.assertTrue(status["launch_supported"])
+        self.assertEqual(result, {"pid": 4321, "name": "Battle.net"})
+        command = popen.call_args.args[0]
+        self.assertEqual(command, [
+            str(umu.resolve()), str(executable.resolve()),
+            "--no-sandbox", "two words",
+        ])
+        options = popen.call_args.kwargs
+        self.assertEqual(options["env"]["WINEPREFIX"], str(prefix.resolve()))
+        self.assertEqual(options["env"]["PROTONPATH"], str(proton.parent.resolve()))
+        self.assertEqual(options["env"]["GAMEID"], "umu-default")
+        self.assertTrue(options["start_new_session"])
+        self.assertNotIn("shell", options)
+
+    def test_managed_launch_rejects_executable_outside_its_prefix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home/player"
+            self.create_heroic_battle_net_profile(home)
+            heroic = home / ".config/heroic"
+            library_path = heroic / "sideload_apps/library.json"
+            library = json.loads(library_path.read_text())
+            outside = home / "Downloads/Battle.net.exe"
+            outside.parent.mkdir()
+            outside.write_bytes(b"MZ")
+            library["games"][0]["install"]["executable"] = str(outside)
+            library_path.write_text(json.dumps(library))
+
+            with self.assertRaisesRegex(launchers.LauncherError, "Proton profil"):
+                launchers.launch_managed_launcher(
+                    "managed-battle-net", home=str(home), popen=Mock(),
+                )
+
+    def test_local_launcher_arguments_are_bounded_and_never_a_shell_command(self):
+        self.assertEqual(
+            launchers.parse_launcher_arguments('--flag "value with spaces"'),
+            ["--flag", "value with spaces"],
+        )
+        with self.assertRaisesRegex(launchers.LauncherError, "uvozovky"):
+            launchers.parse_launcher_arguments("'unfinished")
+        with self.assertRaisesRegex(launchers.LauncherError, "neplatné"):
+            launchers.parse_launcher_arguments("line one\nline two")
 
     def test_repo_versions_from_multiple_architectures_stay_separate(self):
         runner = Mock(return_value=completed(
