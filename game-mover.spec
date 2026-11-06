@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.38.3
+Version:        0.39.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 URL:            https://github.com/michalbernacky-dev/game-mover
@@ -188,6 +188,10 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Thu Nov 05 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
+- Launch verified Heroic-managed launchers through their local UMU and Proton profile
+- Store optional launcher arguments only in the current user's client configuration
+
 * Thu Oct 22 2026 Game Mover Packager <packager@example.invalid> - 0.38.1-1
 - Fix the Mover GUI to consume the direct Steam shader-cache status response
 

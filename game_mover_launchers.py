@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sqlite3
 import stat
 import subprocess
@@ -256,6 +257,146 @@ def _heroic_managed_launchers(home):
     return found
 
 
+def _heroic_managed_launch_profiles(home):
+    """Return locally verified Heroic/Proton launch profiles.
+
+    The profile is derived entirely from the current user's Heroic metadata.
+    User-provided arguments are deliberately not part of this discovery step.
+    """
+    found = []
+    config_roots = (
+        os.path.join(home, ".config/heroic"),
+        os.path.join(home, ".var/app/com.heroicgameslauncher.hgl/config/heroic"),
+    )
+    for config_root in config_roots:
+        library = _load_local_json(
+            os.path.join(config_root, "sideload_apps/library.json"),
+        )
+        games = library.get("games") if isinstance(library, dict) else None
+        if not isinstance(games, list):
+            continue
+        umu = _safe_local_path(
+            home, os.path.join(config_root, "tools/runtimes/umu/umu-run"), file=True,
+        )
+        if not umu or not os.access(umu, os.X_OK):
+            continue
+        for item in games:
+            if not isinstance(item, dict) or item.get("is_installed") is False:
+                continue
+            app_id = str(
+                item.get("app_name") or item.get("appName") or item.get("id") or "",
+            )
+            definition = _managed_definition(item.get("title"), app_id)
+            if not definition or not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", app_id):
+                continue
+            config = _load_local_json(
+                os.path.join(config_root, "GamesConfig", f"{app_id}.json"),
+            )
+            entry = config.get(app_id) if isinstance(config, dict) else None
+            if not isinstance(entry, dict):
+                continue
+            prefix = _safe_local_path(home, entry.get("winePrefix"))
+            install = item.get("install") if isinstance(item.get("install"), dict) else {}
+            executable = _safe_local_path(home, install.get("executable"), file=True)
+            wine_version = (
+                entry.get("wineVersion")
+                if isinstance(entry.get("wineVersion"), dict) else {}
+            )
+            proton_bin = _safe_local_path(home, wine_version.get("bin"), file=True)
+            try:
+                executable_in_prefix = (
+                    prefix and executable
+                    and os.path.commonpath((prefix, executable)) == prefix
+                )
+            except (ValueError, TypeError):
+                executable_in_prefix = False
+            if (
+                not executable_in_prefix
+                or wine_version.get("type") != "proton"
+                or not proton_bin
+                or os.path.basename(proton_bin) != "proton"
+                or not os.access(proton_bin, os.X_OK)
+            ):
+                continue
+            found.append({
+                "launcher_id": f"managed-{definition.id}",
+                "app_id": app_id,
+                "name": definition.name,
+                "executable": executable,
+                "prefix": prefix,
+                "proton_path": os.path.dirname(proton_bin),
+                "umu": umu,
+            })
+    return found
+
+
+def managed_launcher_launch_profile(launcher_id, home=None):
+    """Resolve one unambiguous local Heroic profile for a managed launcher."""
+    home = os.path.realpath(home or os.path.expanduser("~"))
+    launcher_id = str(launcher_id or "")
+    if not re.fullmatch(r"managed-[a-z0-9-]{1,128}", launcher_id):
+        raise LauncherError("Neplatný identifikátor spravovaného launcheru")
+    matches = [
+        profile for profile in _heroic_managed_launch_profiles(home)
+        if profile["launcher_id"] == launcher_id
+    ]
+    if not matches:
+        raise LauncherError(
+            "Heroic launcher nemá jednoznačný místní Proton profil pro spuštění",
+        )
+    if len(matches) != 1:
+        raise LauncherError(
+            "Heroic obsahuje více instalací tohoto launcheru; vyber profilu zatím není podporovaný",
+        )
+    return matches[0]
+
+
+def parse_launcher_arguments(value):
+    """Parse a bounded local argument string without invoking a shell."""
+    value = str(value or "")
+    if len(value) > 1024 or "\x00" in value or "\r" in value or "\n" in value:
+        raise LauncherError("Argumenty launcheru jsou příliš dlouhé nebo neplatné")
+    try:
+        arguments = shlex.split(value, posix=True)
+    except ValueError as error:
+        raise LauncherError("Argumenty launcheru mají neplatné uvozovky") from error
+    if len(arguments) > 64 or any(len(argument) > 512 for argument in arguments):
+        raise LauncherError("Argumenty launcheru překračují bezpečný limit")
+    return arguments
+
+
+def launch_managed_launcher(
+    launcher_id, arguments="", *, home=None, popen=subprocess.Popen,
+):
+    """Launch a verified local Heroic entry through its configured UMU/Proton."""
+    profile = managed_launcher_launch_profile(launcher_id, home=home)
+    command = [
+        profile["umu"], profile["executable"],
+        *parse_launcher_arguments(arguments),
+    ]
+    environment = os.environ.copy()
+    environment.update({
+        "WINEPREFIX": profile["prefix"],
+        "PROTONPATH": profile["proton_path"],
+        "GAMEID": "umu-default",
+        "WINEDEBUG": "-all",
+    })
+    try:
+        process = popen(
+            command,
+            cwd=os.path.dirname(profile["executable"]),
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError as error:
+        raise LauncherError("Spuštění launcheru přes UMU selhalo") from error
+    return {"pid": process.pid, "name": profile["name"]}
+
+
 def _lutris_managed_launchers(home):
     found = []
     databases = (
@@ -330,10 +471,18 @@ def managed_launcher_statuses(home=None):
         item["sources"].add(source)
         if version:
             item["versions"].append(version)
+    profiles = _heroic_managed_launch_profiles(home)
+    profile_counts = {}
+    for profile in profiles:
+        profile_counts[profile["launcher_id"]] = (
+            profile_counts.get(profile["launcher_id"], 0) + 1
+        )
     statuses = []
     for item in merged.values():
         versions = item.pop("versions")
         sources = item.pop("sources")
+        launcher_id = item["id"]
+        profile_count = profile_counts.get(launcher_id, 0)
         statuses.append({
             **item,
             "source": " + ".join(sorted(sources)),
@@ -343,6 +492,11 @@ def managed_launcher_statuses(home=None):
             "update_available": False,
             "update_supported": False,
             "managed_externally": True,
+            "launch_supported": profile_count == 1,
+            "launch_error": (
+                "Nalezeno více Heroic profilů"
+                if profile_count > 1 else ""
+            ),
             "error": "",
         })
     return sorted(statuses, key=lambda item: item["name"].casefold())

@@ -60,7 +60,10 @@ from game_mover_security import (
 )
 from game_mover_version import __version__
 from game_mover_launchers import (
+    LauncherError,
+    launch_managed_launcher as perform_managed_launcher_launch,
     managed_launcher_statuses,
+    parse_launcher_arguments,
     update_launcher as perform_launcher_update,
 )
 from game_mover_endpoints import (
@@ -1298,7 +1301,9 @@ class GameMover(QWidget):
             "Game Mover rozpozná nativní launchery i launchery, které sis přímo "
             "nainstaloval přes Heroic nebo Lutris. Zašedlá položka na tomto počítači "
             "není nainstalovaná. Heroic lze bezpečně aktualizovat z jeho oficiálního "
-            "GitHub release; launchery ve Wine spravuje jejich původní instalátor.", tab,
+            "GitHub release; launchery ve Wine spravuje jejich původní instalátor. "
+            "Samostatný Heroic launcher s jednoznačným Proton profilem lze spustit "
+            "s místně uloženými argumenty.", tab,
         )
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
@@ -2001,6 +2006,7 @@ class GameMover(QWidget):
             source.setStyleSheet("color: #9fb0ba;")
             text_layout.addWidget(source)
             row.addLayout(text_layout, 1)
+            actions_layout = QVBoxLayout()
             update_button = QPushButton("Aktualizovat", card)
             update_button.setVisible(bool(launcher.get("update_supported")))
             update_button.setEnabled(
@@ -2010,10 +2016,44 @@ class GameMover(QWidget):
             update_button.clicked.connect(
                 lambda _checked=False, item=dict(launcher): self.update_launcher(item)
             )
-            row.addWidget(update_button)
+            actions_layout.addWidget(update_button)
+            argument_edit = None
+            launch_button = None
+            save_arguments = None
+            if launcher.get("launch_supported"):
+                argument_edit = QLineEdit(card)
+                argument_edit.setPlaceholderText("Argumenty, např. --no-sandbox")
+                saved_arguments = self.client_config.get("launcher_arguments", {})
+                if isinstance(saved_arguments, dict):
+                    argument_edit.setText(str(saved_arguments.get(launcher_id, "")))
+                argument_edit.setMaximumWidth(360)
+                argument_edit.setToolTip(
+                    "Argumenty se ukládají jen do místní uživatelské konfigurace. "
+                    "Program, prefix, Proton a UMU určuje ověřená konfigurace Heroicu.",
+                )
+                actions_layout.addWidget(argument_edit)
+                launch_actions = QHBoxLayout()
+                save_arguments = QPushButton("Uložit argumenty", card)
+                save_arguments.clicked.connect(
+                    lambda _checked=False, lid=launcher_id, edit=argument_edit:
+                    self.save_launcher_arguments(lid, edit)
+                )
+                launch_actions.addWidget(save_arguments)
+                launch_button = QPushButton("Spustit", card)
+                launch_button.clicked.connect(
+                    lambda _checked=False, item=dict(launcher), edit=argument_edit:
+                    self.launch_managed_launcher(item, edit)
+                )
+                launch_actions.addWidget(launch_button)
+                actions_layout.addLayout(launch_actions)
+            elif launcher.get("launch_error"):
+                status.setToolTip(str(launcher["launch_error"]))
+            row.addLayout(actions_layout)
             self.launchers_layout.addWidget(card)
             self.launcher_cards[launcher_id] = {
                 "card": card, "status": status, "update": update_button,
+                "arguments": argument_edit, "save_arguments": save_arguments,
+                "launch": launch_button,
                 "launcher": dict(launcher),
             }
         self.launchers_layout.addStretch()
@@ -2025,6 +2065,38 @@ class GameMover(QWidget):
             self.launchers_tab_index,
             f"Launchery ({update_count})" if update_count else "Launchery",
         )
+
+    def save_launcher_arguments(self, launcher_id, argument_edit):
+        arguments = argument_edit.text().strip()
+        try:
+            parse_launcher_arguments(arguments)
+            saved = self.client_config.get("launcher_arguments")
+            if not isinstance(saved, dict):
+                saved = {}
+            saved[str(launcher_id)] = arguments
+            self.client_config["launcher_arguments"] = saved
+            save_client_config(self.client_config)
+        except (LauncherError, OSError) as error:
+            QMessageBox.warning(self, "Argumenty launcheru", str(error))
+            return False
+        return True
+
+    def launch_managed_launcher(self, launcher, argument_edit):
+        launcher_id = str(launcher.get("id", ""))
+        if not self.save_launcher_arguments(launcher_id, argument_edit):
+            return
+        try:
+            result = perform_managed_launcher_launch(
+                launcher_id, argument_edit.text().strip(),
+            )
+        except LauncherError as error:
+            QMessageBox.critical(self, "Spuštění launcheru", str(error))
+            return
+        card = self.launcher_cards.get(launcher_id, {})
+        status = card.get("status")
+        if status:
+            status.setText(f"{result['name']} byl předán UMU ke spuštění")
+            status.setStyleSheet("color: #74c0fc; font-weight: bold;")
 
     def update_launcher(self, launcher):
         if self.launcher_update_thread and self.launcher_update_thread.isRunning():

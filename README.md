@@ -104,6 +104,15 @@ to install that exact file without a terminal prompt; Heroic should be closed
 first. Unlocking Game Mover's local PAM controls does not replace this separate
 administrator prompt.
 
+An explicitly installed Heroic sideload launcher with one unambiguous Proton
+profile can also be started from its card. Game Mover reads the executable,
+Wine prefix, Proton runner and UMU from the current player's local Heroic
+metadata. Optional arguments are saved only in
+`~/.config/game-mover/config.json`, parsed without a shell and never supplied
+by shared Tips and Notes. For example, a Battle.net CEF compatibility profile
+can locally store `--no-sandbox` without modifying Heroic or the Game Mover
+source tree.
+
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
 Entries can target a game, server, or launcher. Authenticated remote clients can
@@ -771,6 +780,14 @@ například EA App, Ubisoft Connect či GOG Galaxy. Komponenta nalezená pouze u
 Wine prefixu běžné hry se ignoruje. U každé takové položky se zobrazí zdroj a,
 pokud jej lokální metadata nebo odpovídající produktový záznam Wine obsahují,
 také nainstalovaná verze. Game Mover tyto launchery neaktualizuje.
+
+Launcher nainstalovaný jako samostatná položka Heroicu a navázaný na jeden
+jednoznačný Proton profil lze z jeho karty také spustit. Game Mover převezme
+EXE, Wine prefix, Proton i UMU z lokálních metadat Heroicu. Volitelné argumenty
+ukládá jen do `~/.config/game-mover/config.json`, rozděluje je bez shellu a
+nikdy je nepřebírá ze sdílených Tipů a poznámek. Pro Battle.net tak lze místně
+uložit například `--no-sandbox` bez úpravy Heroicu nebo zdrojového kódu Game
+Moveru.
 
 Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi

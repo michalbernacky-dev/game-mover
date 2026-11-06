@@ -238,6 +238,14 @@ uploaded. Installation checks include ordinary path candidates and Steam AppID
 manifest discovery across all configured Steam libraries; configuration checks
 cover bounded file markers and JSON values (including nested JSON strings used
 by CurseForge).
+
+The local Launchers tab may start an explicitly installed Heroic sideload
+launcher through the current player's own Heroic metadata. The client accepts
+only an unambiguous executable contained by its Wine prefix, an executable
+Proton runner recorded by Heroic, and Heroic's local UMU. Optional arguments are
+parsed into a bounded argument vector without a shell and stored only in the
+current user's client configuration. They are never loaded from the shared
+notes database or a remote API response.
 The knowledge tab's target picker is populated from a local installed-game
 inventory rather than from launchers. The desktop process scans the current
 player's private home with that player's identity and combines `/var/Games`,
