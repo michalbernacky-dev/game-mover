@@ -21,6 +21,9 @@ GITHUB_API = "https://api.github.com"
 HEROIC_REPOSITORY = "Heroic-Games-Launcher/HeroicGamesLauncher"
 MAX_RPM_BYTES = 256 * 1024 * 1024
 MAX_LOCAL_METADATA_BYTES = 64 * 1024 * 1024
+SHARED_HEROIC_ROOT = os.path.realpath(
+    os.getenv("GAME_MOVER_HEROIC_SHARED_ROOT", "/var/Games/Heroic"),
+)
 VERSION_RE = re.compile(r"^[vV]?(\d+(?:\.\d+)*)(?:[-+](.*))?$")
 
 
@@ -473,16 +476,30 @@ def managed_launcher_statuses(home=None):
             item["versions"].append(version)
     profiles = _heroic_managed_launch_profiles(home)
     profile_counts = {}
+    profiles_by_launcher = {}
     for profile in profiles:
         profile_counts[profile["launcher_id"]] = (
             profile_counts.get(profile["launcher_id"], 0) + 1
         )
+        profiles_by_launcher.setdefault(profile["launcher_id"], []).append(profile)
     statuses = []
     for item in merged.values():
         versions = item.pop("versions")
         sources = item.pop("sources")
         launcher_id = item["id"]
         profile_count = profile_counts.get(launcher_id, 0)
+        library_mount_supported = (
+            launcher_id == "managed-battle-net" and profile_count == 1
+        )
+        library_mounted = False
+        if library_mount_supported and os.path.isdir(SHARED_HEROIC_ROOT):
+            mountpoint = os.path.join(
+                profiles_by_launcher[launcher_id][0]["prefix"], "drive_c", "Games",
+            )
+            try:
+                library_mounted = os.path.samefile(mountpoint, SHARED_HEROIC_ROOT)
+            except OSError:
+                pass
         statuses.append({
             **item,
             "source": " + ".join(sorted(sources)),
@@ -497,6 +514,8 @@ def managed_launcher_statuses(home=None):
                 "Nalezeno více Heroic profilů"
                 if profile_count > 1 else ""
             ),
+            "library_mount_supported": library_mount_supported,
+            "library_mounted": library_mounted,
             "error": "",
         })
     return sorted(statuses, key=lambda item: item["name"].casefold())

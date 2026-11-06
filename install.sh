@@ -13,6 +13,7 @@ LEGACY_SERVICE_NAME="steam_mover.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 PRIVILEGED_SERVICE_PATH="/etc/systemd/system/${PRIVILEGED_SERVICE_NAME}"
 EA_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-ea-bind@.service"
+LAUNCHER_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-launcher-bind@.service"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 APP_METAINFO="/usr/share/metainfo/game-mover.metainfo.xml"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
@@ -152,12 +153,13 @@ podman_uid="$(id -u "${PODMAN_USER}")"
 runuser -u "${PODMAN_USER}" -- env XDG_RUNTIME_DIR="/run/user/${podman_uid}" \
   systemctl --user enable --now podman.socket podman-restart.service
 ensure_local_admin_token
-mkdir -p /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+mkdir -p /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/ea-mounts"
-chgrp "${GROUP_NAME}" /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
-chmod 0775 /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/launcher-mounts"
+chgrp "${GROUP_NAME}" /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
+chmod 0775 /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 setfacl -m "g:${GROUP_NAME}:rwx,m::rwx,d:g:${GROUP_NAME}:rwx,d:m::rwx" \
-  /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
+  /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 
 echo "[4/8] Instaluji systemd službu pro Flask API (${SERVICE_PATH})"
 copy_if_changed "${SCRIPT_DIR}/game_mover.service" "${SERVICE_PATH}" 644
@@ -167,6 +169,8 @@ copy_if_changed "${SCRIPT_DIR}/game-mover-dns.service" \
   "/etc/systemd/system/game-mover-dns.service" 644
 copy_if_changed "${SCRIPT_DIR}/game-mover-ea-bind@.service" \
   "${EA_BIND_SERVICE_PATH}" 644
+copy_if_changed "${SCRIPT_DIR}/game-mover-launcher-bind@.service" \
+  "${LAUNCHER_BIND_SERVICE_PATH}" 644
 
 echo "[5/8] Desktop launcher (${APP_DESKTOP})"
 desktop_tmp="$(mktemp)"

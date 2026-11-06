@@ -163,12 +163,15 @@ class ServerManagementGuiTest(unittest.TestCase):
                 "latest_version": "", "update_available": False,
                 "update_supported": False, "managed_externally": True,
                 "launch_supported": True, "error": "",
+                "library_mount_supported": True, "library_mounted": False,
             }],
             "update_policy": "pam",
         })
         card = self.window.launcher_cards["managed-battle-net"]
         self.assertIsNotNone(card["arguments"])
         self.assertIsNotNone(card["launch"])
+        self.assertIsNotNone(card["library"])
+        self.assertEqual(card["library"].text(), "Připojit knihovnu jako G:")
         card["arguments"].setText("--no-sandbox")
 
         with (

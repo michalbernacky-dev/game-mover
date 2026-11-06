@@ -235,6 +235,8 @@ class LauncherProviderTest(unittest.TestCase):
             )
 
         self.assertTrue(status["launch_supported"])
+        self.assertTrue(status["library_mount_supported"])
+        self.assertFalse(status["library_mounted"])
         self.assertEqual(result, {"pid": 4321, "name": "Battle.net"})
         command = popen.call_args.args[0]
         self.assertEqual(command, [
@@ -392,6 +394,33 @@ class LauncherApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.get_json()["install_via_client"])
         update.assert_not_called()
+
+    def test_battle_net_library_mount_uses_fixed_privileged_action(self):
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(backend, "require_local_operation", return_value=True),
+            patch.object(
+                backend, "privileged_call", return_value={"message": "mounted"},
+            ) as privileged_call,
+        ):
+            response = self.client.post(
+                "/launchers/managed-battle-net/library",
+                json={"user": "player", "source": "/tmp/evil"}, **self.local,
+            )
+        self.assertEqual(response.status_code, 200)
+        privileged_call.assert_called_once_with(
+            "ensure-launcher-bind",
+            {"launcher_id": "managed-battle-net", "user": "player"},
+            timeout=120,
+        )
+
+    def test_other_launchers_cannot_request_library_mount(self):
+        with patch.object(backend, "require_local_operation", return_value=True):
+            response = self.client.post(
+                "/launchers/managed-ea-app/library",
+                json={"user": "player"}, **self.local,
+            )
+        self.assertEqual(response.status_code, 400)
 
 
 if __name__ == "__main__":

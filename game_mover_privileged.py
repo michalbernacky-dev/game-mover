@@ -41,6 +41,7 @@ from game_mover_ea import (
     heroic_ea_installations,
     heroic_ea_shared_default_detected,
 )
+from game_mover_launchers import LauncherError, managed_launcher_launch_profile
 
 
 SOCKET_PATH = os.getenv(
@@ -65,6 +66,10 @@ SYSTEMD_UNIT_ROOT = os.getenv(
     "GAME_MOVER_SYSTEMD_UNIT_ROOT", "/etc/systemd/system",
 )
 EA_BIND_SERVICE_PREFIX = "game-mover-ea-bind@"
+LAUNCHER_MOUNT_STATE_ROOT = os.getenv(
+    "GAME_MOVER_LAUNCHER_MOUNT_STATE_ROOT", "/etc/game_mover/launcher-mounts",
+)
+LAUNCHER_BIND_SERVICE_PREFIX = "game-mover-launcher-bind@"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,160}$")
@@ -643,6 +648,162 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
     }
 
 
+def _launcher_bind_service(mount_id: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", mount_id):
+        raise PrivilegedError("Neplatný identifikátor launcher bind mountu")
+    return f"{LAUNCHER_BIND_SERVICE_PREFIX}{mount_id}.service"
+
+
+def _launcher_bind_paths(username: str, launcher_id: str, *, create=False):
+    """Resolve the one supported shared-library mount without trusting paths."""
+    username = _safe_username(username)
+    if launcher_id != "managed-battle-net":
+        raise PrivilegedError("Tento launcher nepodporuje sdílenou Heroic knihovnu")
+    account = pwd.getpwnam(username)
+    home = os.path.realpath(account.pw_dir)
+    try:
+        profile = managed_launcher_launch_profile(launcher_id, home=home)
+    except LauncherError as error:
+        raise PrivilegedError(str(error)) from error
+    prefix = os.path.realpath(profile["prefix"])
+    source = _beneath(GAMES_ROOT, "Heroic")
+    drive_c = os.path.join(prefix, "drive_c")
+    mountpoint = os.path.join(drive_c, "Games")
+    dosdevices = os.path.join(prefix, "dosdevices")
+    if (
+        os.path.commonpath((home, prefix)) != home
+        or not os.path.isdir(source)
+        or os.path.islink(source)
+        or not os.path.isdir(drive_c)
+        or os.path.islink(drive_c)
+        or not os.path.isdir(dosdevices)
+        or os.path.islink(dosdevices)
+    ):
+        raise PrivilegedError("Battle.net profil nebo sdílená knihovna nejsou bezpečné")
+    if not os.path.lexists(mountpoint):
+        if not create:
+            raise PrivilegedError("Cíl launcher bind mountu neexistuje")
+        os.mkdir(mountpoint, 0o755)
+        os.chown(mountpoint, account.pw_uid, account.pw_gid)
+    if not os.path.isdir(mountpoint) or os.path.islink(mountpoint):
+        raise PrivilegedError("Cíl launcher bind mountu není bezpečný adresář")
+    try:
+        already_mounted = os.path.samefile(mountpoint, source)
+    except OSError:
+        already_mounted = False
+    metadata = os.stat(mountpoint, follow_symlinks=False)
+    if not already_mounted and (
+        metadata.st_uid != account.pw_uid or os.listdir(mountpoint)
+    ):
+        raise PrivilegedError("Cíl launcher bind mountu musí být prázdný a patřit hráči")
+    drive = os.path.join(dosdevices, "g:")
+    if os.path.lexists(drive):
+        if not os.path.islink(drive) or os.readlink(drive) not in (
+            "/var/Games", "../drive_c/Games",
+        ):
+            raise PrivilegedError("Wine disk G: koliduje s cizím mapováním")
+        if os.readlink(drive) != "../drive_c/Games":
+            os.unlink(drive)
+    if not os.path.lexists(drive):
+        os.symlink("../drive_c/Games", drive)
+        os.lchown(drive, account.pw_uid, account.pw_gid)
+    return source, mountpoint
+
+
+def _read_launcher_marker(mount_id: str) -> dict:
+    _launcher_bind_service(mount_id)
+    path = os.path.join(LAUNCHER_MOUNT_STATE_ROOT, f"{mount_id}.json")
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+            or metadata.st_size > 4096
+        ):
+            raise PrivilegedError("Evidence launcher mountu nemá bezpečné vlastnosti")
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, encoding="utf-8") as stream:
+            payload = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PrivilegedError("Evidenci launcher mountu nelze načíst") from error
+    if not isinstance(payload, dict):
+        raise PrivilegedError("Evidence launcher mountu je neplatná")
+    return payload
+
+
+def _validated_launcher_marker(mount_id: str) -> tuple[str, str]:
+    payload = _read_launcher_marker(mount_id)
+    if set(payload) != {
+        "version", "unit", "user", "launcher_id", "source", "mountpoint",
+    } or payload.get("version") != 1:
+        raise PrivilegedError("Evidence launcher mountu má nepodporovaný formát")
+    username = _safe_username(payload.get("user"))
+    launcher_id = str(payload.get("launcher_id") or "")
+    service = _launcher_bind_service(mount_id)
+    source, mountpoint = _launcher_bind_paths(username, launcher_id)
+    if (
+        payload.get("unit") != service
+        or payload.get("source") != source
+        or payload.get("mountpoint") != mountpoint
+        or hashlib.sha256(mountpoint.encode("utf-8")).hexdigest() != mount_id
+    ):
+        raise PrivilegedError("Evidence launcher mountu neodpovídá místnímu profilu")
+    return source, mountpoint
+
+
+def _run_launcher_bind_service(mount_id: str, *, unmount=False) -> None:
+    if os.geteuid() != 0:
+        raise PrivilegedError("Launcher bind helper musí běžet jako root")
+    source, mountpoint = _validated_launcher_marker(mount_id)
+    if os.path.ismount(mountpoint):
+        result = _run(["/usr/bin/umount", mountpoint], 60)
+        if result["returncode"]:
+            raise PrivilegedError(result["stderr"] or "Launcher mount nelze odpojit")
+    if unmount:
+        return
+    result = _run(["/usr/bin/mount", "--bind", source, mountpoint], 60)
+    if result["returncode"]:
+        raise PrivilegedError(result["stderr"] or "Launcher bind mount selhal")
+    result = _run([
+        "/usr/bin/mount", "-o", "remount,bind,nosuid,nodev", source, mountpoint,
+    ], 60)
+    if result["returncode"]:
+        _run(["/usr/bin/umount", mountpoint], 60)
+        raise PrivilegedError(result["stderr"] or "Zabezpečení launcher mountu selhalo")
+
+
+def _ensure_launcher_bind_mount(parameters: dict) -> dict:
+    username = _safe_username(parameters.get("user"))
+    launcher_id = str(parameters.get("launcher_id") or "")
+    source, mountpoint = _launcher_bind_paths(username, launcher_id, create=True)
+    mount_id = hashlib.sha256(mountpoint.encode("utf-8")).hexdigest()
+    unit = _launcher_bind_service(mount_id)
+    marker = json.dumps({
+        "version": 1, "unit": unit, "user": username,
+        "launcher_id": launcher_id, "source": source, "mountpoint": mountpoint,
+    }, ensure_ascii=False, sort_keys=True) + "\n"
+    os.makedirs(LAUNCHER_MOUNT_STATE_ROOT, mode=0o700, exist_ok=True)
+    marker_path = os.path.join(LAUNCHER_MOUNT_STATE_ROOT, f"{mount_id}.json")
+    if os.path.lexists(marker_path):
+        if _read_launcher_marker(mount_id) != json.loads(marker):
+            raise PrivilegedError("Evidence launcher mountu koliduje")
+    else:
+        _write_managed_file(marker_path, marker, 0o600)
+    for command, timeout in (
+        (["/usr/bin/systemctl", "daemon-reload"], 30),
+        (["/usr/bin/systemctl", "enable", unit], 60),
+        (["/usr/bin/systemctl", "restart", unit], 60),
+    ):
+        result = _run(command, timeout)
+        if result["returncode"]:
+            raise PrivilegedError(result["stderr"] or "Aktivace launcher mountu selhala")
+    return {
+        "message": "Sdílená Heroic knihovna je trvale připojena jako G:",
+        "mount_unit": unit,
+    }
+
+
 def _steam_cache_status(parameters: dict) -> dict:
     username = _safe_username(parameters.get("user"))
     return inspect_steam_cache(_steamapps(username, missing_ok=True), GAMES_ROOT)
@@ -1068,6 +1229,7 @@ def dispatch(action: str, parameters: dict) -> dict:
         "steam-shader-cache-status": _steam_shader_cache_status,
         "clear-steam-shader-cache": _clear_steam_shader_cache,
         "fix-permissions": _fix_permissions,
+        "ensure-launcher-bind": _ensure_launcher_bind_mount,
     }
     handler = handlers.get(action)
     if handler is None:
@@ -1215,6 +1377,16 @@ if __name__ == "__main__":
         try:
             _run_ea_bind_service(
                 sys.argv[2], unmount=sys.argv[1] == "--ea-unmount",
+            )
+        except (PrivilegedError, OSError, subprocess.SubprocessError) as error:
+            print(_bounded_text(error, 2048), file=sys.stderr)
+            raise SystemExit(1) from error
+    elif len(sys.argv) == 3 and sys.argv[1] in (
+        "--launcher-mount", "--launcher-unmount",
+    ):
+        try:
+            _run_launcher_bind_service(
+                sys.argv[2], unmount=sys.argv[1] == "--launcher-unmount",
             )
         except (PrivilegedError, OSError, subprocess.SubprocessError) as error:
             print(_bounded_text(error, 2048), file=sys.stderr)

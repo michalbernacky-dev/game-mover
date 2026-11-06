@@ -13,7 +13,7 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
-## Local Heroic launcher profiles: 2026-11-05
+## Local Heroic launcher profiles: 2026-11-06
 
 Version 0.39.0 adds an unprivileged local launch action for launchers explicitly
 installed as Heroic sideload library entries. Discovery is performed by the Qt
@@ -28,9 +28,20 @@ Optional arguments are stored with mode `0600` in the existing local client
 configuration. Shared Tips and Notes and remote API responses cannot provide or
 trigger them. Focused tests cover profile discovery, EXE confinement, argument
 bounds, shell-free process construction, local GUI persistence and dispatch.
-Package build, installation and live launch through the new GUI remain pending;
-the equivalent UMU/Proton command was verified interactively before the feature
-was implemented.
+The package build passed. Installation and live launch through the new GUI
+remain pending; the equivalent UMU/Proton command was verified interactively
+before the feature was implemented.
+
+Battle.net additionally supports an authorized persistent bind mount under the
+existing `game.link` policy. The request contains only the local username and
+fixed `managed-battle-net` ID. The broker re-resolves the Heroic profile,
+confines it below that user's home, fixes the source to `/var/Games/Heroic` and
+the destination to `drive_c/Games`, rejects conflicting or non-empty targets
+and writes a root-only marker. The fixed systemd template receives only the
+marker hash and its short-lived helper alone receives `CAP_SYS_ADMIN`; every
+start revalidates the source, target, launcher metadata and Wine `G:` mapping.
+The equivalent bind mount and Wine drive were verified interactively before the
+managed service was implemented; packaged-service deployment remains pending.
 
 ## PAM target and state presentation follow-up: 2026-10-24
 

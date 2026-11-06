@@ -26,6 +26,20 @@ class ServiceHardeningTest(unittest.TestCase):
         self.assertIn("game-mover-ea-bind@.service", specification)
         self.assertIn("game-mover-ea-bind@.service", installer)
 
+    def test_launcher_bind_template_uses_only_a_marker_id(self):
+        unit = pathlib.Path("game-mover-launcher-bind@.service").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE", unit)
+        self.assertIn("NoNewPrivileges=yes", unit)
+        self.assertIn("--launcher-mount %i", unit)
+        self.assertIn("--launcher-unmount %i", unit)
+        self.assertNotIn("%f", unit)
+        specification = pathlib.Path("game-mover.spec").read_text(encoding="utf-8")
+        installer = pathlib.Path("install.sh").read_text(encoding="utf-8")
+        self.assertIn("game-mover-launcher-bind@.service", specification)
+        self.assertIn("game-mover-launcher-bind@.service", installer)
+
     def test_network_api_is_unprivileged_and_strictly_sandboxed(self):
         unit = pathlib.Path("game_mover.service").read_text(encoding="utf-8")
         required = (
