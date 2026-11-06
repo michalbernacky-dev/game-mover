@@ -2325,6 +2325,26 @@ def launcher_update(launcher_id):
         return jsonify({"message": str(error)}), 409
 
 
+@app.route("/launchers/<launcher_id>/library", methods=["POST"])
+def launcher_library_mount(launcher_id):
+    if not require_local_operation(request, "game.link"):
+        return jsonify({"message": "Unauthorized"}), 403
+    data = request.get_json(silent=True) or {}
+    user = data.get("user")
+    if launcher_id != "managed-battle-net" or not user:
+        return jsonify({
+            "message": "Nepodporovaný launcher nebo chybějící uživatel",
+        }), 400
+    if not PRIVILEGED_HELPER_ENABLED:
+        return jsonify({"message": "Privilegovaný helper není dostupný"}), 503
+    try:
+        return jsonify(privileged_call("ensure-launcher-bind", {
+            "launcher_id": launcher_id, "user": user,
+        }, timeout=120))
+    except PrivilegedError as error:
+        return jsonify({"message": str(error)}), 400
+
+
 @app.route("/security/policies", methods=["GET", "PUT"])
 def security_policies():
     # The policy controlling security.manage is intentionally not configurable.

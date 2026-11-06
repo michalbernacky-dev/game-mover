@@ -21,11 +21,12 @@
   <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
   <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.39.0" date="2026-11-05">
+    <release version="0.39.0" date="2026-11-06">
       <description>
         <ul>
           <li>Launch verified Heroic-managed launchers from their Launcher card.</li>
           <li>Save optional command-line arguments only in the current user's local configuration.</li>
+          <li>Persistently expose the shared Heroic library to Battle.net as Wine drive G:.</li>
         </ul>
       </description>
     </release>

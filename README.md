@@ -113,6 +113,13 @@ by shared Tips and Notes. For example, a Battle.net CEF compatibility profile
 can locally store `--no-sandbox` without modifying Heroic or the Game Mover
 source tree.
 
+The Battle.net card can additionally expose the fixed shared Heroic library
+`/var/Games/Heroic` as `G:` inside its verified Wine prefix. The authorized
+action creates a persistent systemd bind mount at `drive_c/Games`, so UMU's
+container sees the payload and the mapping survives reboot. Neither the client
+nor the API supplies a source or destination path; the root helper derives both
+again from the selected local user and Heroic metadata.
+
 The **Tips and Notes** tab stores verified, platform-specific procedures in the
 host SQLite database at `/var/lib/game-platform/game-mover-notes.sqlite3`.
 Entries can target a game, server, or launcher. Authenticated remote clients can
@@ -788,6 +795,13 @@ ukládá jen do `~/.config/game-mover/config.json`, rozděluje je bez shellu a
 nikdy je nepřebírá ze sdílených Tipů a poznámek. Pro Battle.net tak lze místně
 uložit například `--no-sandbox` bez úpravy Heroicu nebo zdrojového kódu Game
 Moveru.
+
+Karta Battle.netu může navíc zpřístupnit pevnou sdílenou Heroic knihovnu
+`/var/Games/Heroic` jako disk `G:` v ověřeném Wine prefixu. Autorizovaná operace
+vytvoří trvalý systemd bind mount do `drive_c/Games`, takže data vidí i UMU
+kontejner a připojení přežije restart. Klient ani API neposílají zdrojovou či
+cílovou cestu; root helper je znovu odvodí z vybraného lokálního uživatele a
+metadat Heroicu.
 
 Záložka **Tipy a poznámky** ukládá vlastní ověřené postupy podle hry, serveru
 nebo launcheru a platformy/prostředí. Data jsou v hostitelské SQLite databázi

@@ -70,6 +70,8 @@ install -Dpm0644 game-mover-privileged.service \
 install -Dpm0644 game-mover-dns.service %{buildroot}%{_unitdir}/game-mover-dns.service
 install -Dpm0644 game-mover-ea-bind@.service \
     %{buildroot}%{_unitdir}/game-mover-ea-bind@.service
+install -Dpm0644 game-mover-launcher-bind@.service \
+    %{buildroot}%{_unitdir}/game-mover-launcher-bind@.service
 install -Dpm0644 game-mover.sysusers \
     %{buildroot}%{_sysusersdir}/game-mover.conf
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
@@ -128,11 +130,12 @@ for config in servers.json gate.json security.json dns.json dns-runtime.json dns
     fi
 done
 
-mkdir -p /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache
-chgrp gemers /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
-chmod 0775 /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
+mkdir -p /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
+install -d -m 0700 -o root -g root /etc/game_mover/launcher-mounts
+chgrp gemers /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache || :
+chmod 0775 /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache || :
 setfacl -m 'g:gemers:rwx,m::rwx,d:g:gemers:rwx,d:m::rwx' \
-    /var/Games /var/Games/EA /var/Games_links /var/Games/steam-cache || :
+    /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache || :
 
 if [ -L /var/lib/game-platform/servers ]; then
     echo "Managed server directory must not be a symbolic link" >&2
@@ -182,15 +185,17 @@ fi
 %{_unitdir}/game-mover-privileged.service
 %{_unitdir}/game-mover-dns.service
 %{_unitdir}/game-mover-ea-bind@.service
+%{_unitdir}/game-mover-launcher-bind@.service
 %{_sysusersdir}/game-mover.conf
 %{_datadir}/applications/game-mover.desktop
 %{_metainfodir}/game-mover.metainfo.xml
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
-* Thu Nov 05 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
+* Fri Nov 06 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
 - Launch verified Heroic-managed launchers through their local UMU and Proton profile
 - Store optional launcher arguments only in the current user's client configuration
+- Persistently expose the shared Heroic library to Battle.net as Wine drive G:
 
 * Thu Oct 22 2026 Game Mover Packager <packager@example.invalid> - 0.38.1-1
 - Fix the Mover GUI to consume the direct Steam shader-cache status response

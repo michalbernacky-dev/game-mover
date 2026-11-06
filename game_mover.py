@@ -819,6 +819,30 @@ class LauncherUpdateThread(QThread):
         )
 
 
+class LauncherLibraryThread(QThread):
+    completed = pyqtSignal(dict)
+
+    def __init__(self, base_url, launcher_id, user, headers):
+        super().__init__()
+        self.base_url = base_url
+        self.launcher_id = launcher_id
+        self.user = user
+        self.headers = headers
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{self.base_url}/launchers/{self.launcher_id}/library",
+                json={"user": self.user}, headers=self.headers, timeout=130,
+            )
+            data = response.json()
+            if response.status_code != 200:
+                raise RuntimeError(data.get("message", f"HTTP {response.status_code}"))
+            self.completed.emit({**data, "launcher_id": self.launcher_id})
+        except Exception as error:
+            self.completed.emit({"launcher_id": self.launcher_id, "error": str(error)})
+
+
 class InstalledGamesThread(QThread):
     loaded = pyqtSignal(dict)
 
@@ -907,6 +931,7 @@ class GameMover(QWidget):
         self.minecraft_install_thread = None
         self.launcher_status_thread = None
         self.launcher_update_thread = None
+        self.launcher_library_thread = None
         self.installed_games_thread = None
         self.system_resources_thread = None
         self.system_resources_refresh_pending = False
@@ -2020,6 +2045,7 @@ class GameMover(QWidget):
             argument_edit = None
             launch_button = None
             save_arguments = None
+            library_button = None
             if launcher.get("launch_supported"):
                 argument_edit = QLineEdit(card)
                 argument_edit.setPlaceholderText("Argumenty, např. --no-sandbox")
@@ -2046,6 +2072,21 @@ class GameMover(QWidget):
                 )
                 launch_actions.addWidget(launch_button)
                 actions_layout.addLayout(launch_actions)
+                if launcher.get("library_mount_supported"):
+                    library_button = QPushButton(
+                        "Obnovit trvalý disk G:"
+                        if launcher.get("library_mounted")
+                        else "Připojit knihovnu jako G:",
+                        card,
+                    )
+                    library_button.setEnabled(bool(
+                        self.local_mover_operation_headers("game.link")
+                    ))
+                    library_button.clicked.connect(
+                        lambda _checked=False, item=dict(launcher):
+                        self.mount_launcher_library(item)
+                    )
+                    actions_layout.addWidget(library_button)
             elif launcher.get("launch_error"):
                 status.setToolTip(str(launcher["launch_error"]))
             row.addLayout(actions_layout)
@@ -2054,6 +2095,7 @@ class GameMover(QWidget):
                 "card": card, "status": status, "update": update_button,
                 "arguments": argument_edit, "save_arguments": save_arguments,
                 "launch": launch_button,
+                "library": library_button,
                 "launcher": dict(launcher),
             }
         self.launchers_layout.addStretch()
@@ -2097,6 +2139,43 @@ class GameMover(QWidget):
         if status:
             status.setText(f"{result['name']} byl předán UMU ke spuštění")
             status.setStyleSheet("color: #74c0fc; font-weight: bold;")
+
+    def mount_launcher_library(self, launcher):
+        if self.launcher_library_thread and self.launcher_library_thread.isRunning():
+            return
+        headers = self.local_mover_operation_headers("game.link")
+        if not headers:
+            QMessageBox.warning(
+                self, "Sdílená knihovna",
+                "Připojení knihovny není povolené, nebo vyžaduje místní PAM "
+                "odemčení v Zabezpečení.",
+            )
+            return
+        launcher_id = str(launcher.get("id", ""))
+        card = self.launcher_cards.get(launcher_id, {})
+        if card.get("library"):
+            card["library"].setEnabled(False)
+        status = card.get("status")
+        if status:
+            status.setText("Nastavuji trvalý bind mount…")
+        self.launcher_library_thread = LauncherLibraryThread(
+            self.launcher_api_url(), launcher_id, self.user, headers,
+        )
+        self.launcher_library_thread.completed.connect(
+            self.on_launcher_library_completed,
+        )
+        self.launcher_library_thread.start()
+
+    def on_launcher_library_completed(self, payload):
+        if payload.get("error"):
+            QMessageBox.critical(
+                self, "Sdílená knihovna", str(payload["error"]),
+            )
+        else:
+            QMessageBox.information(
+                self, "Sdílená knihovna", payload.get("message", "Hotovo"),
+            )
+        self.refresh_launcher_statuses()
 
     def update_launcher(self, launcher):
         if self.launcher_update_thread and self.launcher_update_thread.isRunning():
@@ -4014,6 +4093,14 @@ class GameMover(QWidget):
                     and self.launcher_update_thread.isRunning()
                 )
             )
+            if entry.get("library"):
+                entry["library"].setEnabled(
+                    bool(self.local_mover_operation_headers("game.link"))
+                    and not (
+                        self.launcher_library_thread is not None
+                        and self.launcher_library_thread.isRunning()
+                    )
+                )
         if self.server_management_pages:
             self.update_open_server_management_pages()
         self.update_mover_action_availability()
