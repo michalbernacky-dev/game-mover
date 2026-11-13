@@ -51,7 +51,9 @@ def heroic_payload(version="2.22.1", *, digest=""):
 
 class LauncherProviderTest(unittest.TestCase):
     @staticmethod
-    def create_heroic_battle_net_profile(home):
+    def create_heroic_profile(
+        home, *, title, app_id, prefix_name, executable_relative,
+    ):
         heroic = home / ".config/heroic"
         (heroic / "sideload_apps").mkdir(parents=True)
         (heroic / "GamesConfig").mkdir()
@@ -63,15 +65,14 @@ class LauncherProviderTest(unittest.TestCase):
         proton.parent.mkdir(parents=True)
         proton.write_text("#!/bin/sh\n")
         proton.chmod(0o755)
-        prefix = home / "Games/Heroic/Prefixes/Battle.net"
-        executable = prefix / "drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
+        prefix = home / "Games/Heroic/Prefixes" / prefix_name
+        executable = prefix / executable_relative
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"MZ")
         executable.chmod(0o755)
-        app_id = "battle-local"
         (heroic / "sideload_apps/library.json").write_text(json.dumps({
             "games": [{
-                "title": "Battle.net", "app_name": app_id,
+                "title": title, "app_name": app_id,
                 "is_installed": True,
                 "install": {"executable": str(executable), "platform": "Windows"},
             }],
@@ -83,6 +84,30 @@ class LauncherProviderTest(unittest.TestCase):
             },
         }))
         return prefix, executable, proton, umu
+
+    @classmethod
+    def create_heroic_battle_net_profile(cls, home):
+        return cls.create_heroic_profile(
+            home,
+            title="Battle.net",
+            app_id="battle-local",
+            prefix_name="Battle.net",
+            executable_relative=(
+                "drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
+            ),
+        )
+
+    @classmethod
+    def create_heroic_twinstar_profile(cls, home):
+        return cls.create_heroic_profile(
+            home,
+            title="WoW - TwinStar",
+            app_id="twinstar-local",
+            prefix_name="WoW - TwinStar",
+            executable_relative=(
+                "drive_c/Program Files/TwinStar Launcher/TwinStar Launcher.exe"
+            ),
+        )
 
     def test_semantic_versions_and_prereleases_are_compared(self):
         self.assertTrue(launchers.version_is_newer("2.22.1", "2.22.0"))
@@ -250,6 +275,31 @@ class LauncherProviderTest(unittest.TestCase):
         self.assertTrue(options["start_new_session"])
         self.assertNotIn("shell", options)
 
+    def test_twinstar_profile_is_managed_and_launchable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home/player"
+            prefix, executable, proton, umu = self.create_heroic_twinstar_profile(home)
+            status = next(
+                item for item in launchers.managed_launcher_statuses(str(home))
+                if item["id"] == "managed-twinstar"
+            )
+            popen = Mock(return_value=Mock(pid=9876))
+
+            result = launchers.launch_managed_launcher(
+                "managed-twinstar", home=str(home), popen=popen,
+            )
+
+        self.assertEqual(status["name"], "TwinStar Launcher")
+        self.assertTrue(status["launch_supported"])
+        self.assertTrue(status["library_mount_supported"])
+        self.assertEqual(result, {"pid": 9876, "name": "TwinStar Launcher"})
+        self.assertEqual(
+            popen.call_args.args[0], [str(umu.resolve()), str(executable.resolve())],
+        )
+        options = popen.call_args.kwargs
+        self.assertEqual(options["env"]["WINEPREFIX"], str(prefix.resolve()))
+        self.assertEqual(options["env"]["PROTONPATH"], str(proton.parent.resolve()))
+
     def test_managed_launch_rejects_executable_outside_its_prefix(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home/player"
@@ -395,7 +445,7 @@ class LauncherApiTest(unittest.TestCase):
         self.assertTrue(response.get_json()["install_via_client"])
         update.assert_not_called()
 
-    def test_battle_net_library_mount_uses_fixed_privileged_action(self):
+    def test_shared_library_launchers_use_fixed_privileged_action(self):
         with (
             patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
             patch.object(backend, "require_local_operation", return_value=True),
@@ -403,16 +453,20 @@ class LauncherApiTest(unittest.TestCase):
                 backend, "privileged_call", return_value={"message": "mounted"},
             ) as privileged_call,
         ):
-            response = self.client.post(
-                "/launchers/managed-battle-net/library",
-                json={"user": "player", "source": "/tmp/evil"}, **self.local,
-            )
-        self.assertEqual(response.status_code, 200)
-        privileged_call.assert_called_once_with(
-            "ensure-launcher-bind",
-            {"launcher_id": "managed-battle-net", "user": "player"},
-            timeout=120,
-        )
+            for launcher_id in ("managed-battle-net", "managed-twinstar"):
+                with self.subTest(launcher_id=launcher_id):
+                    privileged_call.reset_mock()
+                    response = self.client.post(
+                        f"/launchers/{launcher_id}/library",
+                        json={"user": "player", "source": "/untrusted/source"},
+                        **self.local,
+                    )
+                    self.assertEqual(response.status_code, 200)
+                    privileged_call.assert_called_once_with(
+                        "ensure-launcher-bind",
+                        {"launcher_id": launcher_id, "user": "player"},
+                        timeout=120,
+                    )
 
     def test_other_launchers_cannot_request_library_mount(self):
         with patch.object(backend, "require_local_operation", return_value=True):

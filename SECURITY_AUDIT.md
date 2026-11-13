@@ -13,7 +13,7 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
-## Local Heroic launcher profiles: 2026-11-06
+## Local Heroic launcher profiles: updated 2026-11-13
 
 Version 0.39.0 adds an unprivileged local launch action for launchers explicitly
 installed as Heroic sideload library entries. Discovery is performed by the Qt
@@ -42,6 +42,18 @@ marker hash and its short-lived helper alone receives `CAP_SYS_ADMIN`; every
 start revalidates the source, target, launcher metadata and Wine `G:` mapping.
 The equivalent bind mount and Wine drive were verified interactively before the
 managed service was implemented; packaged-service deployment remains pending.
+
+The 2026-11-13 source update adds the explicit `managed-twinstar` launcher ID
+and recognizes only the normalized `twinstar`, `twinstar-launcher` and
+`wow-twinstar` aliases. TwinStar shares Battle.net's fixed Heroic-library
+capability boundary: the API and broker accept only the allowlisted ID and a
+local username, independently re-resolve one Heroic profile, keep the EXE
+confined to that prefix, and derive the same fixed source and destination.
+Other managed launchers remain rejected. Focused provider, API and broker tests
+cover discovery, shell-free UMU launch construction, both allowed mount IDs and
+rejection of an unlisted launcher. Local source verification found the migrated
+TwinStar profile launchable and its existing `G:` mount active; packaged-service
+deployment remains pending.
 
 ## PAM target and state presentation follow-up: 2026-10-24
 

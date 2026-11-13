@@ -102,12 +102,12 @@ per-player destination before mounting. The API and long-running broker never
 accept a source or destination path from the client and do not gain
 `CAP_SYS_ADMIN`; only the short-lived systemd mount helper receives it.
 
-Battle.net uses the same capability boundary for a launcher-wide Heroic
-library mount. The client requests only the fixed launcher ID and local
-username under the existing `game.link` policy. The broker independently
-resolves one Heroic Battle.net profile, fixes the source to
-`/var/Games/Heroic`, fixes the destination to `drive_c/Games` below that
-profile, and records root-only marker state. An instance of
+Battle.net and TwinStar Launcher use the same capability boundary for a
+launcher-wide Heroic library mount. The client requests only an explicitly
+allowlisted launcher ID and local username under the existing `game.link`
+policy. The broker independently resolves one matching Heroic profile, fixes
+the source to `/var/Games/Heroic`, fixes the destination to `drive_c/Games`
+below that profile, and records root-only marker state. An instance of
 `game-mover-launcher-bind@.service` receives only the marker hash, revalidates
 the profile at every start, mounts with `nosuid,nodev`, and provides the Wine
 `G:` mapping. Arbitrary launcher, source, destination and Wine-drive mappings
