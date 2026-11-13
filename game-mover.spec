@@ -192,10 +192,11 @@ fi
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
-* Fri Nov 06 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
+* Fri Nov 13 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
 - Launch verified Heroic-managed launchers through their local UMU and Proton profile
 - Store optional launcher arguments only in the current user's client configuration
 - Persistently expose the shared Heroic library to Battle.net as Wine drive G:
+- Recognize TwinStar Launcher and give its verified profile the same shared-library support
 
 * Thu Oct 22 2026 Game Mover Packager <packager@example.invalid> - 0.38.1-1
 - Fix the Mover GUI to consume the direct Steam shader-cache status response
