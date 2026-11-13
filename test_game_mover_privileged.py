@@ -11,35 +11,48 @@ from game_mover_ea import EaInstallation
 
 class PrivilegedBrokerTest(unittest.TestCase):
     def test_launcher_bind_uses_fixed_heroic_source_and_verified_prefix(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            home = root / "home/player"
-            prefix = home / "Games/Heroic/Prefixes/Battle.net"
-            (prefix / "drive_c").mkdir(parents=True)
-            (prefix / "dosdevices").mkdir()
-            games_root = root / "Games"
-            source = games_root / "Heroic"
-            source.mkdir(parents=True)
-            account = Mock(
-                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
-            )
-            with (
-                patch.object(privileged, "GAMES_ROOT", str(games_root.resolve())),
-                patch.object(privileged, "_safe_username", return_value="player"),
-                patch.object(privileged.pwd, "getpwnam", return_value=account),
-                patch.object(privileged, "managed_launcher_launch_profile", return_value={
-                    "prefix": str(prefix),
-                }),
-            ):
-                resolved_source, mountpoint = privileged._launcher_bind_paths(
-                    "player", "managed-battle-net", create=True,
-                )
+        for launcher_id, prefix_name in (
+            ("managed-battle-net", "Battle.net"),
+            ("managed-twinstar", "WoW - TwinStar"),
+        ):
+            with self.subTest(launcher_id=launcher_id):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    home = root / "home/player"
+                    prefix = home / "Games/Heroic/Prefixes" / prefix_name
+                    (prefix / "drive_c").mkdir(parents=True)
+                    (prefix / "dosdevices").mkdir()
+                    games_root = root / "Games"
+                    source = games_root / "Heroic"
+                    source.mkdir(parents=True)
+                    account = Mock(
+                        pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
+                    )
+                    with (
+                        patch.object(
+                            privileged, "GAMES_ROOT", str(games_root.resolve()),
+                        ),
+                        patch.object(
+                            privileged, "_safe_username", return_value="player",
+                        ),
+                        patch.object(
+                            privileged.pwd, "getpwnam", return_value=account,
+                        ),
+                        patch.object(
+                            privileged,
+                            "managed_launcher_launch_profile",
+                            return_value={"prefix": str(prefix)},
+                        ),
+                    ):
+                        resolved_source, mountpoint = privileged._launcher_bind_paths(
+                            "player", launcher_id, create=True,
+                        )
 
-            self.assertEqual(resolved_source, str(source))
-            self.assertEqual(mountpoint, str(prefix / "drive_c/Games"))
-            self.assertEqual(
-                os.readlink(prefix / "dosdevices/g:"), "../drive_c/Games",
-            )
+                    self.assertEqual(resolved_source, str(source))
+                    self.assertEqual(mountpoint, str(prefix / "drive_c/Games"))
+                    self.assertEqual(
+                        os.readlink(prefix / "dosdevices/g:"), "../drive_c/Games",
+                    )
 
     def test_launcher_bind_rejects_every_other_launcher(self):
         account = Mock(pw_uid=1000, pw_gid=1000, pw_dir="/home/player")

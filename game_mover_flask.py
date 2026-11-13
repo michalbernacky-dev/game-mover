@@ -89,7 +89,12 @@ from game_mover_whitelist import (
     whitelist_command,
 )
 from game_mover_logs import WorkloadLogError, read_minecraft_latest_log
-from game_mover_launchers import LauncherError, launcher_statuses, update_launcher
+from game_mover_launchers import (
+    LauncherError,
+    SHARED_LIBRARY_LAUNCHER_IDS,
+    launcher_statuses,
+    update_launcher,
+)
 from game_mover_game_inventory import scan_installed_games
 from game_mover_game_filters import is_excluded_game
 from game_mover_ea import (
@@ -2331,7 +2336,7 @@ def launcher_library_mount(launcher_id):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.get_json(silent=True) or {}
     user = data.get("user")
-    if launcher_id != "managed-battle-net" or not user:
+    if launcher_id not in SHARED_LIBRARY_LAUNCHER_IDS or not user:
         return jsonify({
             "message": "Nepodporovaný launcher nebo chybějící uživatel",
         }), 400

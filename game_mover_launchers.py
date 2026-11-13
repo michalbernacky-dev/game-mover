@@ -24,6 +24,10 @@ MAX_LOCAL_METADATA_BYTES = 64 * 1024 * 1024
 SHARED_HEROIC_ROOT = os.path.realpath(
     os.getenv("GAME_MOVER_HEROIC_SHARED_ROOT", "/var/Games/Heroic"),
 )
+SHARED_LIBRARY_LAUNCHER_IDS = frozenset({
+    "managed-battle-net",
+    "managed-twinstar",
+})
 VERSION_RE = re.compile(r"^[vV]?(\d+(?:\.\d+)*)(?:[-+](.*))?$")
 
 
@@ -89,6 +93,10 @@ MANAGED_LAUNCHERS = (
     ManagedLauncherDefinition(
         "battle-net", "Battle.net", "lutris_battlenet",
         ("battle-net", "battle-net-launcher", "battlenet", "blizzard-battle-net"),
+    ),
+    ManagedLauncherDefinition(
+        "twinstar", "TwinStar Launcher", "applications-games",
+        ("twinstar", "twinstar-launcher", "wow-twinstar"),
     ),
     ManagedLauncherDefinition(
         "amazon-games", "Amazon Games", "lutris_amazon-games",
@@ -489,7 +497,7 @@ def managed_launcher_statuses(home=None):
         launcher_id = item["id"]
         profile_count = profile_counts.get(launcher_id, 0)
         library_mount_supported = (
-            launcher_id == "managed-battle-net" and profile_count == 1
+            launcher_id in SHARED_LIBRARY_LAUNCHER_IDS and profile_count == 1
         )
         library_mounted = False
         if library_mount_supported and os.path.isdir(SHARED_HEROIC_ROOT):

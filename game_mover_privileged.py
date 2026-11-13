@@ -41,7 +41,11 @@ from game_mover_ea import (
     heroic_ea_installations,
     heroic_ea_shared_default_detected,
 )
-from game_mover_launchers import LauncherError, managed_launcher_launch_profile
+from game_mover_launchers import (
+    LauncherError,
+    SHARED_LIBRARY_LAUNCHER_IDS,
+    managed_launcher_launch_profile,
+)
 
 
 SOCKET_PATH = os.getenv(
@@ -655,9 +659,9 @@ def _launcher_bind_service(mount_id: str) -> str:
 
 
 def _launcher_bind_paths(username: str, launcher_id: str, *, create=False):
-    """Resolve the one supported shared-library mount without trusting paths."""
+    """Resolve an allowlisted shared-library mount without trusting paths."""
     username = _safe_username(username)
-    if launcher_id != "managed-battle-net":
+    if launcher_id not in SHARED_LIBRARY_LAUNCHER_IDS:
         raise PrivilegedError("Tento launcher nepodporuje sdílenou Heroic knihovnu")
     account = pwd.getpwnam(username)
     home = os.path.realpath(account.pw_dir)
@@ -679,7 +683,7 @@ def _launcher_bind_paths(username: str, launcher_id: str, *, create=False):
         or not os.path.isdir(dosdevices)
         or os.path.islink(dosdevices)
     ):
-        raise PrivilegedError("Battle.net profil nebo sdílená knihovna nejsou bezpečné")
+        raise PrivilegedError("Profil launcheru nebo sdílená knihovna nejsou bezpečné")
     if not os.path.lexists(mountpoint):
         if not create:
             raise PrivilegedError("Cíl launcher bind mountu neexistuje")
