@@ -1902,8 +1902,9 @@ def move_game():
         "message": "Persistent bind mounts require the privileged helper",
     }), 503
 
+@app.route("/mount_game", methods=["POST"])
 @app.route("/create_symlink", methods=["POST"])
-def create_symlink():
+def mount_game():
     if not require_local_operation(request, "game.link"):
         return jsonify({"message": "Unauthorized"}), 403
     data = request.get_json(silent=True) or {}
@@ -1917,7 +1918,7 @@ def create_symlink():
         return jsonify({"message": "Game Mover supports shared game data only for Steam and EA App"}), 400
     if PRIVILEGED_HELPER_ENABLED:
         try:
-            return jsonify(privileged_call("create-symlink", {
+            return jsonify(privileged_call("mount-game", {
                 "platform": platform, "game_name": game_name, "user": user,
             }))
         except PrivilegedError as error:

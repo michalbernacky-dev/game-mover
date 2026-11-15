@@ -107,7 +107,8 @@ DENIED_SYSTEM_UNITS = {
     "game-mover-privileged.service",
 }
 USER_FILESYSTEM_ACTIONS = {
-    "move-game", "create-symlink", "set-steam-cache", "steam-cache-status",
+    "move-game", "mount-game", "create-symlink", "set-steam-cache",
+    "steam-cache-status",
     "clear-steam-shader-cache",
     "steam-shader-cache-status",
 }
@@ -361,7 +362,7 @@ def _move_game(parameters: dict) -> dict:
     return result
 
 
-def _create_symlink(parameters: dict) -> dict:
+def _mount_game(parameters: dict) -> dict:
     platform = parameters.get("platform")
     if platform not in ("steam", "ea"):
         raise PrivilegedError("Sdílení dat je podporováno pouze pro Steam a EA App")
@@ -442,6 +443,27 @@ def _create_symlink(parameters: dict) -> dict:
         "steam_mountpoint": source,
         "steam_mount_kind": "game",
     }
+
+
+# Compatibility for callers and tests that used the pre-bind-mount helper name.
+_create_symlink = _mount_game
+
+
+def _prepare_legacy_steam_proxy(parameters: dict) -> None:
+    """Repair only the proxy directory needed to remove an exact legacy link."""
+    username = _safe_username(parameters.get("user"))
+    game = _safe_game_name(parameters.get("game_name"))
+    target = _beneath(_beneath(GAMES_ROOT, "steam"), game)
+    source = _beneath(_beneath(_steamapps(username), "common"), game, allow_missing=True)
+    expected_proxy = os.path.join(GAMES_LINKS_ROOT, username, "steam", game)
+    if (
+        not os.path.islink(source)
+        or os.readlink(source) != expected_proxy
+        or not os.path.islink(expected_proxy)
+        or os.path.realpath(expected_proxy) != os.path.realpath(target)
+    ):
+        return
+    _prepare_user_proxy_base(username, "steam")
 
 
 def _ea_mount_unit_name(mountpoint: str) -> str:
@@ -1402,7 +1424,8 @@ def dispatch(action: str, parameters: dict) -> dict:
         "pihole": _pihole,
         "timekpr-config": _timekpr_config,
         "move-game": _move_game,
-        "create-symlink": _create_symlink,
+        "mount-game": _mount_game,
+        "create-symlink": _mount_game,
         "set-steam-cache": _set_steam_cache,
         "steam-cache-status": _steam_cache_status,
         "steam-shader-cache-status": _steam_shader_cache_status,
@@ -1453,9 +1476,14 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
 
 def _broker_dispatch(action: str, parameters: dict) -> dict:
     if action in USER_FILESYSTEM_ACTIONS:
+        if (
+            action in ("mount-game", "create-symlink")
+            and parameters.get("platform") == "steam"
+        ):
+            _prepare_legacy_steam_proxy(parameters)
         result = _filesystem_as_user(action, parameters)
         if (
-            action in ("move-game", "create-symlink")
+            action in ("move-game", "mount-game", "create-symlink")
             and parameters.get("platform") == "ea"
         ):
             return _ensure_ea_bind_mount(
@@ -1464,7 +1492,7 @@ def _broker_dispatch(action: str, parameters: dict) -> dict:
         if (
             action == "set-steam-cache"
             or (
-                action in ("move-game", "create-symlink")
+                action in ("move-game", "mount-game", "create-symlink")
                 and parameters.get("platform") == "steam"
             )
         ):

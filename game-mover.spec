@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.40.0
+Version:        0.40.1
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 URL:            https://github.com/michalbernacky-dev/game-mover
@@ -35,7 +35,7 @@ BuildRequires:  systemd-rpm-macros
 
 %description
 Game Mover provides:
-- a Flask service for moving/linking game directories into a shared library
+- a Flask service for moving/mounting game directories into a shared library
 - a Qt GUI frontend
 - a CLI helper script
 

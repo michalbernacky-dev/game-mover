@@ -324,6 +324,76 @@ class PrivilegedBrokerTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["extra_groups"], [1234])
         self.assertEqual(run.call_args.kwargs["timeout"], 300)
 
+    def test_mount_game_repairs_exact_legacy_proxy_before_dropping_privileges(self):
+        account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/alice")
+        completed = Mock(
+            returncode=0,
+            stdout=(
+                '{"steam_mountpoint":"/home/alice/steamapps/common/Game",'
+                '"steam_mount_kind":"game"}'
+            ),
+            stderr="",
+        )
+        parameters = {
+            "platform": "steam", "user": "alice", "game_name": "Game",
+        }
+        with (
+            patch.object(privileged.pwd, "getpwnam", return_value=account),
+            patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
+            patch.object(privileged, "_prepare_legacy_steam_proxy") as prepare,
+            patch.object(
+                privileged.subprocess, "run", return_value=completed,
+            ) as run,
+            patch.object(
+                privileged, "_ensure_steam_bind_mount", return_value={"message": "mounted"},
+            ) as ensure_mount,
+        ):
+            result = privileged._broker_dispatch("mount-game", parameters)
+
+        self.assertEqual(result, {"message": "mounted"})
+        prepare.assert_called_once_with(parameters)
+        ensure_mount.assert_called_once()
+        self.assertEqual(
+            run.call_args.args[0][-1], "mount-game",
+        )
+
+    def test_legacy_steam_proxy_preparation_is_limited_to_exact_double_link(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            steamapps = home / ".local/share/Steam/steamapps"
+            common = steamapps / "common"
+            target = root / "Games/steam/Game"
+            proxy = root / "Games_links/player/steam/Game"
+            common.mkdir(parents=True)
+            target.mkdir(parents=True)
+            proxy.parent.mkdir(parents=True)
+            proxy.symlink_to(target, target_is_directory=True)
+            (common / "Game").symlink_to(proxy, target_is_directory=True)
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
+            )
+            parameters = {
+                "platform": "steam", "user": "player", "game_name": "Game",
+            }
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(
+                    privileged, "GAMES_LINKS_ROOT", str(root / "Games_links"),
+                ),
+                patch.object(privileged, "_steamapps", return_value=str(steamapps)),
+                patch.object(privileged, "_prepare_user_proxy_base") as prepare,
+            ):
+                privileged._prepare_legacy_steam_proxy(parameters)
+                prepare.assert_called_once_with("player", "steam")
+                (common / "Game").unlink()
+                (common / "Game").symlink_to(target, target_is_directory=True)
+                privileged._prepare_legacy_steam_proxy(parameters)
+
+            self.assertEqual(prepare.call_count, 1)
+
     def test_steam_link_migrates_expected_legacy_proxy_to_mountpoint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -347,7 +417,7 @@ class PrivilegedBrokerTest(unittest.TestCase):
                 patch.object(privileged, "GAMES_LINKS_ROOT", str(root / "Games_links")),
                 patch.object(privileged, "_steamapps", return_value=str(common.parent)),
             ):
-                result = privileged._create_symlink({
+                result = privileged._mount_game({
                     "platform": "steam", "user": "player", "game_name": "Game",
                 })
             self.assertTrue(source.is_dir())

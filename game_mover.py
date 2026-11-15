@@ -1286,19 +1286,19 @@ class GameMover(QWidget):
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
 
-        self.label_symlink = QLabel('Steam hry ve sdílené knihovně dostupné pro bind mount:')
-        layout.addWidget(self.label_symlink)
+        self.label_mount = QLabel('Steam hry ve sdílené knihovně dostupné pro bind mount:')
+        layout.addWidget(self.label_mount)
 
-        self.symlink_list = QListWidget(self)
-        self.symlink_list.setSelectionMode(QListWidget.SingleSelection)
-        self.symlink_list.setMaximumHeight(200)
-        self.symlink_list.currentItemChanged.connect(
+        self.mount_list = QListWidget(self)
+        self.mount_list.setSelectionMode(QListWidget.SingleSelection)
+        self.mount_list.setMaximumHeight(200)
+        self.mount_list.currentItemChanged.connect(
             self.update_mover_action_availability
         )
-        layout.addWidget(self.symlink_list)
+        layout.addWidget(self.mount_list)
 
         self.link_button = QPushButton('Vytvořit / obnovit bind mount', self)
-        self.link_button.clicked.connect(self.create_symlink)
+        self.link_button.clicked.connect(self.mount_game)
         layout.addWidget(self.link_button)
 
         self.disk_label = QLabel("Využití disků:")
@@ -4152,7 +4152,7 @@ class GameMover(QWidget):
             isinstance(selected_game_data, dict)
             and selected_game_data.get("move_blocked")
         )
-        selected_link = self.symlink_list.currentItem()
+        selected_mount = self.mount_list.currentItem()
         self.move_button.setEnabled(
             self.platform in ("steam", "ea")
             and bool(selected_game and not selected_game.startswith("Žádné"))
@@ -4161,7 +4161,7 @@ class GameMover(QWidget):
         )
         self.link_button.setEnabled(
             self.platform in ("steam", "ea")
-            and bool(selected_link and not selected_link.text().startswith("Žádné"))
+            and bool(selected_mount and not selected_mount.text().startswith("Žádné"))
             and bool(self.local_mover_operation_headers("game.link"))
         )
         self.fix_perms_button.setEnabled(
@@ -7948,7 +7948,7 @@ class GameMover(QWidget):
                 "čištění lokální shader cache."
             )
             self.label_move.setText("Steam hry k přesunu do sdílené knihovny:")
-            self.label_symlink.setText(
+            self.label_mount.setText(
                 "Steam hry ve sdílené knihovně dostupné pro bind mount:"
             )
         elif ea_supported:
@@ -7967,7 +7967,7 @@ class GameMover(QWidget):
                     "zůstávají v profilu. Před změnou ukonči Heroic i EA App."
                 )
             self.label_move.setText("Dokončené EA App hry k přesunu:")
-            self.label_symlink.setText(
+            self.label_mount.setText(
                 "EA App hry ve sdílené knihovně dostupné pro bind mount:"
             )
         elif self.platform in ("gog", "epic"):
@@ -7977,7 +7977,7 @@ class GameMover(QWidget):
                 "spravuje Heroic. Game Mover zde neprovádí žádné změny."
             )
             self.label_move.setText(f"{store} / Heroic – sdílení herních dat:")
-            self.label_symlink.setText(f"{store} / Heroic – uživatelské prefixy:")
+            self.label_mount.setText(f"{store} / Heroic – uživatelské prefixy:")
         else:
             launcher = self.platform_combo.currentText()
             self.mover_scope_label.setText(
@@ -7985,7 +7985,7 @@ class GameMover(QWidget):
                 "není implementované ani otestované, proto jsou změny zakázané."
             )
             self.label_move.setText(f"{launcher} – sdílení herních dat:")
-            self.label_symlink.setText(f"{launcher} – uživatelská integrace:")
+            self.label_mount.setText(f"{launcher} – uživatelská integrace:")
         if not ea_supported:
             self.link_button.setText("Vytvořit / obnovit bind mount")
         self.refresh_cache_status()
@@ -8007,17 +8007,18 @@ class GameMover(QWidget):
                 )
             for name in os.listdir(common):
                 path = os.path.join(common, name)
-                shared_ea = os.path.join(GAMES_ROOT, "EA", name)
-                ea_bind_mounted = False
-                if self.platform == "ea" and os.path.isdir(shared_ea):
+                shared_directory = "EA" if self.platform == "ea" else "steam"
+                shared_game = os.path.join(GAMES_ROOT, shared_directory, name)
+                shared_bind_mounted = False
+                if os.path.isdir(shared_game):
                     try:
-                        ea_bind_mounted = os.path.samefile(path, shared_ea)
+                        shared_bind_mounted = os.path.samefile(path, shared_game)
                     except OSError:
                         pass
                 if (
                     os.path.isdir(path)
                     and not os.path.islink(path)
-                    and not ea_bind_mounted
+                    and not shared_bind_mounted
                     and not is_excluded_game(self.platform, name)
                 ):
                     incomplete = bool(
@@ -8045,7 +8046,7 @@ class GameMover(QWidget):
             if show_residue or not item["possible_residue"]
         ]
 
-    def get_symlink_candidates(self):
+    def get_mount_candidates(self):
         if self.platform not in ("steam", "ea"):
             return []
         try:
@@ -8100,8 +8101,8 @@ class GameMover(QWidget):
             )
             self.game_combo_move.clear()
             self.game_combo_move.addItem(message)
-            self.symlink_list.clear()
-            self.symlink_list.addItem(message)
+            self.mount_list.clear()
+            self.mount_list.addItem(message)
             self.show_move_residue_checkbox.setText(
                 "Možné pozůstatky spravuje zvolený launcher"
                 if managed else "Detekce je pouze informativní"
@@ -8143,17 +8144,17 @@ class GameMover(QWidget):
             self.move_button.setEnabled(True)
 
         # Kandidáti pro Steam nebo EA bind mount.
-        self.symlink_list.clear()
-        symlink_games = self.get_symlink_candidates()
-        if not symlink_games:
-            self.symlink_list.addItem(
+        self.mount_list.clear()
+        mount_games = self.get_mount_candidates()
+        if not mount_games:
+            self.mount_list.addItem(
                 'Žádné hry pro bind mount'
                 if self.platform == "ea" else 'Žádné hry pro bind mount'
             )
             self.link_button.setEnabled(False)
         else:
-            for g in symlink_games:
-                self.symlink_list.addItem(QListWidgetItem(g))
+            for game in mount_games:
+                self.mount_list.addItem(QListWidgetItem(game))
             self.link_button.setEnabled(True)
 
         # update disk bars
@@ -8822,8 +8823,8 @@ class GameMover(QWidget):
         QMessageBox.information(self, "Výsledek", data.get("message", ""))
         self.refresh_game_lists()
 
-    def create_symlink(self):
-        item = self.symlink_list.currentItem()
+    def mount_game(self):
+        item = self.mount_list.currentItem()
         if not item or item.text().startswith("Žádné"):
             return
         game = item.text()
@@ -8836,7 +8837,7 @@ class GameMover(QWidget):
             return
         payload = {"platform": self.platform, "game_name": game, "user": self.user}
         try:
-            resp = requests.post(f"{FLASK_URL}/create_symlink", json=payload, headers=headers)
+            resp = requests.post(f"{FLASK_URL}/mount_game", json=payload, headers=headers)
             QMessageBox.information(self, "Výsledek", resp.json().get("message", ""))
             self.refresh_game_lists()
         except Exception as e:
