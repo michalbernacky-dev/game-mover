@@ -193,8 +193,20 @@ def inspect_steam_cache(steamapps: str | None, games_root: str) -> dict:
             status = "custom"
             message = f"Symlink {download_path} má neexistující cíl"
     elif os.path.isdir(download_path):
-        status = "local"
-        message = f"Používá lokální cestu {download_path}"
+        try:
+            mounted_shared = (
+                os.path.isdir(shared_downloading)
+                and os.path.samefile(download_path, shared_downloading)
+            )
+        except OSError:
+            mounted_shared = False
+        if mounted_shared:
+            status = "shared"
+            target = shared_downloading_real
+            message = f"Bind mount {download_path} -> {target}"
+        else:
+            status = "local"
+            message = f"Používá lokální cestu {download_path}"
     elif os.path.exists(download_path):
         status = "unknown"
         message = f"{download_path} není adresář ani symlink"

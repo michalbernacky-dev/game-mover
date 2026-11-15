@@ -483,11 +483,11 @@ class ServerRegistryTest(unittest.TestCase):
                 **self.local_options(self.pam_headers),
             )
 
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 503)
         self.assertTrue((common / "Linked Game").is_symlink())
         self.assertTrue(outside.is_dir())
 
-    def test_valid_mover_paths_still_move_and_link_game(self):
+    def test_mover_without_privileged_helper_never_creates_legacy_links(self):
         home = Path(self.temp_dir.name) / "home"
         common = home / ".local/share/Steam/steamapps/common"
         common.mkdir(parents=True)
@@ -515,10 +515,11 @@ class ServerRegistryTest(unittest.TestCase):
 
         shared = games_root / "steam/Safe Game"
         proxy = links_root / "alice/steam/Safe Game"
-        self.assertEqual(moved.status_code, 200, moved.get_data(as_text=True))
-        self.assertTrue(shared.is_dir())
-        self.assertEqual(proxy.resolve(), shared)
-        self.assertEqual(source.resolve(), shared)
+        self.assertEqual(moved.status_code, 503, moved.get_data(as_text=True))
+        self.assertFalse(shared.exists())
+        self.assertFalse(proxy.exists())
+        self.assertTrue(source.is_dir())
+        self.assertFalse(source.is_symlink())
 
     def test_production_mover_routes_semantic_request_to_root_broker(self):
         result = {"message": "Přesunuto"}
@@ -566,9 +567,9 @@ class ServerRegistryTest(unittest.TestCase):
 
         source = common / "Shared Game"
         proxy = links_root / "alice/steam/Shared Game"
-        self.assertEqual(linked.status_code, 200, linked.get_data(as_text=True))
-        self.assertEqual(source.resolve(), shared)
-        self.assertEqual(proxy.resolve(), shared)
+        self.assertEqual(linked.status_code, 503, linked.get_data(as_text=True))
+        self.assertFalse(source.exists())
+        self.assertFalse(proxy.exists())
         self.assertEqual(traversal.status_code, 400)
 
     def test_steam_cache_rejects_invalid_user_and_shared_symlink(self):
@@ -601,7 +602,7 @@ class ServerRegistryTest(unittest.TestCase):
             )
 
         self.assertEqual(invalid_user.status_code, 400)
-        self.assertEqual(unsafe_cache.status_code, 400)
+        self.assertEqual(unsafe_cache.status_code, 503)
         self.assertTrue((cache_root / "downloading").is_symlink())
         self.assertTrue(outside.is_dir())
 

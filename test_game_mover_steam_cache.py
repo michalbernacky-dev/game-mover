@@ -186,6 +186,10 @@ class SteamCacheSecurityTest(unittest.TestCase):
                 broker, "_filesystem_as_user", side_effect=broker.dispatch
             ) as worker,
             patch.object(broker, "_set_shared_permissions"),
+            patch.object(
+                broker, "_ensure_steam_bind_mount",
+                return_value={"status": "shared", "message": "mounted"},
+            ) as ensure_mount,
         ):
             response = self.client.post(
                 "/set_steam_cache",
@@ -194,12 +198,23 @@ class SteamCacheSecurityTest(unittest.TestCase):
                 **self.local,
             )
             self.assertEqual(response.status_code, 200)
-            self.assertTrue(self.download.is_symlink())
+            self.assertTrue(self.download.is_dir())
+            self.assertFalse(self.download.is_symlink())
             self.assertEqual(
                 (self.games / "steam-cache" / "downloading" / "payload").read_bytes(),
                 b"unfinished download",
             )
             worker.assert_called_once_with("set-steam-cache", {"user": "alice"})
+            ensure_mount.assert_called_once()
+
+    def test_status_recognizes_shared_cache_bind_mount(self):
+        shared = self.games / "steam-cache/downloading"
+        shared.mkdir(parents=True)
+        self.download.mkdir()
+        with patch.object(os.path, "samefile", return_value=True):
+            result = inspect_steam_cache(str(self.steamapps), str(self.games))
+        self.assertEqual(result["status"], "shared")
+        self.assertIn("Bind mount", result["message"])
 
     def test_status_lists_local_shader_cache_without_mutation(self):
         self.download.mkdir()

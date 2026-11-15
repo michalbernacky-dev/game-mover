@@ -1286,7 +1286,7 @@ class GameMover(QWidget):
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
 
-        self.label_symlink = QLabel('Steam hry ve sdílené knihovně dostupné pro symlink:')
+        self.label_symlink = QLabel('Steam hry ve sdílené knihovně dostupné pro bind mount:')
         layout.addWidget(self.label_symlink)
 
         self.symlink_list = QListWidget(self)
@@ -1297,7 +1297,7 @@ class GameMover(QWidget):
         )
         layout.addWidget(self.symlink_list)
 
-        self.link_button = QPushButton('Vytvořit symlink', self)
+        self.link_button = QPushButton('Vytvořit / obnovit bind mount', self)
         self.link_button.clicked.connect(self.create_symlink)
         layout.addWidget(self.link_button)
 
@@ -7944,12 +7944,12 @@ class GameMover(QWidget):
         if steam_supported:
             self.mover_scope_label.setText(
                 "Steam podporuje přesun herních dat do sdílené knihovny, "
-                "uživatelské symlinky, sdílenou download cache a bezpečné "
+                "uživatelské bind mounty, sdílenou download cache a bezpečné "
                 "čištění lokální shader cache."
             )
             self.label_move.setText("Steam hry k přesunu do sdílené knihovny:")
             self.label_symlink.setText(
-                "Steam hry ve sdílené knihovně dostupné pro symlink:"
+                "Steam hry ve sdílené knihovně dostupné pro bind mount:"
             )
         elif ea_supported:
             self.link_button.setText("Vytvořit / obnovit bind mount")
@@ -7987,7 +7987,7 @@ class GameMover(QWidget):
             self.label_move.setText(f"{launcher} – sdílení herních dat:")
             self.label_symlink.setText(f"{launcher} – uživatelská integrace:")
         if not ea_supported:
-            self.link_button.setText("Vytvořit symlink")
+            self.link_button.setText("Vytvořit / obnovit bind mount")
         self.refresh_cache_status()
         self.refresh_game_lists()
 
@@ -8058,10 +8058,21 @@ class GameMover(QWidget):
                 candidates = []
                 for game in shared_games:
                     local = os.path.join(user_common, game)
-                    shared = os.path.join(GAMES_ROOT, "EA", game)
-                    if self.platform != "ea":
-                        if not os.path.exists(local):
+                    shared_directory = "EA" if self.platform == "ea" else "steam"
+                    shared = os.path.join(GAMES_ROOT, shared_directory, game)
+                    if self.platform == "steam":
+                        if not os.path.lexists(local):
                             candidates.append(game)
+                        elif os.path.islink(local):
+                            if os.path.realpath(local) == os.path.realpath(shared):
+                                candidates.append(game)
+                        elif os.path.isdir(local):
+                            try:
+                                mounted = os.path.samefile(local, shared)
+                            except OSError:
+                                mounted = False
+                            if mounted or not os.listdir(local):
+                                candidates.append(game)
                         continue
                     if not os.path.lexists(local):
                         candidates.append(game)
@@ -8131,13 +8142,13 @@ class GameMover(QWidget):
                 self.game_combo_move.addItem(label, item)
             self.move_button.setEnabled(True)
 
-        # Kandidáti pro Steam symlink nebo EA bind mount.
+        # Kandidáti pro Steam nebo EA bind mount.
         self.symlink_list.clear()
         symlink_games = self.get_symlink_candidates()
         if not symlink_games:
             self.symlink_list.addItem(
                 'Žádné hry pro bind mount'
-                if self.platform == "ea" else 'Žádné hry pro symlink'
+                if self.platform == "ea" else 'Žádné hry pro bind mount'
             )
             self.link_button.setEnabled(False)
         else:

@@ -74,6 +74,10 @@ LAUNCHER_MOUNT_STATE_ROOT = os.getenv(
     "GAME_MOVER_LAUNCHER_MOUNT_STATE_ROOT", "/etc/game_mover/launcher-mounts",
 )
 LAUNCHER_BIND_SERVICE_PREFIX = "game-mover-launcher-bind@"
+STEAM_MOUNT_STATE_ROOT = os.getenv(
+    "GAME_MOVER_STEAM_MOUNT_STATE_ROOT", "/etc/game_mover/steam-mounts",
+)
+STEAM_BIND_SERVICE_PREFIX = "game-mover-steam-bind@"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 256 * 1024
 SYSTEMD_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,160}$")
@@ -331,21 +335,13 @@ def _move_game(parameters: dict) -> dict:
     target_base = _beneath(GAMES_ROOT, shared_directory, allow_missing=True)
     os.makedirs(target_base, mode=0o775, exist_ok=True)
     target = _beneath(target_base, game, allow_missing=True)
-    proxy = None
-    if platform == "steam":
-        proxy_base = _beneath(
-            GAMES_LINKS_ROOT, username, platform, allow_missing=True,
-        )
-        os.makedirs(proxy_base, mode=0o775, exist_ok=True)
-        proxy = _beneath(proxy_base, game, allow_missing=True)
-    if os.path.lexists(target) or (proxy and os.path.lexists(proxy)):
-        raise PrivilegedError("Cílová nebo integrační cesta už existuje")
+    if os.path.lexists(target):
+        raise PrivilegedError("Cílová cesta už existuje")
     shutil.move(source, target)
     try:
         _set_shared_permissions(target)
         if platform == "steam":
-            os.symlink(target, proxy)
-            os.symlink(proxy, source)
+            os.mkdir(source, mode=0o755)
         else:
             os.mkdir(source, mode=0o755)
     except Exception:
@@ -353,14 +349,15 @@ def _move_game(parameters: dict) -> dict:
             os.unlink(source)
         elif os.path.isdir(source) and not os.listdir(source):
             os.rmdir(source)
-        if proxy and os.path.islink(proxy):
-            os.unlink(proxy)
         if not os.path.lexists(source) and os.path.isdir(target):
             shutil.move(target, source)
         raise
     result = {"message": f"Hra '{game}' byla přesunuta do sdílené knihovny"}
     if platform == "ea":
         result["ea_mountpoint"] = source
+    else:
+        result["steam_mountpoint"] = source
+        result["steam_mount_kind"] = "game"
     return result
 
 
@@ -416,18 +413,35 @@ def _create_symlink(parameters: dict) -> dict:
             "message": "Mountpoint EA hry je připravený",
             "ea_mountpoint": source,
         }
-    if os.path.lexists(source):
-        raise PrivilegedError("Cesta už existuje")
-    proxy_base = _beneath(GAMES_LINKS_ROOT, username, platform, allow_missing=True)
-    os.makedirs(proxy_base, mode=0o775, exist_ok=True)
-    proxy = _beneath(proxy_base, game, allow_missing=True)
-    if os.path.lexists(proxy):
-        if not os.path.islink(proxy) or os.path.realpath(proxy) != os.path.realpath(target):
-            raise PrivilegedError("Proxy cesta koliduje s jinou hrou")
+    if os.path.islink(source):
+        if os.path.realpath(source) != os.path.realpath(target):
+            raise PrivilegedError("Existující Steam odkaz míří na jiná data")
+        os.unlink(source)
+        os.mkdir(source, mode=0o755)
+        proxy = _beneath(
+            GAMES_LINKS_ROOT, username, "steam", game, allow_missing=True,
+        )
+        if (
+            os.path.islink(proxy)
+            and os.path.realpath(proxy) == os.path.realpath(target)
+        ):
+            os.unlink(proxy)
+    elif os.path.isdir(source):
+        try:
+            already_mounted = os.path.samefile(source, target)
+        except OSError:
+            already_mounted = False
+        if not already_mounted and (os.path.ismount(source) or os.listdir(source)):
+            raise PrivilegedError("Cílový Steam adresář není prázdný")
+    elif os.path.lexists(source):
+        raise PrivilegedError("Cílová Steam cesta není adresář")
     else:
-        os.symlink(target, proxy)
-    os.symlink(proxy, source)
-    return {"message": "Odkaz hry byl vytvořen přes spravovanou proxy"}
+        os.mkdir(source, mode=0o755)
+    return {
+        "message": "Mountpoint Steam hry je připravený",
+        "steam_mountpoint": source,
+        "steam_mount_kind": "game",
+    }
 
 
 def _ea_mount_unit_name(mountpoint: str) -> str:
@@ -652,6 +666,155 @@ def _ensure_ea_bind_mount(parameters: dict, mountpoint: Any) -> dict:
     }
 
 
+def _steam_bind_service(mount_id: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", mount_id):
+        raise PrivilegedError("Neplatný identifikátor Steam bind mountu")
+    return f"{STEAM_BIND_SERVICE_PREFIX}{mount_id}.service"
+
+
+def _steam_bind_paths(
+    username: str, kind: str, game: str | None = None,
+) -> tuple[str, str]:
+    username = _safe_username(username)
+    steamapps = _steamapps(username)
+    if kind == "game":
+        game = _safe_game_name(game)
+        source = _beneath(_beneath(GAMES_ROOT, "steam"), game)
+        mountpoint = _beneath(_beneath(steamapps, "common"), game)
+    elif kind == "cache" and game is None:
+        source = _beneath(GAMES_ROOT, "steam-cache", "downloading")
+        mountpoint = _beneath(steamapps, "downloading")
+    else:
+        raise PrivilegedError("Neplatný typ Steam bind mountu")
+    home = os.path.realpath(pwd.getpwnam(username).pw_dir)
+    parent = os.path.realpath(os.path.dirname(mountpoint))
+    if (
+        os.path.commonpath((home, parent)) != home
+        or not os.path.isdir(source)
+        or os.path.islink(source)
+        or not os.path.isdir(mountpoint)
+        or os.path.islink(mountpoint)
+    ):
+        raise PrivilegedError("Steam bind mount nemá bezpečné umístění")
+    return source, mountpoint
+
+
+def _read_steam_marker(mount_id: str) -> dict:
+    _steam_bind_service(mount_id)
+    path = os.path.join(STEAM_MOUNT_STATE_ROOT, f"{mount_id}.json")
+    try:
+        metadata = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+            or metadata.st_size > 4096
+        ):
+            raise PrivilegedError("Evidence Steam mountu nemá bezpečné vlastnosti")
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, encoding="utf-8") as stream:
+            payload = json.load(stream)
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PrivilegedError("Evidenci Steam mountu nelze načíst") from error
+    if not isinstance(payload, dict):
+        raise PrivilegedError("Evidence Steam mountu je neplatná")
+    return payload
+
+
+def _validated_steam_marker(mount_id: str) -> tuple[str, str]:
+    payload = _read_steam_marker(mount_id)
+    if set(payload) != {
+        "version", "unit", "user", "kind", "game_name", "source", "mountpoint",
+    } or payload.get("version") != 1:
+        raise PrivilegedError("Evidence Steam mountu má nepodporovaný formát")
+    username = _safe_username(payload.get("user"))
+    kind = str(payload.get("kind") or "")
+    game = payload.get("game_name")
+    source, mountpoint = _steam_bind_paths(username, kind, game)
+    service = _steam_bind_service(mount_id)
+    if (
+        payload.get("unit") != service
+        or payload.get("source") != source
+        or payload.get("mountpoint") != mountpoint
+        or hashlib.sha256(mountpoint.encode("utf-8")).hexdigest() != mount_id
+    ):
+        raise PrivilegedError("Evidence Steam mountu neodpovídá místnímu profilu")
+    return source, mountpoint
+
+
+def _run_steam_bind_service(mount_id: str, *, unmount: bool = False) -> None:
+    if os.geteuid() != 0:
+        raise PrivilegedError("Steam bind helper musí běžet jako root")
+    source, mountpoint = _validated_steam_marker(mount_id)
+    if os.path.ismount(mountpoint):
+        result = _run(["/usr/bin/umount", mountpoint], 60)
+        if result["returncode"]:
+            raise PrivilegedError(result["stderr"] or "Steam mount nelze odpojit")
+    if unmount:
+        return
+    result = _run(["/usr/bin/mount", "--bind", source, mountpoint], 60)
+    if result["returncode"]:
+        raise PrivilegedError(result["stderr"] or "Steam bind mount selhal")
+    result = _run([
+        "/usr/bin/mount", "-o", "remount,bind,nosuid,nodev", source, mountpoint,
+    ], 60)
+    if result["returncode"]:
+        _run(["/usr/bin/umount", mountpoint], 60)
+        raise PrivilegedError(result["stderr"] or "Zabezpečení Steam mountu selhalo")
+
+
+def _ensure_steam_bind_mount(parameters: dict, result: dict) -> dict:
+    username = _safe_username(parameters.get("user"))
+    kind = str(result.get("steam_mount_kind") or "")
+    game = parameters.get("game_name") if kind == "game" else None
+    source, mountpoint = _steam_bind_paths(username, kind, game)
+    if result.get("steam_mountpoint") != mountpoint:
+        raise PrivilegedError("Worker vrátil neplatný Steam mountpoint")
+    account = pwd.getpwnam(username)
+    metadata = os.stat(mountpoint, follow_symlinks=False)
+    try:
+        already_mounted = os.path.samefile(mountpoint, source)
+    except OSError:
+        already_mounted = False
+    if not already_mounted and (
+        metadata.st_uid != account.pw_uid or os.listdir(mountpoint)
+    ):
+        raise PrivilegedError("Steam mountpoint musí být prázdný a patřit hráči")
+    mount_id = hashlib.sha256(mountpoint.encode("utf-8")).hexdigest()
+    unit = _steam_bind_service(mount_id)
+    marker_payload = {
+        "version": 1, "unit": unit, "user": username, "kind": kind,
+        "game_name": game, "source": source, "mountpoint": mountpoint,
+    }
+    marker = json.dumps(marker_payload, ensure_ascii=False, sort_keys=True) + "\n"
+    os.makedirs(STEAM_MOUNT_STATE_ROOT, mode=0o700, exist_ok=True)
+    marker_path = os.path.join(STEAM_MOUNT_STATE_ROOT, f"{mount_id}.json")
+    marker_exists = os.path.lexists(marker_path)
+    if marker_exists:
+        if _read_steam_marker(mount_id) != marker_payload:
+            raise PrivilegedError("Evidence Steam mountu koliduje")
+    _set_shared_permissions(source)
+    if not marker_exists:
+        _write_managed_file(marker_path, marker, 0o600)
+    for command, timeout in (
+        (["/usr/bin/systemctl", "daemon-reload"], 30),
+        (["/usr/bin/systemctl", "enable", unit], 60),
+        (["/usr/bin/systemctl", "restart", unit], 60),
+    ):
+        command_result = _run(command, timeout)
+        if command_result["returncode"]:
+            raise PrivilegedError(
+                command_result["stderr"] or "Aktivace Steam bind mountu selhala",
+            )
+    label = f"Steam hra '{game}'" if kind == "game" else "Steam download cache"
+    return {
+        "message": f"{label} je připojena trvalým bind mountem",
+        "status": "shared",
+        "shared_path": source,
+        "mount_unit": unit,
+    }
+
+
 def _launcher_bind_service(mount_id: str) -> str:
     if not re.fullmatch(r"[0-9a-f]{64}", mount_id):
         raise PrivilegedError("Neplatný identifikátor launcher bind mountu")
@@ -831,20 +994,32 @@ def _set_steam_cache(parameters: dict) -> dict:
     if os.path.islink(shared):
         raise PrivilegedError("Sdílená Steam cache nesmí být symbolický odkaz")
     if os.path.islink(download):
-        if os.path.realpath(download) == os.path.realpath(shared):
-            return {"message": "Steam cache už je sdílená", "status": "shared"}
+        if os.path.realpath(download) != os.path.realpath(shared):
+            raise PrivilegedError("Existující Steam cache míří na jiná data")
         os.unlink(download)
+        os.mkdir(download, mode=0o755)
     elif os.path.isdir(download):
-        if os.path.lexists(shared):
-            raise PrivilegedError("Cílová sdílená cache už existuje")
-        shutil.move(download, shared)
+        try:
+            already_mounted = os.path.samefile(download, shared)
+        except (FileNotFoundError, OSError):
+            already_mounted = False
+        if not already_mounted:
+            if os.path.lexists(shared):
+                if os.listdir(download):
+                    raise PrivilegedError("Cílová sdílená cache už existuje")
+            else:
+                shutil.move(download, shared)
+                os.mkdir(download, mode=0o755)
     elif os.path.lexists(download):
         raise PrivilegedError("Lokální Steam cache není adresář ani odkaz")
     else:
         os.makedirs(shared, mode=0o775, exist_ok=True)
-    os.symlink(shared, download)
-    _set_shared_permissions(shared)
-    return {"message": "Steam cache byla bezpečně nasdílena", "status": "shared", "shared_path": shared}
+        os.mkdir(download, mode=0o755)
+    return {
+        "message": "Mountpoint Steam cache je připravený",
+        "status": "shared", "shared_path": shared,
+        "steam_mountpoint": download, "steam_mount_kind": "cache",
+    }
 
 
 def _clear_steam_shader_cache(parameters: dict) -> dict:
@@ -1246,11 +1421,6 @@ def _filesystem_as_user(action: str, parameters: dict) -> dict:
     username = _safe_username(parameters.get("user"))
     account = pwd.getpwnam(username)
     group_id = grp.getgrnam(GROUP_NAME).gr_gid
-    if (
-        action in ("move-game", "create-symlink")
-        and parameters.get("platform") == "steam"
-    ):
-        _prepare_user_proxy_base(username, parameters.get("platform"))
     payload = json.dumps(parameters, ensure_ascii=False, separators=(",", ":"))
     completed = subprocess.run(
         [sys.executable, "-B", os.path.realpath(__file__), "--filesystem-worker", action],
@@ -1291,6 +1461,14 @@ def _broker_dispatch(action: str, parameters: dict) -> dict:
             return _ensure_ea_bind_mount(
                 parameters, result.get("ea_mountpoint"),
             )
+        if (
+            action == "set-steam-cache"
+            or (
+                action in ("move-game", "create-symlink")
+                and parameters.get("platform") == "steam"
+            )
+        ):
+            return _ensure_steam_bind_mount(parameters, result)
         return result
     return dispatch(action, parameters)
 
@@ -1391,6 +1569,16 @@ if __name__ == "__main__":
         try:
             _run_launcher_bind_service(
                 sys.argv[2], unmount=sys.argv[1] == "--launcher-unmount",
+            )
+        except (PrivilegedError, OSError, subprocess.SubprocessError) as error:
+            print(_bounded_text(error, 2048), file=sys.stderr)
+            raise SystemExit(1) from error
+    elif len(sys.argv) == 3 and sys.argv[1] in (
+        "--steam-mount", "--steam-unmount",
+    ):
+        try:
+            _run_steam_bind_service(
+                sys.argv[2], unmount=sys.argv[1] == "--steam-unmount",
             )
         except (PrivilegedError, OSError, subprocess.SubprocessError) as error:
             print(_bounded_text(error, 2048), file=sys.stderr)

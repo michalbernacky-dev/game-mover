@@ -13,6 +13,34 @@ inspection, deployment verification, and the required live per-player
 move/launch checks. The canonical repository was published on 2026-09-16 and
 all publication-time controls in the general gate below were verified.
 
+## Steam steamrt64 bind-mount migration: 2026-11-15
+
+Valve Steam client build `1794536281` reproduced a compatibility regression on
+the development host immediately after its self-update: the new steamrt64 mount
+namespace did not expose `/var/Games` or `/var/Games_links`. Existing managed
+game and `steamapps/downloading` symlinks therefore resolved outside the client
+namespace, and Steam reported the shared staging directory as unwritable. The
+host filesystems, ACLs and direct player write test remained valid; the shared
+game payload was still present.
+
+Version 0.40.0 replaces new Steam game and shared download-cache symlinks with
+persistent bind mounts at their original paths below the player's `steamapps`.
+The dropped-UID worker validates and migrates only an expected legacy link,
+prepares an owned empty mountpoint, and removes only the matching legacy proxy.
+The root broker independently derives the fixed source and player-confined
+destination, writes mode-0600 marker state and enables an instance of the fixed
+`game-mover-steam-bind@.service` template. Only that short-lived helper receives
+`CAP_SYS_ADMIN`; neither Flask nor the long-running broker gains mount
+capabilities. The same mechanism covers `/var/Games/steam-cache/downloading`.
+
+Focused tests cover legacy double-symlink migration, fixed source derivation,
+owned empty mountpoints, root-only marker state, marker-only systemd arguments,
+cache bind recognition and broker routing. All 373 source tests pass. A local
+Fedora 44 RPM/SRPM build passed and its payload, scriptlets, identity and digest
+were inspected. Hosted CI, installation, live link migration, Steam restart and
+in-client verification are still pending and must not be inferred from those
+source and local-package results.
+
 ## Local Heroic launcher profiles: updated 2026-11-13
 
 Version 0.39.0 adds an unprivileged local launch action for launchers explicitly

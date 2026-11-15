@@ -1,5 +1,5 @@
 Name:           game-mover
-Version:        0.39.0
+Version:        0.40.0
 Release:        1%{?dist}
 Summary:        Shared game library manager with local Flask API and Qt GUI
 URL:            https://github.com/michalbernacky-dev/game-mover
@@ -72,6 +72,8 @@ install -Dpm0644 game-mover-ea-bind@.service \
     %{buildroot}%{_unitdir}/game-mover-ea-bind@.service
 install -Dpm0644 game-mover-launcher-bind@.service \
     %{buildroot}%{_unitdir}/game-mover-launcher-bind@.service
+install -Dpm0644 game-mover-steam-bind@.service \
+    %{buildroot}%{_unitdir}/game-mover-steam-bind@.service
 install -Dpm0644 game-mover.sysusers \
     %{buildroot}%{_sysusersdir}/game-mover.conf
 install -Dpm0644 game-mover.desktop %{buildroot}%{_datadir}/applications/game-mover.desktop
@@ -93,6 +95,7 @@ find /opt/game_mover -type d -name __pycache__ -prune -exec rm -rf -- {} + 2>/de
 
 mkdir -p /etc/game_mover
 install -d -m 0700 -o root -g root /etc/game_mover/ea-mounts
+install -d -m 0700 -o root -g root /etc/game_mover/steam-mounts
 if [ ! -f /etc/game_mover/api.token ]; then
     token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
     printf '%s\n' "$token" > /etc/game_mover/api.token
@@ -186,12 +189,18 @@ fi
 %{_unitdir}/game-mover-dns.service
 %{_unitdir}/game-mover-ea-bind@.service
 %{_unitdir}/game-mover-launcher-bind@.service
+%{_unitdir}/game-mover-steam-bind@.service
 %{_sysusersdir}/game-mover.conf
 %{_datadir}/applications/game-mover.desktop
 %{_metainfodir}/game-mover.metainfo.xml
 %attr(0750,gameplatform,gameplatform) %dir %{_sharedstatedir}/game-mover
 
 %changelog
+* Sun Nov 15 2026 Game Mover Packager <packager@example.invalid> - 0.40.0-1
+- Replace Steam game and download-cache symlinks with persistent bind mounts
+- Migrate existing managed Steam symlinks without moving shared payload data
+- Keep shared Steam paths visible inside the updated steamrt64 container
+
 * Fri Nov 13 2026 Game Mover Packager <packager@example.invalid> - 0.39.0-1
 - Launch verified Heroic-managed launchers through their local UMU and Proton profile
 - Store optional launcher arguments only in the current user's client configuration
