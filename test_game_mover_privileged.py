@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 from pathlib import Path
 import sys
@@ -294,23 +296,144 @@ class PrivilegedBrokerTest(unittest.TestCase):
 
     def test_user_filesystem_actions_drop_root_before_traversal(self):
         account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/alice")
-        completed = Mock(returncode=0, stdout='{"message":"ok"}', stderr="")
+        completed = Mock(
+            returncode=0,
+            stdout=(
+                '{"message":"ok","steam_mountpoint":"/home/alice/Game",'
+                '"steam_mount_kind":"game"}'
+            ),
+            stderr="",
+        )
         with (
             patch.object(privileged.pwd, "getpwnam", return_value=account),
             patch.object(privileged.grp, "getgrnam", return_value=Mock(gr_gid=1234)),
-            patch.object(privileged, "_prepare_user_proxy_base") as prepare,
             patch.object(privileged.subprocess, "run", return_value=completed) as run,
+            patch.object(
+                privileged, "_ensure_steam_bind_mount",
+                return_value={"message": "mounted"},
+            ) as ensure_mount,
         ):
             result = privileged._broker_dispatch(
                 "move-game", {"platform": "steam", "user": "alice", "game_name": "Game"},
             )
 
-        self.assertEqual(result, {"message": "ok"})
-        prepare.assert_called_once_with("alice", "steam")
+        self.assertEqual(result, {"message": "mounted"})
+        ensure_mount.assert_called_once()
         self.assertEqual(run.call_args.kwargs["user"], 1001)
         self.assertEqual(run.call_args.kwargs["group"], 1001)
         self.assertEqual(run.call_args.kwargs["extra_groups"], [1234])
         self.assertEqual(run.call_args.kwargs["timeout"], 300)
+
+    def test_steam_link_migrates_expected_legacy_proxy_to_mountpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            common = home / ".local/share/Steam/steamapps/common"
+            target = root / "Games/steam/Game"
+            proxy = root / "Games_links/player/steam/Game"
+            common.mkdir(parents=True)
+            target.mkdir(parents=True)
+            proxy.parent.mkdir(parents=True)
+            proxy.symlink_to(target, target_is_directory=True)
+            source = common / "Game"
+            source.symlink_to(proxy, target_is_directory=True)
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
+            )
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "GAMES_LINKS_ROOT", str(root / "Games_links")),
+                patch.object(privileged, "_steamapps", return_value=str(common.parent)),
+            ):
+                result = privileged._create_symlink({
+                    "platform": "steam", "user": "player", "game_name": "Game",
+                })
+            self.assertTrue(source.is_dir())
+            self.assertFalse(source.is_symlink())
+            self.assertEqual(list(source.iterdir()), [])
+            self.assertFalse(proxy.exists())
+            self.assertEqual(result["steam_mountpoint"], str(source))
+
+    def test_steam_mount_records_only_fixed_source_and_player_mountpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            steamapps = home / ".local/share/Steam/steamapps"
+            mountpoint = steamapps / "common/Game"
+            source = root / "Games/steam/Game"
+            mountpoint.mkdir(parents=True)
+            source.mkdir(parents=True)
+            state = root / "state"
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
+            )
+            commands = []
+
+            def fake_run(command, _timeout):
+                commands.append(command)
+                return {"returncode": 0, "stdout": "", "stderr": ""}
+
+            worker_result = {
+                "steam_mountpoint": str(mountpoint),
+                "steam_mount_kind": "game",
+            }
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "STEAM_MOUNT_STATE_ROOT", str(state)),
+                patch.object(privileged, "_steamapps", return_value=str(steamapps)),
+                patch.object(privileged, "_run", side_effect=fake_run),
+                patch.object(privileged, "_set_shared_permissions"),
+            ):
+                result = privileged._ensure_steam_bind_mount(
+                    {"user": "player", "game_name": "Game"}, worker_result,
+                )
+
+            mount_id = hashlib.sha256(str(mountpoint).encode()).hexdigest()
+            marker = json.loads((state / f"{mount_id}.json").read_text())
+            self.assertEqual(marker["source"], str(source))
+            self.assertEqual(marker["mountpoint"], str(mountpoint))
+            self.assertEqual(marker["kind"], "game")
+            self.assertEqual(result["status"], "shared")
+            self.assertIn(
+                ["/usr/bin/systemctl", "restart", result["mount_unit"]], commands,
+            )
+
+    def test_steam_mount_rejects_worker_path_and_nonempty_mountpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            home = root / "home/player"
+            steamapps = home / ".local/share/Steam/steamapps"
+            mountpoint = steamapps / "common/Game"
+            source = root / "Games/steam/Game"
+            mountpoint.mkdir(parents=True)
+            source.mkdir(parents=True)
+            account = Mock(
+                pw_uid=os.getuid(), pw_gid=os.getgid(), pw_dir=str(home),
+            )
+            base_result = {
+                "steam_mountpoint": str(mountpoint),
+                "steam_mount_kind": "game",
+            }
+            with (
+                patch.object(privileged, "_safe_username", return_value="player"),
+                patch.object(privileged.pwd, "getpwnam", return_value=account),
+                patch.object(privileged, "GAMES_ROOT", str(root / "Games")),
+                patch.object(privileged, "_steamapps", return_value=str(steamapps)),
+            ):
+                with self.assertRaisesRegex(privileged.PrivilegedError, "neplatný"):
+                    privileged._ensure_steam_bind_mount(
+                        {"user": "player", "game_name": "Game"},
+                        {**base_result, "steam_mountpoint": str(home / "outside")},
+                    )
+                (mountpoint / "foreign.bin").write_bytes(b"do not hide")
+                with self.assertRaisesRegex(privileged.PrivilegedError, "prázdný"):
+                    privileged._ensure_steam_bind_mount(
+                        {"user": "player", "game_name": "Game"}, base_result,
+                    )
 
     def test_ea_user_worker_has_extended_move_timeout(self):
         account = Mock(pw_uid=1001, pw_gid=1001, pw_dir="/home/player")

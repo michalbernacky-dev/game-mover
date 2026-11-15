@@ -1893,54 +1893,14 @@ def move_game():
             }, timeout=900 if platform == "ea" else 180))
         except PrivilegedError as error:
             return jsonify({"message": str(error)}), 400
-
     try:
         safe_path_component(game_name, "game name")
-        source_common = user_common_dir(platform, user)
-        if not source_common:
-            if platform == "ea" and heroic_ea_shared_default_detected(
-                interactive_user_home(user)
-            ):
-                return jsonify({
-                    "message": "EA App uses Heroic's shared default Wine prefix; "
-                    "assign a dedicated EA App prefix first",
-                }), 409
-            return jsonify({"message": "Game library not found for user"}), 404
-        if platform == "ea":
-            installation = ea_installation_for_common(
-                interactive_user_home(user), source_common,
-            )
-            if not installation:
-                return jsonify({"message": "Heroic EA App prefix not found"}), 404
-            if ea_game_install_in_progress(installation, game_name):
-                return jsonify({"message": "EA App installation is not complete"}), 409
-            if ea_runtime_active():
-                return jsonify({"message": "Close Heroic and EA App before moving game data"}), 409
-        source_path = resolve_beneath(
-            source_common, os.path.join(source_common, game_name),
-        )
-        if not os.path.isdir(source_path):
-            return jsonify({"message": "Game not found in source"}), 404
-        target_base = ensure_managed_directory(
-            GAMES_ROOT, shared_platform_directory(platform),
-        )
-        target_path = resolve_beneath(
-            target_base, os.path.join(target_base, game_name),
-        )
-        proxy_base = ensure_managed_directory(GAMES_LINKS_ROOT, user, platform)
-        proxy_path = os.path.join(proxy_base, game_name)
-        if os.path.lexists(target_path) or os.path.lexists(proxy_path):
-            return jsonify({"message": "Target or proxy path already exists"}), 409
-
-        shutil.move(source_path, target_path)
-        set_group_perms(target_path)
-        os.symlink(target_path, proxy_path)
-        os.symlink(proxy_path, source_path)
-        return jsonify({"message": f"Game '{game_name}' moved to shared, proxy and symlink created"})
-    except ValueError as e:
-        return jsonify({"message": str(e)}), 400
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+        interactive_user_home(user)
+    except ValueError as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": "Persistent bind mounts require the privileged helper",
+    }), 503
 
 @app.route("/create_symlink", methods=["POST"])
 def create_symlink():
@@ -1962,51 +1922,14 @@ def create_symlink():
             }))
         except PrivilegedError as error:
             return jsonify({"message": str(error)}), 400
-
     try:
         safe_path_component(game_name, "game name")
-        target_base = resolve_beneath(
-            GAMES_ROOT,
-            os.path.join(GAMES_ROOT, shared_platform_directory(platform)),
-        )
-        target_path = resolve_beneath(
-            target_base, os.path.join(target_base, game_name),
-        )
-        if not os.path.isdir(target_path):
-            return jsonify({"message": "Target path does not exist"}), 404
-        source_common = user_common_dir(platform, user)
-        if not source_common:
-            if platform == "ea" and heroic_ea_shared_default_detected(
-                interactive_user_home(user)
-            ):
-                return jsonify({
-                    "message": "EA App uses Heroic's shared default Wine prefix; "
-                    "assign a dedicated EA App prefix first",
-                }), 409
-            return jsonify({"message": "Game library not found for user"}), 404
-        if platform == "ea" and ea_runtime_active():
-            return jsonify({"message": "Close Heroic and EA App before linking game data"}), 409
-        source_path = resolve_beneath(
-            source_common, os.path.join(source_common, game_name),
-        )
-
-        if os.path.lexists(source_path):
-            return jsonify({"message": "Symlink already exists"}), 400
-
-        proxy_base = ensure_managed_directory(GAMES_LINKS_ROOT, user, platform)
-        proxy_path = os.path.join(proxy_base, game_name)
-        if os.path.lexists(proxy_path):
-            if not os.path.islink(proxy_path) or os.path.realpath(proxy_path) != target_path:
-                return jsonify({"message": "Proxy path conflicts with shared game"}), 409
-        else:
-            os.symlink(target_path, proxy_path)
-
-        os.symlink(proxy_path, source_path)
-        return jsonify({"message": "Game symlink created via managed proxy"})
-    except ValueError as e:
-        return jsonify({"message": str(e)}), 400
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+        interactive_user_home(user)
+    except ValueError as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": "Persistent bind mounts require the privileged helper",
+    }), 503
 
 @app.route("/fix_perms", methods=["POST"])
 def fix_perms():
@@ -2085,56 +2008,13 @@ def set_steam_cache():
             ))
         except PrivilegedError as error:
             return jsonify({"message": str(error)}), 400
-
     try:
-        steamapps = steamapps_dir(user)
-    except ValueError as e:
-        return jsonify({"message": str(e)}), 400
-    if not steamapps:
-        return jsonify({"message": "Steam knihovna nenalezena"}), 404
-
-    try:
-        download_path = os.path.join(steamapps, "downloading")
-        shared_base = ensure_managed_directory(GAMES_ROOT, "steam-cache")
-        shared_downloading = os.path.join(shared_base, "downloading")
-        if os.path.islink(shared_downloading):
-            return jsonify({"message": "Sdílená Steam cache nesmí být symlink"}), 400
-        try:
-            gid = grp.getgrnam(GROUP_NAME).gr_gid
-            os.chown(shared_base, -1, gid)
-            os.chmod(shared_base, 0o775)
-        except Exception:
-            pass
-
-        if os.path.islink(download_path):
-            target = os.path.realpath(download_path)
-            if target == os.path.realpath(shared_downloading):
-                return jsonify({"message": "Steam cache už je sdílená", "status": "shared"})
-            os.unlink(download_path)
-        elif os.path.isdir(download_path):
-            if os.path.lexists(shared_downloading):
-                return jsonify({"message": f"Cílový {shared_downloading} už existuje, nejprve jej odstraň nebo přesuň"}), 409
-            shutil.move(download_path, shared_downloading)
-        elif os.path.lexists(download_path):
-            return jsonify({"message": f"{download_path} není adresář ani symlink"}), 400
-        else:
-            os.makedirs(shared_downloading, exist_ok=True)
-
-        if not os.path.exists(shared_downloading):
-            os.makedirs(shared_downloading, exist_ok=True)
-
-        os.symlink(shared_downloading, download_path)
-
-        set_group_perms(shared_downloading)
-        return jsonify({
-            "message": f"Steam cache přesunuta do {shared_downloading} a vytvořen symlink",
-            "status": "shared",
-            "shared_path": shared_downloading,
-        })
-    except FileExistsError:
-        return jsonify({"message": "Nepodařilo se vytvořit symlink, cesta už existuje"}), 409
-    except Exception as e:
-        return jsonify({"message": str(e)}), 500
+        interactive_user_home(user)
+    except ValueError as error:
+        return jsonify({"message": str(error)}), 400
+    return jsonify({
+        "message": "Persistent bind mounts require the privileged helper",
+    }), 503
 
 
 @app.route("/clear_steam_shader_cache", methods=["POST"])

@@ -5,9 +5,9 @@ Local-first game data manager for trusted local users on a single Linux machine.
 
 The mutable **Mover** tab supports Steam and complete EA App games installed in
 a Heroic-managed Wine prefix. Steam payloads move into `/var/Games/steam` and
-use per-user symlinks; EA game payloads move into `/var/Games/EA` and use
-persistent per-player bind mounts. For EA, only the individual game directory
-moves: the Wine
+use persistent per-player bind mounts; EA game payloads move into `/var/Games/EA`
+and use persistent per-player bind mounts. For EA, only the individual game
+directory moves: the Wine
 prefix, EA launcher, registry, credentials and account state stay in the player
 profile. The EA prefix must be dedicated (for example
 `Prefixes/default/EA App`), not Heroic's global shared `default` prefix. Heroic
@@ -137,7 +137,7 @@ library listed in `libraryfolders.vdf`, including secondary disks.
 On first opening, the desktop client scans the current player's private launcher
 metadata itself and combines it with shared `/var/Games` data. This works with
 homes that correctly deny access to the system service. The inventory includes
-Steam manifests and Game Mover symlinks, Heroic metadata, Lutris' local catalog,
+Steam manifests and Game Mover mounts, Heroic metadata, Lutris' local catalog,
 and CurseForge instances. The catalog shows platforms, users, and approximate
 logical size. Confirmed launcher entries remain visible regardless of size;
 unverified shared payloads and directories are marked as possible remnants and
@@ -689,8 +689,8 @@ Lokální nástroj pro správu herních dat pro důvěryhodné uživatele na jed
 
 Mutující záložka **Mover** podporuje Steam a dokončené hry EA App nainstalované
 v Heroic Wine prefixu. Steam data přesouvá do `/var/Games/steam`, EA hry do
-`/var/Games/EA`; Steam na původní místo vrací uživatelský symlink a EA vytváří
-trvalý bind mount pro prefix každého hráče. U EA se přesouvá
+`/var/Games/EA`; Steam i EA na původním místě vytvářejí trvalý bind mount pro
+každého hráče. U EA se přesouvá
 jen adresář konkrétní hry; Wine prefix, EA launcher, registry, přihlašovací údaje
 a stav účtu zůstávají v profilu hráče. EA musí mít samostatný prefix, například
 `Prefixes/default/EA App`, nikoli globální sdílený Heroic prefix `default`.
@@ -820,7 +820,7 @@ výsledky hostiteli. Kontrola Steamu používá AppID a prochází všechny knih
 Při prvním otevření desktopový klient sám prohledá soukromá launcherová metadata
 právě přihlášeného hráče a sloučí je se sdílenými daty v `/var/Games`. Funguje
 tak i pro správně uzamčené domovské adresáře, do kterých systémová služba nemá
-přístup. Inventura zahrnuje manifesty a symlinky Steamu, metadata Heroicu,
+přístup. Inventura zahrnuje manifesty a mounty Steamu, metadata Heroicu,
 místní katalog Lutrisu a instance CurseForge. U hry ukáže platformy, uživatele
 a přibližnou logickou velikost. Potvrzené instalace ponechá bez ohledu na
 velikost; neověřené sdílené payloady a adresáře označí jako možné pozůstatky a

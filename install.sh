@@ -14,6 +14,7 @@ SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 PRIVILEGED_SERVICE_PATH="/etc/systemd/system/${PRIVILEGED_SERVICE_NAME}"
 EA_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-ea-bind@.service"
 LAUNCHER_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-launcher-bind@.service"
+STEAM_BIND_SERVICE_PATH="/etc/systemd/system/game-mover-steam-bind@.service"
 APP_DESKTOP="/usr/share/applications/game-mover.desktop"
 APP_METAINFO="/usr/share/metainfo/game-mover.metainfo.xml"
 AUTOSTART_DESKTOP="/etc/xdg/autostart/game-mover.desktop"
@@ -156,6 +157,7 @@ ensure_local_admin_token
 mkdir -p /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/ea-mounts"
 install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/launcher-mounts"
+install -d -m 0700 -o root -g root "${LOCAL_ADMIN_DIR}/steam-mounts"
 chgrp "${GROUP_NAME}" /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 chmod 0775 /var/Games /var/Games/EA /var/Games/Heroic /var/Games_links /var/Games/steam-cache
 setfacl -m "g:${GROUP_NAME}:rwx,m::rwx,d:g:${GROUP_NAME}:rwx,d:m::rwx" \
@@ -171,6 +173,8 @@ copy_if_changed "${SCRIPT_DIR}/game-mover-ea-bind@.service" \
   "${EA_BIND_SERVICE_PATH}" 644
 copy_if_changed "${SCRIPT_DIR}/game-mover-launcher-bind@.service" \
   "${LAUNCHER_BIND_SERVICE_PATH}" 644
+copy_if_changed "${SCRIPT_DIR}/game-mover-steam-bind@.service" \
+  "${STEAM_BIND_SERVICE_PATH}" 644
 
 echo "[5/8] Desktop launcher (${APP_DESKTOP})"
 desktop_tmp="$(mktemp)"

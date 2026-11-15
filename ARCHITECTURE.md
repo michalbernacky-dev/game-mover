@@ -65,8 +65,8 @@ network model.
 ## Desktop game-data ownership
 
 The mutable **Mover** workflow supports Steam and one narrowly bounded EA App
-layout. Steam payloads move into `/var/Games/steam` and keep the per-user proxy
-symlink model; complete EA App game payloads move into `/var/Games/EA` and use
+layout. Steam payloads move into `/var/Games/steam` and use persistent per-user
+bind mounts; complete EA App game payloads move into `/var/Games/EA` and use
 a persistent systemd bind mount from the shared payload to the original
 directory in each player's prefix,
 because EA App does not reliably recognize a Unix directory symlink as an
@@ -74,7 +74,8 @@ installed game.
 
 Steam's shared `steamapps/downloading` directory and each player's private
 `steamapps/shadercache` have different lifecycles. The former may be moved into
-the fixed shared cache root. Shader cache remains on the player's home volume;
+the fixed shared cache root and exposed at its original path through a persistent
+bind mount. Shader cache remains on the player's home volume;
 Mover exposes an inspection-only inventory and an authorized deletion action
 for selected numeric AppID directories. Both operations execute after dropping
 to that player's identity. The deletion action accepts no filesystem path,
@@ -260,7 +261,7 @@ notes database or a remote API response.
 The knowledge tab's target picker is populated from a local installed-game
 inventory rather than from launchers. The desktop process scans the current
 player's private home with that player's identity and combines `/var/Games`,
-Steam manifests/symlinks, Heroic metadata, Lutris SQLite and CurseForge
+Steam manifests/mounts, Heroic metadata, Lutris SQLite and CurseForge
 instances. This avoids granting the system service access to private homes.
 Providers deduplicate paths and aggregate the users that reference each game.
 Logical directory size is measured once per real path. Unverified shared
