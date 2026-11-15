@@ -14,6 +14,11 @@ profile. The EA prefix must be dedicated (for example
 and EA App must be closed, and staged downloads are shown only informationally
 and cannot be moved. Steam runtimes and possible stale
 installations remain hidden by default behind an explicit recovery checkbox.
+Mover's move and mount actions now use the same persistent Steam bind-mount
+lifecycle. An exact legacy double symlink is migrated automatically, including
+repair of its old root-owned per-player proxy directory. A game already exposed
+through the correct bind mount is not offered for another move. The CLI uses
+`game-mover mount`; the former `link` spelling remains a compatibility alias.
 Steam's shared download cache and the current player's local shader cache are
 managed separately. Mover can inspect shader-cache usage by game and delete
 only explicitly selected AppID directories; it does not move shader cache onto
@@ -702,6 +707,12 @@ Heroic. Ostatní launchery zůstávají jen zdrojem read-only
 inventury a zůstávají viditelné ve výběru Moveru, ale nenabízejí žádné změny,
 dokud jejich úložiště výslovně neimplementujeme a neotestujeme. Existující
 starší data zúžení rozsahu nikdy automaticky nemaže.
+
+Přesun i připojení Steam hry používají stejný životní cyklus persistentního
+bind mountu. Přesná stará dvojice symlinků se migruje automaticky, včetně opravy
+starého root-owned proxy adresáře konkrétního hráče. Správně připojená hra se už
+znovu nenabízí k přesunu. CLI používá `game-mover mount`; původní zápis `link`
+zůstává kompatibilním aliasem.
 
 Sdílená download cache Steamu a lokální shader cache aktuálního hráče se
 spravují odděleně. Mover ukazuje velikost shader cache podle her a smaže pouze

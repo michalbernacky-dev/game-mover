@@ -539,6 +539,29 @@ class ServerRegistryTest(unittest.TestCase):
             timeout=180,
         )
 
+    def test_mount_game_route_uses_canonical_bind_mount_action(self):
+        result = {"message": "Připojeno"}
+        with (
+            patch.object(backend, "PRIVILEGED_HELPER_ENABLED", True),
+            patch.object(backend, "privileged_call", return_value=result) as broker,
+        ):
+            response = self.client.post(
+                "/mount_game",
+                json={"platform": "steam", "game_name": "Safe Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+            legacy = self.client.post(
+                "/create_symlink",
+                json={"platform": "steam", "game_name": "Safe Game", "user": "alice"},
+                **self.local_options(self.pam_headers),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(legacy.status_code, 200)
+        self.assertEqual(broker.call_count, 2)
+        for invocation in broker.call_args_list:
+            self.assertEqual(invocation.args[0], "mount-game")
+
     def test_create_symlink_uses_only_validated_roots(self):
         home = Path(self.temp_dir.name) / "home"
         common = home / ".local/share/Steam/steamapps/common"

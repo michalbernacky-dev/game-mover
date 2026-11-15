@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -200,7 +202,7 @@ class ServerManagementGuiTest(unittest.TestCase):
             ["steam", "gog", "epic", "ea", "ubisoft", "rockstar"],
         )
         self.assertIn("Steam hry", self.window.label_move.text())
-        self.assertIn("Steam hry", self.window.label_symlink.text())
+        self.assertIn("Steam hry", self.window.label_mount.text())
 
         self.window.platform_combo.setCurrentIndex(
             self.window.platform_combo.findData("gog")
@@ -226,6 +228,28 @@ class ServerManagementGuiTest(unittest.TestCase):
         )
         self.assertIn("pouze rozpoznávaný", self.window.mover_scope_label.text())
         self.assertFalse(self.window.move_button.isEnabled())
+
+    def test_mover_does_not_offer_a_steam_bind_mount_for_move_again(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            common = root / "home/player/steamapps/common"
+            local = common / "Cyberpunk 2077"
+            shared_root = root / "Games"
+            shared = shared_root / "steam/Cyberpunk 2077"
+            local.mkdir(parents=True)
+            shared.mkdir(parents=True)
+            self.window.platform = "steam"
+            self.window.user = "player"
+            with (
+                patch.object(game_mover, "GAMES_ROOT", str(shared_root)),
+                patch.object(
+                    game_mover, "resolve_user_common", return_value=str(common),
+                ),
+                patch.object(game_mover.os.path, "samefile", return_value=True),
+            ):
+                candidates = self.window.get_game_candidates()
+
+        self.assertEqual(candidates, [])
 
     def test_shader_cache_size_formatter(self):
         self.assertEqual(self.window.format_cache_size(0), "0 B")

@@ -11,7 +11,7 @@
       application and a local Flask service.
     </p>
     <p>
-      It can move and link supported game directories, inspect game launchers,
+      It can move and mount supported game directories, inspect game launchers,
       and manage local game-server workloads.
     </p>
   </description>
@@ -21,6 +21,16 @@
   <url type="vcs-browser">https://github.com/michalbernacky-dev/game-mover</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.40.1" date="2026-11-15">
+      <description>
+        <ul>
+          <li>Complete the Steam Mover lifecycle around persistent bind mounts.</li>
+          <li>Repair exact root-owned legacy proxy directories before migration.</li>
+          <li>Stop offering an already mounted Steam game for another move.</li>
+          <li>Add canonical GUI, API and CLI mount operations while retaining compatibility aliases.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.40.0" date="2026-11-15">
       <description>
         <ul>

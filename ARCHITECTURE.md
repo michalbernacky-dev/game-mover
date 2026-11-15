@@ -72,6 +72,16 @@ directory in each player's prefix,
 because EA App does not reliably recognize a Unix directory symlink as an
 installed game.
 
+Steam move and attach operations share one lifecycle: the dropped-player worker
+moves data or prepares an empty mountpoint, while the root broker derives the
+fixed source and destination, records root-only marker state, and activates the
+persistent service. The canonical API action is `mount-game`; the former
+`create-symlink` action remains only as a compatibility alias. Exact legacy
+double links are migrated in place. If their proxy directory has old root
+ownership, the broker repairs only that validated per-player proxy directory
+before dropping privileges so the worker can remove the matching legacy link.
+Already mounted games are excluded from the move inventory by inode identity.
+
 Steam's shared `steamapps/downloading` directory and each player's private
 `steamapps/shadercache` have different lifecycles. The former may be moved into
 the fixed shared cache root and exposed at its original path through a persistent

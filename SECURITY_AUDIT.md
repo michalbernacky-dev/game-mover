@@ -35,11 +35,39 @@ capabilities. The same mechanism covers `/var/Games/steam-cache/downloading`.
 
 Focused tests cover legacy double-symlink migration, fixed source derivation,
 owned empty mountpoints, root-only marker state, marker-only systemd arguments,
-cache bind recognition and broker routing. All 373 source tests pass. A local
-Fedora 44 RPM/SRPM build passed and its payload, scriptlets, identity and digest
-were inspected. Hosted CI, installation, live link migration, Steam restart and
-in-client verification are still pending and must not be inferred from those
-source and local-package results.
+cache bind recognition and broker routing. The exact post-merge hosted RPM was
+inspected and deployed on 2026-11-15. Package integrity, service identities,
+root-only markers, enabled mount instances, the migrated game/cache mounts and
+the Steam client's namespace access were verified. Steam then completed the
+affected AppID's update reconciliation with `No Error` and started the game;
+the earlier disk-write failures remained confined to pre-migration timestamps.
+
+### Steam Mover lifecycle follow-up: 2026-11-15
+
+The live migration exposed a compatibility gap in version 0.40.0: the helper
+that safely repairs a root-owned legacy per-player proxy directory was no
+longer called before the filesystem worker dropped privileges. The worker could
+replace the player's outer symlink with an empty directory and then fail to
+remove the matching proxy, leaving that game temporarily unavailable until the
+operation was retried after a manual ownership repair. Source review also found
+that the Qt move inventory did not compare Steam directories with the shared
+payload by inode, so an already mounted game was offered for another move even
+though the backend would reject the existing target.
+
+Version 0.40.1 routes GUI and CLI attachment through canonical `/mount_game`
+and `mount-game` operations while retaining the former endpoint, broker action
+and CLI spelling as compatibility aliases. Before a dropped-UID migration, the
+root broker repairs a proxy directory only when the player's source is the
+exact expected double link and the proxy resolves to the fixed shared game.
+The worker still validates and removes the link itself. Steam bind mounts are
+now excluded from the move inventory with `samefile()` identity, matching the
+existing EA behavior. Focused tests cover canonical and compatibility routing,
+the exact-proxy repair boundary, dropped-identity dispatch and the GUI inventory
+regression. Hosted package and deployment verification for 0.40.1 must pass
+before this follow-up is considered deployed. The local source gate passed
+377 tests, Ruff, Gitleaks, Bash syntax and metadata validation; the local
+RPM/SRPM payload and digests were inspected, but those workstation artifacts
+are not publication or deployment evidence.
 
 ## Local Heroic launcher profiles: updated 2026-11-13
 
