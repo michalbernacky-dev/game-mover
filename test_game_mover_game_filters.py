@@ -13,6 +13,7 @@ class GameFiltersTest(unittest.TestCase):
         self.assertTrue(is_excluded_game("steam", "GE-Proton10-28"))
         self.assertTrue(is_excluded_game("steam", "Steam Controller Configs"))
         self.assertTrue(is_excluded_game("steam", "Steamworks Shared"))
+        self.assertTrue(is_excluded_game("steam", "legacysteamruntime"))
         self.assertTrue(is_excluded_game("steam", "Half-Life Dedicated Server"))
         self.assertFalse(is_excluded_game("steam", "Half-Life 2"))
         self.assertFalse(is_excluded_game("epic", "Grand Theft Auto V Enhanced"))

@@ -11,6 +11,7 @@ EXCLUDE_PREFIXES = ("SteamLinuxRuntime", "Proton", "GE-Proton")
 EXCLUDE_LIST = {
     "steam": (
         "Half-Life Dedicated Server",
+        "LegacySteamRuntime",
         "Steam Controller Configs",
         "Steamworks Common Redistributables",
         "Steamworks Shared",
